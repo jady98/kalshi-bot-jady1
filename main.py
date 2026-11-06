@@ -12,7 +12,7 @@ INTERVAL = "1m"
 CANDLE_LIMIT = 200
 
 session = requests.Session()
-session.headers.update({"User-Agent": "BitcoinRadarPRO/4.1"})
+session.headers.update({"User-Agent": "BitcoinRadarPRO/4.3"})
 
 def get_market_data():
     r = session.get("https://api.binance.us/api/v3/klines", params={"symbol": SYMBOL, "interval": INTERVAL, "limit": CANDLE_LIMIT}, timeout=12)
@@ -21,7 +21,10 @@ def get_market_data():
     df["time"] = pd.to_numeric(df["time"]) // 1000
     for col in ["open", "high", "low", "close", "volume"]:
         df[col] = pd.to_numeric(df[col], errors="coerce")
-    return df.dropna(subset=["close"]).reset_index(drop=True), "Binance.US"
+    
+    # Limpiar duplicados y huecos de tiempo vacíos
+    df = df.dropna(subset=["close"]).drop_duplicates(subset=["time"]).sort_values("time").reset_index(drop=True)
+    return df, "Binance.US"
 
 def calculate_indicators(df):
     df = df.copy()
@@ -55,20 +58,20 @@ HTML = r"""<!DOCTYPE html>
 <html lang="es">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Bitcoin Radar PRO</title>
 <script src="https://unpkg.com/lightweight-charts@4.2.2/dist/lightweight-charts.standalone.production.js"></script>
 <style>
-:root{--bg:#080d18;--panel:#111a2a;--panel2:#182438;--line:#263750;--muted:#91a4bd;--white:#edf4ff;--green:#00d69a;--red:#ff5268;--yellow:#ffc857;--blue:#36a3ff;}
+:root{--bg:#080d18;--panel:#111a2a;--panel2:#182438;--line:#263750;--muted:#91a4bd;--white:#edf4ff;--green:#00d69a;--red:#ff5268;--yellow:#ffc857;}
 *{box-sizing:border-box;}
-body{margin:0;padding:10px;background:var(--bg);color:var(--white);font-family:Arial,sans-serif;}
-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;padding:0 4px;}
-h1{font-size:16px;margin:0;letter-spacing:1px;}
-.sub{font-size:10px;color:var(--green);}
-.panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px;margin-bottom:10px;}
-.chart{width:100%;height:320px;}
-.small-chart{width:100%;height:140px;}
-.signal-box{text-align:center;padding:12px;border-radius:8px;font-weight:bold;font-size:16px;background:var(--panel2);border:1px solid var(--line);}
+body{margin:0;padding:6px;background:var(--bg);color:var(--white);font-family:Arial,sans-serif;}
+header{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;padding:0 2px;}
+h1{font-size:14px;margin:0;letter-spacing:1px;}
+.sub{font-size:9px;color:var(--green);}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:6px;margin-bottom:6px;}
+.chart{width:100%;height:385px;}
+.small-chart{width:100%;height:110px;}
+.signal-box{text-align:center;padding:10px;border-radius:6px;font-weight:bold;font-size:15px;background:var(--panel2);border:1px solid var(--line);}
 .signal-up{background:#103d34;color:var(--green);border-color:var(--green);}
 .signal-down{background:#3b202b;color:var(--red);border-color:var(--red);}
 .signal-wait{background:#40351e;color:var(--yellow);border-color:var(--yellow);}
@@ -83,17 +86,17 @@ h1{font-size:16px;margin:0;letter-spacing:1px;}
 </header>
 
 <div class="panel">
- <small style="color:var(--muted)">SEÑAL TÉCNICA (ALCISTA / BAJISTA)</small>
- <div id="mainSignal" class="signal-box signal-wait" style="margin-top:6px;">ESPERAR</div>
+ <small style="color:var(--muted);font-size:10px;">SEÑAL TÉCNICA</small>
+ <div id="mainSignal" class="signal-box signal-wait" style="margin-top:4px;">ESPERAR</div>
 </div>
 
 <div class="panel">
- <div style="font-size:11px;font-weight:bold;margin-bottom:6px;">GRÁFICO PRECIO · 1M (EMA 9/21 + VWAP)</div>
+ <div style="font-size:10px;font-weight:bold;margin-bottom:4px;color:var(--muted);">GRÁFICO PRECIO · 1M (EMA 9/21 + VWAP)</div>
  <div id="priceChart" class="chart"></div>
 </div>
 
 <div class="panel">
- <div style="font-size:11px;font-weight:bold;margin-bottom:6px;">VOLUMEN</div>
+ <div style="font-size:10px;font-weight:bold;margin-bottom:4px;color:var(--muted);">VOLUMEN</div>
  <div id="volumeChart" class="small-chart"></div>
 </div>
 
@@ -102,19 +105,19 @@ function createOpt(h, elId) {
  return {
   width: document.getElementById(elId).clientWidth,
   height: h,
-  layout: {background:{color:"#111a2a"}, textColor:"#aebdd0", fontSize:9},
+  layout: {background:{color:"#111a2a"}, textColor:"#aebdd0", fontSize:10},
   grid: {vertLines:{color:"#1d2b40"}, horzLines:{color:"#1d2b40"}},
-  timeScale:{timeVisible:true, secondsVisible:false}
+  timeScale:{timeVisible:true, secondsVisible:false, barSpacing: 8}
  };
 }
 
-const pc = LightweightCharts.createChart(document.getElementById('priceChart'), createOpt(320, 'priceChart'));
+const pc = LightweightCharts.createChart(document.getElementById('priceChart'), createOpt(385, 'priceChart'));
 const candle = pc.addCandlestickSeries({upColor:"#00d69a", downColor:"#ff5268"});
 const e9 = pc.addLineSeries({color:"#ffc857", lineWidth:2});
 const e21 = pc.addLineSeries({color:"#36a3ff", lineWidth:2});
 const vw = pc.addLineSeries({color:"#c58cff", lineWidth:2});
 
-const vc = LightweightCharts.createChart(document.getElementById('volumeChart'), createOpt(140, 'volumeChart'));
+const vc = LightweightCharts.createChart(document.getElementById('volumeChart'), createOpt(110, 'volumeChart'));
 const vol = vc.addHistogramSeries();
 
 async function updateAll() {
