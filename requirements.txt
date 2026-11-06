@@ -1,1 +1,5 @@
-kalshi-python, requests, python-dotenv, pandas, websocket-client, cryptography.
+
+flask
+requests
+pandas
+gunicorn
