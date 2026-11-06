@@ -1,0 +1,1 @@
+kalshi-python, requests, python-dotenv, pandas, websocket-client, cryptography.
