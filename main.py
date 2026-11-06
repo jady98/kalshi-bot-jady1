@@ -16,9 +16,8 @@ EMA_FAST = 9
 EMA_SLOW = 21
 RSI_PERIOD = 14
 
-
 def get_market_data():
-    url = "https://api.binance.com/api/v3/klines"
+    url = "https://api.binance.us/api/v3/klines"
 
     params = {
         "symbol": SYMBOL,
@@ -26,12 +25,7 @@ def get_market_data():
         "limit": CANDLE_LIMIT
     }
 
-    response = requests.get(
-        url,
-        params=params,
-        timeout=15
-    )
-
+    response = requests.get(url, params=params, timeout=15)
     response.raise_for_status()
 
     data = response.json()
@@ -45,49 +39,27 @@ def get_market_data():
     for column in ["open", "high", "low", "close"]:
         df[column] = df[column].astype(float)
 
-    df["time"] = pd.to_datetime(
-        df["time"], unit="ms", utc=True
-    )
+    df["time"] = pd.to_datetime(df["time"], unit="ms", utc=True)
 
     return df
 
 
 def calculate_indicators(df):
-
-    df["EMA9"] = df["close"].ewm(
-        span=EMA_FAST,
-        adjust=False
-    ).mean()
-
-    df["EMA21"] = df["close"].ewm(
-        span=EMA_SLOW,
-        adjust=False
-    ).mean()
+    df["EMA9"] = df["close"].ewm(span=EMA_FAST, adjust=False).mean()
+    df["EMA21"] = df["close"].ewm(span=EMA_SLOW, adjust=False).mean()
 
     delta = df["close"].diff()
-
     gain = delta.clip(lower=0)
     loss = -delta.clip(upper=0)
 
-    avg_gain = gain.ewm(
-        alpha=1 / RSI_PERIOD,
-        adjust=False,
-        min_periods=RSI_PERIOD
-    ).mean()
-
-    avg_loss = loss.ewm(
-        alpha=1 / RSI_PERIOD,
-        adjust=False,
-        min_periods=RSI_PERIOD
-    ).mean()
+    avg_gain = gain.ewm(alpha=1 / RSI_PERIOD, adjust=False, min_periods=RSI_PERIOD).mean()
+    avg_loss = loss.ewm(alpha=1 / RSI_PERIOD, adjust=False, min_periods=RSI_PERIOD).mean()
 
     rs = avg_gain / avg_loss.replace(0, float("nan"))
-
     df["RSI"] = 100 - (100 / (1 + rs))
 
     return df
-
-
+    
 def generate_signal(df):
 
     last = df.iloc[-1]
