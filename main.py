@@ -2,35 +2,39 @@
 import os
 import requests
 import pandas as pd
+import numpy as np
 
 from flask import Flask, jsonify, render_template_string
 
 app = Flask(__name__)
 
+# =====================================
 # CONFIGURACION
+# =====================================
+
 SYMBOL = "BTCUSDT"
 INTERVAL = "1m"
-CANDLE_LIMIT = 100
+CANDLE_LIMIT = 200
 
 EMA_FAST = 9
 EMA_SLOW = 21
 RSI_PERIOD = 14
 
-# SESIONES HTTP
 session = requests.Session()
-session.headers.update({
-    "User-Agent": "BitcoinSignalRadar/1.0"
-})
+session.headers.update({"User-Agent": "BitcoinRadarPRO/1.0"})
 
+# =====================================
+# DATOS DE MERCADO
+# =====================================
 
 def get_market_data():
 
-    # FUENTE 1: BINANCE.US
-    try:
-        url = "https://api.binance.us/api/v3/klines"
+    errors = []
 
+    # BINANCE.US
+    try:
         response = session.get(
-            url,
+            "https://api.binance.us/api/v3/klines",
             params={
                 "symbol": SYMBOL,
                 "interval": INTERVAL,
@@ -40,6 +44,7 @@ def get_market_data():
         )
 
         response.raise_for_status()
+
         data = response.json()
 
         df = pd.DataFrame(data, columns=[
@@ -48,28 +53,23 @@ def get_market_data():
             "trades", "taker_buy", "taker_quote", "ignore"
         ])
 
-        for col in ["open", "high", "low", "close"]:
-            df[col] = df[col].astype(float)
-
         df["time"] = pd.to_datetime(
             df["time"], unit="ms", utc=True
         )
 
-        return df.sort_values("time").reset_index(drop=True)
+        for col in ["open", "high", "low", "close", "volume"]:
+            df[col] = df[col].astype(float)
 
-    except Exception as binance_error:
+        return df, "Binance.US"
 
-        print("Binance.US no disponible:", binance_error)
+    except Exception as e:
+        errors.append("Binance.US: " + str(e))
 
-    # FUENTE 2: COINBASE
+    # COINBASE
     try:
-        url = "https://api.exchange.coinbase.com/products/BTC-USD/candles"
-
         response = session.get(
-            url,
-            params={
-                "granularity": 60
-            },
+            "https://api.exchange.coinbase.com/products/BTC-USD/candles",
+            params={"granularity": 60},
             timeout=12
         )
 
@@ -77,53 +77,60 @@ def get_market_data():
         data = response.json()
 
         if not isinstance(data, list) or not data:
-            raise ValueError("Coinbase no devolvio velas")
+            raise ValueError("Sin velas disponibles")
 
-        df = pd.DataFrame(
-            data,
-            columns=[
-                "time", "low", "high",
-                "open", "close", "volume"
-            ]
-        )
-
-        for col in ["open", "high", "low", "close"]:
-            df[col] = df[col].astype(float)
+        df = pd.DataFrame(data, columns=[
+            "time", "low", "high", "open", "close", "volume"
+        ])
 
         df["time"] = pd.to_datetime(
             df["time"], unit="s", utc=True
         )
 
+        for col in ["open", "high", "low", "close", "volume"]:
+            df[col] = df[col].astype(float)
+
         df = df.sort_values("time").tail(CANDLE_LIMIT)
 
-        return df.reset_index(drop=True)
+        return df.reset_index(drop=True), "Coinbase"
 
-    except Exception as coinbase_error:
+    except Exception as e:
+        errors.append("Coinbase: " + str(e))
 
-        raise Exception(
-            "No se pudieron obtener datos. "
-            f"Binance: {binance_error}. "
-            f"Coinbase: {coinbase_error}"
-        )
+    raise Exception(" | ".join(errors))
 
+
+# =====================================
+# INDICADORES
+# =====================================
 
 def calculate_indicators(df):
 
     df = df.copy()
 
-    # EMA 9 Y EMA 21
-    df["EMA9"] = df["close"].ewm(
-        span=EMA_FAST,
-        adjust=False
+    close = df["close"]
+
+    # EMA
+    df["EMA9"] = close.ewm(
+        span=EMA_FAST, adjust=False
     ).mean()
 
-    df["EMA21"] = df["close"].ewm(
-        span=EMA_SLOW,
-        adjust=False
+    df["EMA21"] = close.ewm(
+        span=EMA_SLOW, adjust=False
     ).mean()
 
-    # RSI 14
-    delta = df["close"].diff()
+    # VWAP
+    typical = (df["high"] + df["low"] + close) / 3
+
+    volume_sum = df["volume"].cumsum()
+
+    df["VWAP"] = (
+        (typical * df["volume"]).cumsum()
+        / volume_sum.replace(0, np.nan)
+    )
+
+    # RSI WILDER
+    delta = close.diff()
 
     gain = delta.clip(lower=0)
     loss = -delta.clip(upper=0)
@@ -140,58 +147,66 @@ def calculate_indicators(df):
         min_periods=RSI_PERIOD
     ).mean()
 
-    rs = avg_gain / avg_loss.replace(0, float("nan"))
+    rs = avg_gain / avg_loss.replace(0, np.nan)
 
     df["RSI"] = 100 - (100 / (1 + rs))
 
-    # CORREGIR CASOS DE RSI EXTREMO
-    df.loc[
-        (avg_loss == 0) & (avg_gain > 0),
-        "RSI"
-    ] = 100
+    df.loc[(avg_loss == 0) & (avg_gain > 0), "RSI"] = 100
+    df.loc[(avg_gain == 0) & (avg_loss > 0), "RSI"] = 0
+    df.loc[(avg_gain == 0) & (avg_loss == 0), "RSI"] = 50
 
-    df.loc[
-        (avg_gain == 0) & (avg_loss > 0),
-        "RSI"
-    ] = 0
+    # MACD
+    ema12 = close.ewm(span=12, adjust=False).mean()
+    ema26 = close.ewm(span=26, adjust=False).mean()
 
-    df.loc[
-        (avg_gain == 0) & (avg_loss == 0),
-        "RSI"
-    ] = 50
+    df["MACD"] = ema12 - ema26
+
+    df["MACD_SIGNAL"] = df["MACD"].ewm(
+        span=9, adjust=False
+    ).mean()
+
+    df["MACD_HIST"] = df["MACD"] - df["MACD_SIGNAL"]
+
+    # SOPORTE Y RESISTENCIA
+    df["SUPPORT"] = df["low"].rolling(50, min_periods=1).min()
+    df["RESISTANCE"] = df["high"].rolling(50, min_periods=1).max()
 
     return df
 
 
-def find_support_resistance(df):
-
-    recent = df.tail(50)
-
-    support = float(recent["low"].min())
-    resistance = float(recent["high"].max())
-
-    return support, resistance
-
+# =====================================
+# ANALISIS DE MERCADO
+# =====================================
 
 def generate_signal(df):
 
     last = df.iloc[-1]
 
-    ema9 = last["EMA9"]
-    ema21 = last["EMA21"]
-    rsi = last["RSI"]
-
-    if pd.isna(rsi):
+    if pd.isna(last["RSI"]):
         return "ESPERAR"
 
-    if ema9 > ema21 and rsi > 50:
+    if (
+        last["EMA9"] > last["EMA21"]
+        and last["RSI"] > 50
+        and last["MACD"] > last["MACD_SIGNAL"]
+        and last["close"] > last["VWAP"]
+    ):
         return "SUBE"
 
-    if ema9 < ema21 and rsi < 50:
+    if (
+        last["EMA9"] < last["EMA21"]
+        and last["RSI"] < 50
+        and last["MACD"] < last["MACD_SIGNAL"]
+        and last["close"] < last["VWAP"]
+    ):
         return "BAJA"
 
     return "ESPERAR"
 
+
+# =====================================
+# INTERFAZ PRO
+# =====================================
 
 HTML = """
 <!DOCTYPE html>
@@ -200,13 +215,11 @@ HTML = """
 <head>
 
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 
-<meta name="viewport"
-content="width=device-width, initial-scale=1">
+<title>Bitcoin Signal Radar PRO</title>
 
-<title>Bitcoin Signal Radar</title>
-
-<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+<script src="https://unpkg.com/lightweight-charts@4.2.2/dist/lightweight-charts.standalone.production.js"></script>
 
 <style>
 
@@ -215,94 +228,153 @@ content="width=device-width, initial-scale=1">
 }
 
 body {
-    background: #080e19;
-    color: #ffffff;
-    font-family: Arial, sans-serif;
     margin: 0;
     padding: 12px;
+    background: #080d18;
+    color: #e5edf8;
+    font-family: Arial, sans-serif;
+}
+
+header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 15px;
 }
 
 h1 {
-    text-align: center;
-    font-size: 23px;
-    letter-spacing: 2px;
-    color: #e5edf9;
+    font-size: 19px;
+    letter-spacing: 1.5px;
+    margin: 5px 0;
 }
 
-h3 {
-    font-size: 15px;
-    color: #cbd5e1;
+.status {
+    font-size: 11px;
+    color: #22d69b;
 }
 
 .panel {
-    background: #121d2d;
-    border: 1px solid #26364c;
-    padding: 15px;
-    border-radius: 13px;
-    margin-bottom: 13px;
+    background: #111a2a;
+    border: 1px solid #24344b;
+    border-radius: 12px;
+    padding: 13px;
+    margin-bottom: 12px;
 }
 
-.small {
+.metrics {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 9px;
+}
+
+.metric {
+    background: #182438;
+    padding: 13px;
+    border-radius: 9px;
+    min-width: 0;
+}
+
+.metric small {
     color: #91a4bd;
-    font-size: 12px;
+    font-size: 10px;
 }
 
-.price {
-    font-size: 32px;
-    font-weight: bold;
+.metric strong {
+    display: block;
+    font-size: 19px;
     margin-top: 7px;
+    overflow-wrap: anywhere;
 }
 
-.signal {
-    font-size: 29px;
-    font-weight: bold;
-    margin-top: 8px;
+.green {
+    color: #00d69a;
 }
 
-#explanation {
-    color: #b6c4d7;
-    font-size: 13px;
+.red {
+    color: #ff5268;
 }
 
-#chart {
+.yellow {
+    color: #ffc857;
+}
+
+.blue {
+    color: #36a3ff;
+}
+
+.section-title {
+    font-size: 12px;
+    color: #9eb0c8;
+    letter-spacing: 1px;
+    margin: 3px 0 12px;
+}
+
+.chart {
     width: 100%;
-    height: 470px;
+    height: 360px;
 }
 
-#rsi {
-    width: 100%;
-    height: 230px;
+.chart.small-chart {
+    height: 160px;
 }
 
-.levels {
+.chart.macd-chart {
+    height: 170px;
+}
+
+.legend {
     display: flex;
-    justify-content: space-between;
-    gap: 8px;
     flex-wrap: wrap;
-    font-size: 12px;
-    color: #b6c4d7;
+    gap: 12px;
+    font-size: 10px;
+    color: #aabbd0;
+    margin-bottom: 10px;
 }
 
-.level {
-    background: #1d2a3d;
-    padding: 9px;
-    border-radius: 8px;
-    flex: 1;
-    text-align: center;
+.legend span {
+    display: flex;
+    align-items: center;
+    gap: 5px;
 }
 
-#updated {
-    color: #91a4bd;
-    font-size: 12px;
+.dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
 }
 
 button {
-    background: #24354c;
+    border: 1px solid #344963;
+    background: #1b2b42;
     color: white;
-    border: 1px solid #425571;
-    padding: 9px 14px;
     border-radius: 7px;
-    margin-top: 8px;
+    padding: 10px 13px;
+    font-weight: bold;
+}
+
+footer {
+    font-size: 10px;
+    color: #8293a9;
+    text-align: center;
+    padding: 12px;
+}
+
+@media (min-width: 700px) {
+    body {
+        max-width: 1150px;
+        margin: auto;
+        padding: 22px;
+    }
+
+    .metrics {
+        grid-template-columns: repeat(4, 1fr);
+    }
+
+    .chart {
+        height: 500px;
+    }
 }
 
 </style>
@@ -311,384 +383,456 @@ button {
 
 <body>
 
-<h1>BITCOIN SIGNAL RADAR</h1>
+<header>
+    <div>
+        <h1>BITCOIN RADAR PRO</h1>
+        <div class="status" id="connection">CONECTANDO...</div>
+    </div>
 
-<div class="panel">
+    <button onclick="updateDashboard()">ACTUALIZAR</button>
+</header>
 
-    <div class="small">PRECIO BTC / USD</div>
+<div class="metrics">
 
-    <div class="price" id="price">
-        Cargando...
+    <div class="metric">
+        <small>BTC / USD</small>
+        <strong id="price">$--</strong>
+    </div>
+
+    <div class="metric">
+        <small>SEÑAL</small>
+        <strong id="signal" class="yellow">--</strong>
+    </div>
+
+    <div class="metric">
+        <small>RSI 14</small>
+        <strong id="rsiValue">--</strong>
+    </div>
+
+    <div class="metric">
+        <small>FUENTE</small>
+        <strong id="source" style="font-size:14px">--</strong>
     </div>
 
 </div>
 
 <div class="panel">
 
-    <div class="small">DIRECCION DEL MERCADO</div>
-
-    <div class="signal" id="signal">
-        ANALIZANDO...
+    <div class="section-title">
+        PRECIO · VELAS JAPONESAS · TENDENCIA
     </div>
 
-    <p id="explanation">
-        Esperando indicadores...
-    </p>
+    <div class="legend">
+        <span><i class="dot" style="background:#ffc857"></i>EMA 9</span>
+        <span><i class="dot" style="background:#36a3ff"></i>EMA 21</span>
+        <span><i class="dot" style="background:#c58cff"></i>VWAP</span>
+        <span><i class="dot" style="background:#00d69a"></i>SUBIDA</span>
+        <span><i class="dot" style="background:#ff5268"></i>BAJADA</span>
+    </div>
+
+    <div id="priceChart" class="chart"></div>
 
 </div>
 
 <div class="panel">
 
-    <h3>SOPORTE Y RESISTENCIA</h3>
+    <div class="section-title">
+        VOLUMEN DE MERCADO
+    </div>
 
-    <div class="levels">
+    <div id="volumeChart" class="chart small-chart"></div>
 
-        <div class="level">
-            SOPORTE
-            <br>
-            <b id="support">--</b>
-        </div>
+</div>
 
-        <div class="level">
-            RESISTENCIA
-            <br>
-            <b id="resistance">--</b>
-        </div>
+<div class="panel">
 
+    <div class="section-title">
+        RSI · FUERZA RELATIVA
+    </div>
+
+    <div id="rsiChart" class="chart small-chart"></div>
+
+</div>
+
+<div class="panel">
+
+    <div class="section-title">
+        MACD · MOMENTUM
+    </div>
+
+    <div id="macdChart" class="chart macd-chart"></div>
+
+</div>
+
+<div class="metrics">
+
+    <div class="metric">
+        <small>SOPORTE 50 VELAS</small>
+        <strong id="support" class="green">--</strong>
+    </div>
+
+    <div class="metric">
+        <small>RESISTENCIA 50 VELAS</small>
+        <strong id="resistance" class="red">--</strong>
     </div>
 
 </div>
 
 <div class="panel">
 
-    <h3>VELAS JAPONESAS | EMA 9 / EMA 21</h3>
+    <div class="section-title">LECTURA DEL MERCADO</div>
 
-    <div id="chart"></div>
-
-</div>
-
-<div class="panel">
-
-    <h3>RSI RELATIVO | PERIODO 14</h3>
-
-    <div id="rsi"></div>
-
-</div>
-
-<div class="panel">
-
-    <div id="updated">
+    <p id="explanation" style="font-size:13px;color:#b5c5da">
         Esperando datos...
-    </div>
-
-    <p class="small">
-        Datos públicos de mercado.
-        Indicadores informativos, no garantizan
-        movimientos futuros.
     </p>
 
-    <button onclick="updateDashboard()">
-        ACTUALIZAR AHORA
-    </button>
+    <div id="updated" style="font-size:11px;color:#8293a9">
+        --
+    </div>
 
 </div>
+
+<footer>
+    Indicadores técnicos informativos. No son garantías de movimientos futuros.
+    Datos de mercado BTC/USD. No representan necesariamente el BRTI de Kalshi.
+    <br><br>
+    Charts powered by TradingView Lightweight Charts
+</footer>
 
 <script>
 
-const money = value =>
+const $ = id => document.getElementById(id);
+
+const formatPrice = value =>
     "$" + Number(value).toLocaleString("en-US", {
         minimumFractionDigits: 2,
         maximumFractionDigits: 2
     });
 
+const chartOptions = (element, height) => ({
+    width: element.clientWidth,
+    height: height,
+    layout: {
+        background: {color: "#111a2a"},
+        textColor: "#aebdd0",
+        fontSize: 10
+    },
+    grid: {
+        vertLines: {color: "#1d2b40"},
+        horzLines: {color: "#1d2b40"}
+    },
+    rightPriceScale: {
+        borderColor: "#34445a"
+    },
+    timeScale: {
+        borderColor: "#34445a",
+        timeVisible: true,
+        secondsVisible: false
+    },
+    crosshair: {
+        mode: LightweightCharts.CrosshairMode.Normal
+    },
+    handleScroll: true,
+    handleScale: true
+});
+
+// CREAR GRAFICOS
+
+const priceChart = LightweightCharts.createChart(
+    $("priceChart"),
+    chartOptions($("priceChart"), 360)
+);
+
+const candles = priceChart.addCandlestickSeries({
+    upColor: "#00d69a",
+    downColor: "#ff5268",
+    borderUpColor: "#00d69a",
+    borderDownColor: "#ff5268",
+    wickUpColor: "#00d69a",
+    wickDownColor: "#ff5268"
+});
+
+const ema9 = priceChart.addLineSeries({
+    color: "#ffc857",
+    lineWidth: 2,
+    title: "EMA 9",
+    lastValueVisible: true
+});
+
+const ema21 = priceChart.addLineSeries({
+    color: "#36a3ff",
+    lineWidth: 2,
+    title: "EMA 21",
+    lastValueVisible: true
+});
+
+const vwap = priceChart.addLineSeries({
+    color: "#c58cff",
+    lineWidth: 2,
+    title: "VWAP",
+    lastValueVisible: true
+});
+
+// VOLUMEN
+
+const volumeChart = LightweightCharts.createChart(
+    $("volumeChart"),
+    chartOptions($("volumeChart"), 160)
+);
+
+const volumeSeries = volumeChart.addHistogramSeries({
+    priceFormat: {type: "volume"},
+    priceScaleId: "",
+    lastValueVisible: false
+});
+
+volumeChart.priceScale("").applyOptions({
+    scaleMargins: {
+        top: 0.1,
+        bottom: 0
+    }
+});
+
+// RSI
+
+const rsiChart = LightweightCharts.createChart(
+    $("rsiChart"),
+    chartOptions($("rsiChart"), 160)
+);
+
+const rsiSeries = rsiChart.addLineSeries({
+    color: "#bd8aff",
+    lineWidth: 2,
+    title: "RSI 14"
+});
+
+rsiSeries.createPriceLine({
+    price: 70,
+    color: "#ff5268",
+    lineStyle: LightweightCharts.LineStyle.Dashed,
+    title: "70"
+});
+
+rsiSeries.createPriceLine({
+    price: 50,
+    color: "#71839c",
+    lineStyle: LightweightCharts.LineStyle.Dotted,
+    title: "50"
+});
+
+rsiSeries.createPriceLine({
+    price: 30,
+    color: "#00d69a",
+    lineStyle: LightweightCharts.LineStyle.Dashed,
+    title: "30"
+});
+
+rsiChart.priceScale("right").applyOptions({
+    autoScale: false,
+    scaleMargins: {top: 0.1, bottom: 0.1}
+});
+
+// MACD
+
+const macdChart = LightweightCharts.createChart(
+    $("macdChart"),
+    chartOptions($("macdChart"), 170)
+);
+
+const macdLine = macdChart.addLineSeries({
+    color: "#36a3ff",
+    lineWidth: 2,
+    title: "MACD"
+});
+
+const macdSignal = macdChart.addLineSeries({
+    color: "#ffc857",
+    lineWidth: 2,
+    title: "Signal"
+});
+
+const macdHistogram = macdChart.addHistogramSeries({
+    priceFormat: {type: "price", precision: 2},
+    lastValueVisible: false
+});
+
+macdLine.createPriceLine({
+    price: 0,
+    color: "#71839c",
+    lineStyle: LightweightCharts.LineStyle.Dashed
+});
+
+// SINCRONIZAR EJES DE TIEMPO
+
+let syncing = false;
+
+function syncCharts(source, targets) {
+    source.timeScale().subscribeVisibleLogicalRangeChange(range => {
+        if (!range || syncing) return;
+
+        syncing = true;
+
+        targets.forEach(chart => {
+            chart.timeScale().setVisibleLogicalRange(range);
+        });
+
+        syncing = false;
+    });
+}
+
+syncCharts(priceChart, [volumeChart, rsiChart, macdChart]);
+syncCharts(volumeChart, [priceChart, rsiChart, macdChart]);
+syncCharts(rsiChart, [priceChart, volumeChart, macdChart]);
+syncCharts(macdChart, [priceChart, volumeChart, rsiChart]);
+
+// ACTUALIZACION
+
+let initialized = false;
+let busy = false;
+
 async function updateDashboard() {
 
-    const status = document.getElementById("updated");
+    if (busy) return;
+    busy = true;
 
     try {
 
-        const response = await fetch(
-            "/api/data",
-            {cache: "no-store"}
-        );
+        $("connection").innerText = "ACTUALIZANDO DATOS...";
+
+        const response = await fetch("/api/data", {
+            cache: "no-store"
+        });
 
         const data = await response.json();
 
         if (!response.ok) {
-            throw new Error(data.error || "Error del servidor");
+            throw new Error(data.error || "Error de datos");
         }
 
-        document.getElementById("price").innerText =
-            money(data.price);
+        $("price").innerText = formatPrice(data.price);
+        $("source").innerText = data.source;
 
-        const signalElement =
-            document.getElementById("signal");
+        $("signal").innerText = data.signal;
 
-        signalElement.innerText = data.signal;
+        $("signal").className =
+            data.signal === "SUBE" ? "green" :
+            data.signal === "BAJA" ? "red" : "yellow";
 
-        signalElement.style.color =
-            data.signal === "SUBE" ? "#22d68a" :
-            data.signal === "BAJA" ? "#ff5268" :
-            "#f5c451";
+        $("rsiValue").innerText =
+            data.rsi === null ? "--" : data.rsi.toFixed(2);
 
-        document.getElementById("explanation").innerText =
-            data.explanation;
+        $("support").innerText = formatPrice(data.support);
+        $("resistance").innerText = formatPrice(data.resistance);
 
-        document.getElementById("support").innerText =
-            money(data.support);
+        $("explanation").innerText = data.explanation;
 
-        document.getElementById("resistance").innerText =
-            money(data.resistance);
+        const previousRange = initialized
+            ? priceChart.timeScale().getVisibleLogicalRange()
+            : null;
 
-        const candles = data.candles;
+        candles.setData(data.candles.map(x => ({
+            time: x.time,
+            open: x.open,
+            high: x.high,
+            low: x.low,
+            close: x.close
+        })));
 
-        const times = candles.map(x => x.time);
+        ema9.setData(data.candles.map(x => ({
+            time: x.time,
+            value: x.ema9
+        })));
 
-        const commonLayout = {
-            paper_bgcolor: "#121d2d",
-            plot_bgcolor: "#121d2d",
-            font: {
-                color: "#dce6f4",
-                size: 11
-            },
-            margin: {
-                t: 20,
-                b: 45,
-                l: 65,
-                r: 15
-            },
-            hovermode: "x unified",
-            dragmode: "pan",
-            uirevision: "bitcoin-chart",
-            xaxis: {
-                type: "date",
-                gridcolor: "#253449",
-                showgrid: true,
-                rangeslider: {
-                    visible: false
-                },
-                showspikes: true,
-                spikemode: "across",
-                spikesnap: "cursor"
-            },
-            yaxis: {
-                side: "right",
-                gridcolor: "#253449",
-                showgrid: true,
-                tickformat: ",.2f",
-                fixedrange: false
-            }
-        };
+        ema21.setData(data.candles.map(x => ({
+            time: x.time,
+            value: x.ema21
+        })));
 
-        // VELAS JAPONESAS
+        vwap.setData(data.candles.map(x => ({
+            time: x.time,
+            value: x.vwap
+        })));
 
-        const candleTrace = {
+        volumeSeries.setData(data.candles.map(x => ({
+            time: x.time,
+            value: x.volume,
+            color: x.close >= x.open
+                ? "rgba(0,214,154,0.55)"
+                : "rgba(255,82,104,0.55)"
+        })));
 
-            x: times,
-
-            open: candles.map(x => x.open),
-            high: candles.map(x => x.high),
-            low: candles.map(x => x.low),
-            close: candles.map(x => x.close),
-
-            type: "candlestick",
-
-            name: "BTC",
-
-            increasing: {
-                line: {color: "#00e59b"},
-                fillcolor: "#00c987"
-            },
-
-            decreasing: {
-                line: {color: "#ff496c"},
-                fillcolor: "#ff496c"
-            },
-
-            whiskerwidth: 0.6
-        };
-
-        // EMA 9
-
-        const ema9Trace = {
-
-            x: times,
-
-            y: candles.map(x => x.ema9),
-
-            type: "scatter",
-
-            mode: "lines",
-
-            name: "EMA 9",
-
-            line: {
-                color: "#ffc857",
-                width: 2
-            }
-        };
-
-        // EMA 21
-
-        const ema21Trace = {
-
-            x: times,
-
-            y: candles.map(x => x.ema21),
-
-            type: "scatter",
-
-            mode: "lines",
-
-            name: "EMA 21",
-
-            line: {
-                color: "#36a3ff",
-                width: 2
-            }
-        };
-
-        const layout = {
-
-            ...commonLayout,
-
-            shapes: [
-
-                {
-                    type: "line",
-                    xref: "paper",
-                    x0: 0,
-                    x1: 1,
-                    y0: data.support,
-                    y1: data.support,
-                    line: {
-                        color: "#00d69a",
-                        width: 1.5,
-                        dash: "dot"
-                    }
-                },
-
-                {
-                    type: "line",
-                    xref: "paper",
-                    x0: 0,
-                    x1: 1,
-                    y0: data.resistance,
-                    y1: data.resistance,
-                    line: {
-                        color: "#ff5268",
-                        width: 1.5,
-                        dash: "dot"
-                    }
-                }
-
-            ],
-
-            legend: {
-                orientation: "h",
-                y: 1.08
-            },
-
-            showlegend: true
-        };
-
-        Plotly.react(
-            "chart",
-            [
-                candleTrace,
-                ema9Trace,
-                ema21Trace
-            ],
-            layout,
-            {
-                responsive: true,
-                scrollZoom: true,
-                displaylogo: false
-            }
+        rsiSeries.setData(data.candles
+            .filter(x => x.rsi !== null)
+            .map(x => ({
+                time: x.time,
+                value: x.rsi
+            }))
         );
 
-        // RSI
+        macdLine.setData(data.candles.map(x => ({
+            time: x.time,
+            value: x.macd
+        })));
 
-        const rsiTrace = {
+        macdSignal.setData(data.candles.map(x => ({
+            time: x.time,
+            value: x.macd_signal
+        })));
 
-            x: times,
+        macdHistogram.setData(data.candles.map(x => ({
+            time: x.time,
+            value: x.macd_hist,
+            color: x.macd_hist >= 0
+                ? "rgba(0,214,154,0.65)"
+                : "rgba(255,82,104,0.65)"
+        })));
 
-            y: candles.map(x => x.rsi),
+        if (!initialized) {
+            priceChart.timeScale().fitContent();
+            initialized = true;
+        } else if (previousRange) {
+            priceChart.timeScale().setVisibleLogicalRange(previousRange);
+        }
 
-            type: "scatter",
+        $("connection").innerText =
+            "● CONECTADO · " + data.source;
 
-            mode: "lines",
-
-            name: "RSI 14",
-
-            line: {
-                color: "#bd8aff",
-                width: 2
-            }
-        };
-
-        Plotly.react(
-            "rsi",
-            [rsiTrace],
-            {
-                paper_bgcolor: "#121d2d",
-                plot_bgcolor: "#121d2d",
-
-                font: {
-                    color: "#dce6f4"
-                },
-
-                margin: {
-                    t: 15,
-                    b: 35,
-                    l: 45,
-                    r: 15
-                },
-
-                xaxis: {
-                    type: "date",
-                    gridcolor: "#253449"
-                },
-
-                yaxis: {
-                    range: [0, 100],
-                    side: "right",
-                    gridcolor: "#253449"
-                },
-
-                shapes: [30, 50, 70].map(level => ({
-                    type: "line",
-                    xref: "paper",
-                    x0: 0,
-                    x1: 1,
-                    y0: level,
-                    y1: level,
-                    line: {
-                        color: level === 50 ? "#64748b" : "#ffbd59",
-                        dash: "dot",
-                        width: 1
-                    }
-                }))
-            },
-            {
-                responsive: true,
-                displaylogo: false
-            }
-        );
-
-        status.innerText =
-            "Actualizado: " +
-            new Date().toLocaleTimeString() +
-            " | Fuente: " + data.source;
+        $("updated").innerText =
+            "Ultima actualizacion: " +
+            new Date().toLocaleTimeString();
 
     } catch (error) {
 
-        status.innerText =
-            "ERROR: " + error.message;
+        $("connection").innerText = "● ERROR DE CONEXION";
 
+        $("explanation").innerText = error.message;
+
+    } finally {
+        busy = false;
     }
-
 }
+
+// AJUSTE RESPONSIVE
+
+function resizeCharts() {
+
+    const pairs = [
+        [priceChart, "priceChart", 360],
+        [volumeChart, "volumeChart", 160],
+        [rsiChart, "rsiChart", 160],
+        [macdChart, "macdChart", 170]
+    ];
+
+    pairs.forEach(([chart, id, height]) => {
+        const el = $(id);
+        chart.applyOptions({
+            width: el.clientWidth,
+            height: height
+        });
+    });
+}
+
+window.addEventListener("resize", resizeCharts);
 
 updateDashboard();
 
@@ -701,109 +845,114 @@ setInterval(updateDashboard, 15000);
 """
 
 
+# =====================================
+# PAGINA PRINCIPAL
+# =====================================
+
 @app.route("/")
 def home():
-
     return render_template_string(HTML)
 
+
+# =====================================
+# API DEL MERCADO
+# =====================================
 
 @app.route("/api/data")
 def market_data():
 
     try:
 
-        df = get_market_data()
+        df, source = get_market_data()
 
-        if len(df) < 25:
-            raise ValueError("No hay suficientes velas")
+        if len(df) < 30:
+            raise ValueError("Datos insuficientes")
 
         df = calculate_indicators(df)
 
+        last = df.iloc[-1]
+
         signal = generate_signal(df)
 
-        support, resistance = find_support_resistance(df)
-
         if signal == "SUBE":
-
             explanation = (
-                "EMA 9 esta por encima de EMA 21 "
-                "y RSI superior a 50."
+                "EMA 9 > EMA 21, RSI > 50, MACD positivo "
+                "y precio sobre VWAP. Confirmacion tecnica alcista."
             )
 
         elif signal == "BAJA":
-
             explanation = (
-                "EMA 9 esta por debajo de EMA 21 "
-                "y RSI inferior a 50."
+                "EMA 9 < EMA 21, RSI < 50, MACD negativo "
+                "y precio bajo VWAP. Confirmacion tecnica bajista."
             )
 
         else:
-
             explanation = (
-                "No hay confirmacion suficiente. Esperar."
+                "Los indicadores no coinciden. "
+                "Esperar una confirmacion antes de operar."
             )
 
-        candles = []
+        candles_data = []
 
         for _, row in df.iterrows():
 
-            candles.append({
+            candles_data.append({
 
-                "time": row["time"].isoformat(),
+                "time": int(row["time"].timestamp()),
 
                 "open": float(row["open"]),
                 "high": float(row["high"]),
                 "low": float(row["low"]),
                 "close": float(row["close"]),
+                "volume": float(row["volume"]),
 
                 "ema9": float(row["EMA9"]),
                 "ema21": float(row["EMA21"]),
+                "vwap": (
+                    float(row["VWAP"])
+                    if pd.notna(row["VWAP"]) else None
+                ),
 
                 "rsi": (
-                    None
-                    if pd.isna(row["RSI"])
-                    else float(row["RSI"])
-                )
+                    float(row["RSI"])
+                    if pd.notna(row["RSI"]) else None
+                ),
+
+                "macd": float(row["MACD"]),
+                "macd_signal": float(row["MACD_SIGNAL"]),
+                "macd_hist": float(row["MACD_HIST"])
 
             })
 
         return jsonify({
 
-            "price": float(df.iloc[-1]["close"]),
+            "price": float(last["close"]),
 
             "signal": signal,
 
+            "rsi": (
+                float(last["RSI"])
+                if pd.notna(last["RSI"]) else None
+            ),
+
+            "support": float(last["SUPPORT"]),
+            "resistance": float(last["RESISTANCE"]),
+
+            "source": source,
+
             "explanation": explanation,
 
-            "support": support,
-
-            "resistance": resistance,
-
-            "source": (
-                "Binance.US"
-                if SYMBOL == "BTCUSDT"
-                else "Coinbase"
-            ) if len(candles) else "Desconocida",
-
-            "candles": candles
+            "candles": candles_data
 
         })
 
     except Exception as error:
 
-        print("ERROR MARKET DATA:", error)
+        print("MARKET ERROR:", error)
 
         return jsonify({
             "error": str(error)
         }), 500
 
 
-if __name__ == "__main__":
-
-    port = int(os.environ.get("PORT", 10000))
-
-    app.run(
-        host="0.0.0.0",
-        port=port
-    )
-    
+# ===================
