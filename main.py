@@ -26,7 +26,38 @@ session.headers.update({"User-Agent": "BitcoinRadarPRO/3.0"})
 def get_market_data():
     errors = []
 
-    # Binance.US
+    # Coinbase primero: sus velas de 1 min sí se mueven.
+    # Binance.US devuelve muchas velas planas (sin movimiento).
+    try:
+        r = session.get(
+            "https://api.exchange.coinbase.com/products/BTC-USD/candles",
+            params={"granularity": 60},
+            timeout=12
+        )
+        r.raise_for_status()
+        rows = r.json()
+
+        if not isinstance(rows, list) or not rows:
+            raise ValueError("Coinbase no devolvio velas")
+
+        df = pd.DataFrame(rows, columns=[
+            "time", "low", "high", "open", "close", "volume"
+        ])
+
+        df["time"] = pd.to_datetime(
+            df["time"], unit="s", utc=True
+        )
+
+        for col in ["open", "high", "low", "close", "volume"]:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+
+        df = df.sort_values("time").tail(CANDLE_LIMIT)
+        return df.dropna().reset_index(drop=True), "Coinbase"
+
+    except Exception as exc:
+        errors.append("Coinbase: " + str(exc))
+
+    # Binance.US como respaldo
     try:
         r = session.get(
             "https://api.binance.us/api/v3/klines",
@@ -57,36 +88,6 @@ def get_market_data():
 
     except Exception as exc:
         errors.append("Binance.US: " + str(exc))
-
-    # Coinbase como respaldo
-    try:
-        r = session.get(
-            "https://api.exchange.coinbase.com/products/BTC-USD/candles",
-            params={"granularity": 60},
-            timeout=12
-        )
-        r.raise_for_status()
-        rows = r.json()
-
-        if not isinstance(rows, list) or not rows:
-            raise ValueError("Coinbase no devolvio velas")
-
-        df = pd.DataFrame(rows, columns=[
-            "time", "low", "high", "open", "close", "volume"
-        ])
-
-        df["time"] = pd.to_datetime(
-            df["time"], unit="s", utc=True
-        )
-
-        for col in ["open", "high", "low", "close", "volume"]:
-            df[col] = pd.to_numeric(df[col], errors="coerce")
-
-        df = df.sort_values("time").tail(CANDLE_LIMIT)
-        return df.dropna().reset_index(drop=True), "Coinbase"
-
-    except Exception as exc:
-        errors.append("Coinbase: " + str(exc))
 
     raise RuntimeError("No se pudieron obtener datos BTC. " + " | ".join(errors))
 
@@ -611,7 +612,6 @@ footer {
 }
 </style>
 </head>
-
 <body>
 <main>
 
@@ -969,6 +969,7 @@ let savedTrade = null;
 let audioCtx = null;
 let lastAlertKey = "";
 let marketCloseTs = null;
+let firstLoad = true;
 
 try {
   savedTrade = JSON.parse(localStorage.getItem("radarTrade") || "null");
@@ -1163,6 +1164,10 @@ async function updateAll() {
       ml.setData(d.macd);
       ms.setData(d.macd_signal);
       mh.setData(d.macd_hist);
+    }
+    if (firstLoad && d.candles && d.candles.length > 60) {
+      pc.timeScale().setVisibleLogicalRange({ from: d.candles.length - 60, to: d.candles.length - 1 });
+      firstLoad = false;
     }
     renderMarket(d.market);
     updateTradePanel();
