@@ -612,6 +612,7 @@ footer {
 }
 </style>
 </head>
+
 <body>
 <main>
 
@@ -836,6 +837,9 @@ function chartOptions(el, height) {
  return {
   width:el.clientWidth,
   height:height,
+  localization:{
+   timeFormatter: t => new Date(t*1000).toLocaleTimeString("en-US",{hour:"2-digit",minute:"2-digit",hour12:false,timeZone:"America/New_York"})
+  },
   layout:{
    background:{color:"#111a2a"},
    textColor:"#aebdd0",
@@ -852,7 +856,8 @@ function chartOptions(el, height) {
    secondsVisible:false,
    rightOffset:3,
    barSpacing:7,
-   minBarSpacing:2
+   minBarSpacing:2,
+   tickMarkFormatter: (time, tickMarkType, locale) => new Date(time*1000).toLocaleTimeString("en-US",{hour:"2-digit",minute:"2-digit",hour12:false,timeZone:"America/New_York"})
   },
   crosshair:{mode:LightweightCharts.CrosshairMode.Normal},
   handleScroll:true,
