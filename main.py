@@ -704,12 +704,10 @@ def api_kalshi():
             "message": str(exc)
         }), 502
 
+start_brtI()
 
 if __name__ == "__main__":
-    start_brtI()
-
     port = int(os.environ.get("PORT", "10000"))
-
     app.run(
         host="0.0.0.0",
         port=port,
