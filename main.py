@@ -1,1245 +1,717 @@
+import os
+import json
 import time
-import requests
-import pandas as pd
-import numpy as np
-
+import base64
+import threading
+from collections import deque
 from datetime import datetime, timezone
-from zoneinfo import ZoneInfo
+
+import requests
+import websocket
 from flask import Flask, jsonify, render_template_string
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import padding
 
 app = Flask(__name__)
 
-# ==========================================================
-# BITCOIN RADAR PRO
-# MOTOR DE DATOS E INDICADORES
-# ==========================================================
+# =========================================================
+# BITCOIN RADAR PRO 3.0
+# BRTI EN VIVO DESDE KALSHI
+# SOLO LECTURA: NO ENVIA ORDENES
+# =========================================================
 
-SYMBOL = "BTCUSDT"
-INTERVAL = "1m"
-LIMIT = 200
+KALSHI_WS = "wss://external-api-ws.kalshi.com/trade-api/ws/v2"
+KALSHI_API = "https://external-api.kalshi.com/trade-api/v2"
+SERIES = "KXBTC15M"
 
-MIAMI = ZoneInfo("America/New_York")
+API_KEY_ID = os.getenv("KALSHI_API_KEY_ID", "").strip()
+PRIVATE_KEY_PEM = os.getenv("KALSHI_PRIVATE_KEY", "").replace("\\n", "\n")
 
-COINBASE_URL = (
-    "https://api.exchange.coinbase.com"
-    "/products/BTC-USD/candles"
-)
+lock = threading.Lock()
+ticks = deque(maxlen=12000)
+candles = {}
+latest = {
+    "price": None,
+    "avg60": None,
+    "avg15": None,
+    "timestamp": None,
+    "connected": False,
+    "error": None
+}
 
-BINANCE_URL = (
-    "https://api.binance.com/api/v3/klines"
-)
+market_cache = {
+    "data": None,
+    "updated": 0
+}
 
-KALSHI_URL = (
-    "https://api.elections.kalshi.com/trade-api/v2"
-)
 
-session = requests.Session()
-session.headers.update({
-    "User-Agent": "BitcoinRadarPro/1.0"
-})
+def make_signature(timestamp):
+    if not API_KEY_ID or not PRIVATE_KEY_PEM:
+        raise RuntimeError("Faltan las variables RSA de Kalshi")
 
-# ==========================================================
-# OBTENER DATOS DE BITCOIN
-# ==========================================================
+    private_key = serialization.load_pem_private_key(
+        PRIVATE_KEY_PEM.encode("utf-8"),
+        password=None
+    )
 
-def get_btc_data():
+    message = (
+        str(timestamp) + "GET/trade-api/ws/v2"
+    ).encode("utf-8")
 
-    try:
-        response = session.get(
-            COINBASE_URL,
-            params={"granularity": 60},
-            timeout=8
-        )
+    signature = private_key.sign(
+        message,
+        padding.PSS(
+            mgf=padding.MGF1(hashes.SHA256()),
+            salt_length=hashes.SHA256().digest_size
+        ),
+        hashes.SHA256()
+    )
 
-        response.raise_for_status()
-        raw = response.json()
+    return base64.b64encode(signature).decode("utf-8")
 
-        df = pd.DataFrame(
-            raw,
-            columns=[
-                "time", "low", "high",
-                "open", "close", "volume"
-            ]
-        )
 
-        df = df.sort_values("time")
-        df = df.tail(LIMIT).reset_index(drop=True)
+def ws_headers():
+    timestamp = str(int(time.time() * 1000))
 
-        if len(df) < 30:
-            raise ValueError("Datos insuficientes")
-
-        source = "COINBASE"
-
-    except Exception:
-
-        response = session.get(
-            BINANCE_URL,
-            params={
-                "symbol": SYMBOL,
-                "interval": INTERVAL,
-                "limit": LIMIT
-            },
-            timeout=8
-        )
-
-        response.raise_for_status()
-
-        raw = response.json()
-
-        df = pd.DataFrame(
-            raw,
-            columns=[
-                "time", "open", "high",
-                "low", "close", "volume",
-                "close_time", "quote_volume",
-                "trades", "buy_volume",
-                "buy_quote_volume", "ignore"
-            ]
-        )
-
-        df = df[
-            ["time", "open", "high",
-             "low", "close", "volume"]
-        ]
-
-        df["time"] = (
-            pd.to_numeric(df["time"]) // 1000
-        )
-
-        df = df.tail(LIMIT).reset_index(drop=True)
-
-        source = "BINANCE"
-
-    numeric = [
-        "open", "high", "low", "close", "volume"
+    return [
+        "KALSHI-ACCESS-KEY: " + API_KEY_ID,
+        "KALSHI-ACCESS-TIMESTAMP: " + timestamp,
+        "KALSHI-ACCESS-SIGNATURE: " + make_signature(timestamp)
     ]
 
-    for col in numeric:
-        df[col] = pd.to_numeric(
-            df[col], errors="coerce"
+
+def add_brtI_tick(price, timestamp_ms):
+    price = float(price)
+    timestamp_ms = int(timestamp_ms)
+    second = timestamp_ms // 1000
+    minute = second - (second % 60)
+
+    with lock:
+        ticks.append({
+            "time": second,
+            "price": price
+        })
+
+        candle = candles.get(minute)
+
+        if candle is None:
+            candles[minute] = {
+                "time": minute,
+                "open": price,
+                "high": price,
+                "low": price,
+                "close": price,
+                "volume": 0
+            }
+        else:
+            candle["high"] = max(candle["high"], price)
+            candle["low"] = min(candle["low"], price)
+            candle["close"] = price
+            candle["volume"] += 1
+
+        # Mantener solo las 250 velas más recientes
+        old_keys = sorted(candles.keys())[:-250]
+        for key in old_keys:
+            candles.pop(key, None)
+
+        latest["price"] = price
+        latest["timestamp"] = second
+        latest["connected"] = True
+        latest["error"] = None
+
+
+def on_message(ws, message):
+    try:
+        packet = json.loads(message)
+        if packet.get("type") != "cfbenchmarks_value":
+            return
+
+        msg = packet.get("msg", {})
+
+        if msg.get("index_id") != "BRTI":
+            return
+
+        raw = json.loads(msg.get("data", "{}"))
+
+        price = raw.get("value")
+        timestamp_ms = raw.get("time") or msg.get("received_at")
+
+        if price is None or timestamp_ms is None:
+            return
+
+        add_brtI_tick(price, timestamp_ms)
+
+        avg60 = msg.get("avg_60s_data") or {}
+        avg15 = msg.get("last_60s_windowed_average_15min") or {}
+
+        with lock:
+            latest["avg60"] = float(avg60["value"]) if avg60.get("value") else None
+            latest["avg15"] = float(avg15["value"]) if avg15.get("value") else None
+
+    except Exception as exc:
+        app.logger.warning("Mensaje BRTI no procesado: %s", exc)
+
+
+def on_open(ws):
+    with lock:
+        latest["connected"] = True
+        latest["error"] = None
+
+    ws.send(json.dumps({
+        "id": 1,
+        "cmd": "subscribe",
+        "params": {
+            "channels": ["cfbenchmarks_value"],
+            "index_ids": ["BRTI"]
+        }
+    }))
+
+
+def on_error(ws, error):
+    with lock:
+        latest["connected"] = False
+        latest["error"] = str(error)
+
+
+def on_close(ws, status, message):
+    with lock:
+        latest["connected"] = False
+
+
+def brti_worker():
+    while True:
+        try:
+            socket = websocket.WebSocketApp(
+                KALSHI_WS,
+                header=ws_headers(),
+                on_open=on_open,
+                on_message=on_message,
+                on_error=on_error,
+                on_close=on_close
+            )
+
+            socket.run_forever(
+                ping_interval=20,
+                ping_timeout=10
+            )
+
+        except Exception as exc:
+            with lock:
+                latest["connected"] = False
+                latest["error"] = str(exc)
+
+        time.sleep(5)
+
+
+def start_brtI():
+    thread = threading.Thread(
+        target=brti_worker,
+        daemon=True
+    )
+    thread.start()
+
+
+def calculate_signal():
+    with lock:
+        values = [x["price"] for x in ticks]
+
+    if len(values) < 30:
+        return "ESPERAR", "Recopilando datos BRTI en vivo"
+
+    recent = values[-100:]
+
+    fast = sum(recent[-9:]) / min(9, len(recent))
+    slow = sum(recent[-21:]) / min(21, len(recent))
+
+    changes = [
+        recent[i] - recent[i - 1]
+        for i in range(1, len(recent))
+    ]
+
+    gains = [x for x in changes[-14:] if x > 0]
+    losses = [-x for x in changes[-14:] if x < 0]
+
+    avg_gain = sum(gains) / 14
+    avg_loss = sum(losses) / 14
+
+    if avg_loss == 0:
+        rsi = 100 if avg_gain > 0 else 50
+    else:
+        rs = avg_gain / avg_loss
+        rsi = 100 - (100 / (1 + rs))
+
+    momentum = recent[-1] - recent[-15]
+
+    if fast > slow and rsi > 52 and momentum > 0:
+        return "SUBE", "Tendencia y momentum positivos"
+
+    if fast < slow and rsi < 48 and momentum < 0:
+        return "BAJA", "Tendencia y momentum negativos"
+
+    return "ESPERAR", "No existe confirmación suficiente"
+
+
+def get_kalshi_market():
+    now = time.time()
+
+    if market_cache["data"] and now - market_cache["updated"] < 3:
+        return market_cache["data"]
+
+    response = requests.get(
+        f"{KALSHI_API}/markets",
+        params={
+            "series_ticker": SERIES,
+            "status": "open",
+            "limit": 100
+        },
+        timeout=10
+    )
+    response.raise_for_status()
+
+    markets = response.json().get("markets", [])
+    candidates = []
+
+    for market in markets:
+        close_text = market.get("close_time") or market.get(
+            "expected_expiration_time"
         )
 
-    df["time"] = pd.to_numeric(
-        df["time"], errors="coerce"
-    ).astype(int)
+        if not close_text:
+            continue
 
-    df = df.dropna().reset_index(drop=True)
+        try:
+            close_dt = datetime.fromisoformat(
+                close_text.replace("Z", "+00:00")
+            )
+            if close_dt.timestamp() > now:
+                candidates.append((close_dt.timestamp(), market))
+        except ValueError:
+            continue
 
-    return df, source
-
-
-# ==========================================================
-# INDICADORES TÉCNICOS
-# ==========================================================
-
-def calculate_indicators(df):
-
-    df = df.copy()
-
-    close = df["close"]
-    volume = df["volume"]
-
-    # EMA 9 Y EMA 21
-
-    df["ema9"] = close.ewm(
-        span=9, adjust=False
-    ).mean()
-
-    df["ema21"] = close.ewm(
-        span=21, adjust=False
-    ).mean()
-
-    # VWAP
-
-    typical = (
-        df["high"] +
-        df["low"] +
-        df["close"]
-    ) / 3
-
-    cumulative_volume = volume.cumsum()
-
-    df["vwap"] = (
-        (typical * volume).cumsum()
-        / cumulative_volume.replace(0, np.nan)
-    )
-
-    # RSI 14
-
-    delta = close.diff()
-
-    gain = delta.clip(lower=0)
-    loss = -delta.clip(upper=0)
-
-    avg_gain = gain.ewm(
-        alpha=1/14,
-        adjust=False
-    ).mean()
-
-    avg_loss = loss.ewm(
-        alpha=1/14,
-        adjust=False
-    ).mean()
-
-    rs = avg_gain / avg_loss.replace(0, np.nan)
-
-    df["rsi"] = 100 - (
-        100 / (1 + rs)
-    )
-
-    # MACD
-
-    ema12 = close.ewm(
-        span=12, adjust=False
-    ).mean()
-
-    ema26 = close.ewm(
-        span=26, adjust=False
-    ).mean()
-
-    df["macd"] = ema12 - ema26
-
-    df["macd_signal"] = df["macd"].ewm(
-        span=9, adjust=False
-    ).mean()
-
-    df["macd_hist"] = (
-        df["macd"] - df["macd_signal"]
-    )
-
-    df = df.replace(
-        [np.inf, -np.inf], np.nan
-    )
-
-    return df
-
-
-# ==========================================================
-# MOTOR DE DIRECCIÓN DEL MERCADO
-# ==========================================================
-
-def calculate_signal(df):
-
-    last = df.iloc[-1]
-
-    score = 0
-
-    # EMA
-
-    if last["ema9"] > last["ema21"]:
-        score += 2
-
-    elif last["ema9"] < last["ema21"]:
-        score -= 2
-
-    # VWAP
-
-    if last["close"] > last["vwap"]:
-        score += 1
-
-    elif last["close"] < last["vwap"]:
-        score -= 1
-
-    # RSI
-
-    if last["rsi"] > 55:
-        score += 1
-
-    elif last["rsi"] < 45:
-        score -= 1
-
-    # MACD
-
-    if last["macd"] > last["macd_signal"]:
-        score += 1
-
-    elif last["macd"] < last["macd_signal"]:
-        score -= 1
-
-    # Clasificación
-
-    if score >= 4:
-        signal = "SUBE"
-        trend = "ALCISTA"
-
-    elif score <= -4:
-        signal = "BAJA"
-        trend = "BAJISTA"
-
+    if not candidates:
+        result = {
+            "available": False,
+            "message": "No se encontró un contrato BTC 15M abierto."
+        }
     else:
-        signal = "ESPERAR"
-        trend = "LATERAL / INDECISO"
+        candidates.sort(key=lambda x: x[0])
+        close_ts, m = candidates[0]
 
-    # Porcentajes estimados, no probabilidades reales.
+        result = {
+            "available": True,
+            "ticker": m.get("ticker"),
+            "title": m.get("title") or m.get("subtitle"),
+            "close_ts": int(close_ts),
+            "yes_bid": m.get("yes_bid_dollars"),
+            "yes_ask": m.get("yes_ask_dollars"),
+            "no_bid": m.get("no_bid_dollars"),
+            "no_ask": m.get("no_ask_dollars"),
+            "last_price": m.get("last_price_dollars")
+        }
 
-    up = 50 + (score * 8)
-    up = max(5, min(95, up))
+    market_cache["data"] = result
+    market_cache["updated"] = now
 
-    down = 100 - up
-
-    return {
-        "signal": signal,
-        "trend": trend,
-        "score": score,
-        "up_percent": round(up, 1),
-        "down_percent": round(down, 1)
-    }
-
-
-# ==========================================================
-# PREPARAR INFORMACIÓN PARA LA GRÁFICA
-# ==========================================================
-
-def prepare_chart_data(df):
-
-    candles = []
-    ema9 = []
-    ema21 = []
-    vwap = []
-    volume = []
-    rsi = []
-    macd = []
-    macd_signal = []
-    macd_hist = []
-
-    for _, row in df.iterrows():
-
-        t = int(row["time"])
-
-        candles.append({
-            "time": t,
-            "open": round(float(row["open"]), 2),
-            "high": round(float(row["high"]), 2),
-            "low": round(float(row["low"]), 2),
-            "close": round(float(row["close"]), 2)
-        })
-
-        ema9.append({
-            "time": t,
-            "value": round(float(row["ema9"]), 2)
-        })
-
-        ema21.append({
-            "time": t,
-            "value": round(float(row["ema21"]), 2)
-        })
-
-        vwap.append({
-            "time": t,
-            "value": round(float(row["vwap"]), 2)
-        })
-
-        volume.append({
-            "time": t,
-            "value": round(float(row["volume"]), 4),
-            "color": (
-                "#00d69a"
-                if row["close"] >= row["open"]
-                else "#ff5268"
-            )
-        })
-
-        if pd.notna(row["rsi"]):
-            rsi.append({
-                "time": t,
-                "value": round(float(row["rsi"]), 2)
-            })
-
-        macd.append({
-            "time": t,
-            "value": round(float(row["macd"]), 4)
-        })
-
-        macd_signal.append({
-            "time": t,
-            "value": round(float(row["macd_signal"]), 4)
-        })
-
-        macd_hist.append({
-            "time": t,
-            "value": round(float(row["macd_hist"]), 4),
-            "color": (
-                "#00d69a"
-                if row["macd_hist"] >= 0
-                else "#ff5268"
-            )
-        })
-
-    return {
-        "candles": candles,
-        "ema9": ema9,
-        "ema21": ema21,
-        "vwap": vwap,
-        "volume": volume,
-        "rsi_series": rsi,
-        "macd": macd,
-        "macd_signal": macd_signal,
-        "macd_hist": macd_hist
-    }
-
-
-# ==========================================================
-# RELOJ DE MIAMI
-# ==========================================================
-
-def get_miami_time():
-
-    return datetime.now(
-        MIAMI
-    ).strftime("%Y-%m-%d %H:%M:%S")
-
-
-# ==========================================================
-# AQUÍ COMIENZA LA INTERFAZ
-# LA PARTE 2 CONTINÚA DESDE AQUÍ
-# ==========================================================
-
-PAGE = r"""
+    return result
+    HTML = r"""
 <!DOCTYPE html>
 <html lang="es">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>BITCOIN RADAR PRO</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bitcoin Radar PRO by Jady</title>
 
 <script src="https://unpkg.com/lightweight-charts@4.2.2/dist/lightweight-charts.standalone.production.js"></script>
 
 <style>
-* {
-    box-sizing: border-box;
+*{box-sizing:border-box}
+body{
+ margin:0;padding:14px;background:#070b16;color:#eef4ff;
+ font-family:Arial,sans-serif
 }
-
-body {
-    margin: 0;
-    background: #080d17;
-    color: #e8eef8;
-    font-family: Arial, sans-serif;
+main{max-width:1100px;margin:auto}
+header{
+ display:flex;justify-content:space-between;align-items:center;
+ flex-wrap:wrap;gap:10px;margin-bottom:14px
 }
-
-header {
-    padding: 20px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    background: #101827;
-    border-bottom: 1px solid #263247;
+h1{font-size:20px;margin:0;letter-spacing:1px}
+.sub{font-size:11px;color:#00d69a;margin-top:5px}
+.panel{
+ background:#111a2a;border:1px solid #293953;
+ border-radius:13px;padding:14px;margin-bottom:12px
 }
-
-.logo {
-    font-size: 21px;
-    font-weight: bold;
-    letter-spacing: 2px;
+.grid{
+ display:grid;grid-template-columns:repeat(2,1fr);gap:9px
 }
-
-.logo span {
-    color: #00d6a0;
+.metric{background:#19263a;padding:13px;border-radius:9px}
+.metric small{color:#9eafc5;font-size:10px}
+.metric strong{display:block;font-size:21px;margin-top:8px}
+.section{font-size:11px;color:#aebed2;margin-bottom:12px}
+.chart{height:350px;width:100%}
+.green{color:#00d69a}
+.red{color:#ff5268}
+.yellow{color:#ffc857}
+.signals{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.signal{
+ padding:13px 4px;text-align:center;background:#19263a;
+ border:1px solid #344963;border-radius:8px;font-weight:bold
 }
-
-.status {
-    color: #00d6a0;
-    font-size: 12px;
+.active-up{color:#00d69a;border-color:#00d69a}
+.active-down{color:#ff5268;border-color:#ff5268}
+.active-wait{color:#ffc857;border-color:#ffc857}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+.quote{background:#19263a;padding:13px;border-radius:9px}
+.quote small{color:#9eafc5}
+.quote strong{display:block;font-size:25px;margin-top:8px}
+.note{font-size:10px;color:#8799b1;line-height:1.5}
+button{
+ background:#1b2c45;color:white;border:1px solid #3a5272;
+ border-radius:8px;padding:10px 14px;font-weight:bold
 }
-
-.container {
-    max-width: 1500px;
-    margin: auto;
-    padding: 16px;
-}
-
-.top-grid {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 12px;
-}
-
-.card {
-    background: #111b2b;
-    border: 1px solid #25334a;
-    border-radius: 13px;
-    padding: 17px;
-}
-
-.label {
-    color: #8999b0;
-    font-size: 12px;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-}
-
-.price {
-    font-size: 30px;
-    font-weight: bold;
-    margin-top: 12px;
-}
-
-.green {
-    color: #00d69a;
-}
-
-.red {
-    color: #ff5268;
-}
-
-.blue {
-    color: #50a9ff;
-}
-
-.signal-card {
-    margin-top: 14px;
-    display: grid;
-    grid-template-columns: 1fr 1fr 1fr;
-    gap: 12px;
-}
-
-.percent {
-    font-size: 34px;
-    font-weight: bold;
-    margin-top: 12px;
-}
-
-.progress {
-    height: 7px;
-    background: #263247;
-    border-radius: 10px;
-    margin-top: 14px;
-    overflow: hidden;
-}
-
-.progress div {
-    height: 100%;
-    border-radius: 10px;
-    transition: width .5s;
-}
-
-.green-bar {
-    background: #00d69a;
-}
-
-.red-bar {
-    background: #ff5268;
-}
-
-.center-signal {
-    text-align: center;
-}
-
-.trend {
-    font-size: 23px;
-    font-weight: bold;
-    margin-top: 12px;
-}
-
-.subtext {
-    color: #8999b0;
-    font-size: 12px;
-    margin-top: 8px;
-}
-
-.section {
-    margin-top: 15px;
-}
-
-.section-title {
-    font-size: 14px;
-    font-weight: bold;
-    margin-bottom: 12px;
-}
-
-.chart-card {
-    background: #111b2b;
-    border: 1px solid #25334a;
-    border-radius: 13px;
-    padding: 15px;
-}
-
-.chart {
-    width: 100%;
-    height: 390px;
-}
-
-.chart-small {
-    width: 100%;
-    height: 150px;
-}
-
-.indicator-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 12px;
-    margin-top: 14px;
-}
-
-.indicator-value {
-    font-size: 20px;
-    margin-top: 10px;
-    font-weight: bold;
-}
-
-.alert {
-    padding: 13px;
-    background: #18263a;
-    border-left: 4px solid #50a9ff;
-    border-radius: 7px;
-    margin-bottom: 9px;
-    font-size: 13px;
-}
-
-.alert.buy {
-    border-color: #00d69a;
-}
-
-.alert.sell {
-    border-color: #ff5268;
-}
-
-.alert.wait {
-    border-color: #f0b94b;
-}
-
-.alert-list {
-    max-height: 250px;
-    overflow-y: auto;
-}
-
-.clock {
-    font-size: 20px;
-    font-weight: bold;
-    margin-top: 10px;
-}
-
-.footer {
-    text-align: center;
-    padding: 25px;
-    color: #65748a;
-    font-size: 11px;
-}
-
-@media(max-width: 700px) {
-    .top-grid {
-        grid-template-columns: 1fr 1fr;
-    }
-
-    .signal-card {
-        grid-template-columns: 1fr 1fr;
-    }
-
-    .center-signal {
-        grid-column: span 2;
-        grid-row: 1;
-    }
-
-    .price {
-        font-size: 23px;
-    }
-
-    .percent {
-        font-size: 27px;
-    }
-
-    .chart {
-        height: 320px;
-    }
-
-    header {
-        padding: 15px;
-    }
-
-    .logo {
-        font-size: 16px;
-    }
+@media(min-width:750px){
+ .grid{grid-template-columns:repeat(4,1fr)}
+ .layout{display:grid;grid-template-columns:1.5fr 1fr;gap:12px}
+ .chart{height:470px}
 }
 </style>
 </head>
 
 <body>
+<main>
 
 <header>
-    <div class="logo">₿ BITCOIN <span>RADAR PRO</span></div>
-    <div class="status" id="connection">● CONECTANDO</div>
+ <div>
+  <h1>₿ BITCOIN RADAR PRO</h1>
+  <div class="sub">BY JADY ♥ · KALSHI BRTI · BTC 15 MIN</div>
+ </div>
+ <button onclick="updateAll()">ACTUALIZAR</button>
 </header>
 
-<div class="container">
+<div class="grid">
+ <div class="metric">
+  <small>ÍNDICE BRTI EN VIVO</small>
+  <strong id="price">--</strong>
+ </div>
+ <div class="metric">
+  <small>SEÑAL DEL RADAR</small>
+  <strong id="signal" class="yellow">ESPERAR</strong>
+ </div>
+ <div class="metric">
+  <small>PROMEDIO BRTI 60S</small>
+  <strong id="avg60">--</strong>
+ </div>
+ <div class="metric">
+  <small>CIERRE DEL CONTRATO</small>
+  <strong id="timer">--:--</strong>
+ </div>
+</div>
 
-    <div class="top-grid">
+<div class="layout">
+<div>
 
-        <div class="card">
-            <div class="label">BTC / USD</div>
-            <div class="price" id="price">$0.00</div>
-            <div class="subtext" id="source">Fuente: Coinbase</div>
-        </div>
+<section class="panel">
+ <div class="section">ALERTA DE DIRECCIÓN</div>
+ <div class="signals">
+  <div class="signal" id="up">▲ SUBE</div>
+  <div class="signal" id="down">▼ BAJA</div>
+  <div class="signal active-wait" id="wait">Ⅱ ESPERAR</div>
+ </div>
+ <p class="note" id="reason">Esperando datos de Kalshi.</p>
+</section>
 
-        <div class="card">
-            <div class="label">Cambio reciente</div>
-            <div class="price" id="change">0.00%</div>
-            <div class="subtext">Variación de las últimas velas</div>
-        </div>
+<section class="panel">
+ <div class="section">BRTI · VELAS DE 1 MINUTO</div>
+ <div id="chart" class="chart"></div>
+</section>
 
-        <div class="card">
-            <div class="label">Hora Miami</div>
-            <div class="clock" id="clock">--:--:--</div>
-            <div class="subtext" id="date">Actualizando</div>
-        </div>
-
-    </div>
-
-    <div class="signal-card">
-
-        <div class="card">
-            <div class="label green">Probabilidad estimada SUBE</div>
-            <div class="percent green" id="up">50%</div>
-            <div class="progress">
-                <div class="green-bar" id="upbar" style="width:50%"></div>
-            </div>
-        </div>
-
-        <div class="card center-signal">
-            <div class="label">ESTADO DEL MERCADO</div>
-            <div class="trend blue" id="trend">ANALIZANDO</div>
-            <div class="subtext" id="signal">ESPERANDO DATOS</div>
-            <div class="subtext" id="score">Fuerza: 0</div>
-        </div>
-
-        <div class="card">
-            <div class="label red">Probabilidad estimada BAJA</div>
-            <div class="percent red" id="down">50%</div>
-            <div class="progress">
-                <div class="red-bar" id="downbar" style="width:50%"></div>
-            </div>
-        </div>
-
-    </div>
-
-    <div class="section chart-card">
-        <div class="section-title">
-            GRÁFICA PRINCIPAL BTC/USD · 1 MINUTO
-        </div>
-        <div id="mainChart" class="chart"></div>
-        <div class="subtext">
-            Coinbase · Velas · EMA 9 · EMA 21 · VWAP
-        </div>
-    </div>
-
-    <div class="indicator-grid">
-
-        <div class="chart-card">
-            <div class="section-title">RSI 14</div>
-            <div id="rsiChart" class="chart-small"></div>
-            <div class="indicator-value" id="rsiValue">--</div>
-        </div>
-
-        <div class="chart-card">
-            <div class="section-title">MACD</div>
-            <div id="macdChart" class="chart-small"></div>
-            <div class="indicator-value" id="macdValue">--</div>
-        </div>
-
-    </div>
-
-    <div class="indicator-grid">
-
-        <div class="card">
-            <div class="label">EMA 9</div>
-            <div class="indicator-value" id="ema9">--</div>
-        </div>
-
-        <div class="card">
-            <div class="label">EMA 21</div>
-            <div class="indicator-value" id="ema21">--</div>
-        </div>
-
-        <div class="card">
-            <div class="label">VWAP</div>
-            <div class="indicator-value" id="vwap">--</div>
-        </div>
-
-        <div class="card">
-            <div class="label">Volumen</div>
-            <div class="indicator-value" id="volume">--</div>
-        </div>
-
-    </div>
-
-    <div class="section card">
-        <div class="section-title">ALERTAS INTELIGENTES</div>
-        <div id="alerts" class="alert-list">
-            <div class="alert">Iniciando sistema de alertas...</div>
-        </div>
-    </div>
-
-    <div class="section card">
-        <div class="section-title">RADAR DE OPERACIÓN</div>
-        <div id="recommendation" class="alert wait">
-            Analizando las condiciones del mercado...
-        </div>
-        <div class="subtext">
-            Las señales son orientativas y no garantizan resultados.
-            Confirma siempre el precio y el contrato antes de operar.
-        </div>
-    </div>
+<section class="panel">
+ <div class="section">PROMEDIO FINAL DE 60 SEGUNDOS</div>
+ <strong id="avg15" class="green">--</strong>
+ <p class="note">
+ Este dato aparece durante el último minuto del cuarto de hora
+ cuando Kalshi lo transmite.
+ </p>
+</section>
 
 </div>
 
-<div class="footer">
-    BITCOIN RADAR PRO · DATOS DE MERCADO EN VIVO · HORARIO MIAMI
+<div>
+
+<section class="panel">
+ <div class="section">KALSHI · CONTRATO BTC 15M</div>
+ <strong id="marketTitle">Buscando mercado...</strong>
+ <p class="note" id="ticker">Ticker: --</p>
+
+ <div class="two">
+  <div class="quote">
+   <small>YES ASK</small>
+   <strong class="green" id="yesAsk">--</strong>
+   <small id="yesBid">Bid: --</small>
+  </div>
+  <div class="quote">
+   <small>NO ASK</small>
+   <strong class="red" id="noAsk">--</strong>
+   <small id="noBid">Bid: --</small>
+  </div>
+ </div>
+ <p class="note" id="marketStatus">Esperando cotizaciones.</p>
+</section>
+
+<section class="panel">
+ <div class="section">ESTADO DE CONEXIÓN</div>
+ <strong id="connection" class="yellow">CONECTANDO...</strong>
+ <p class="note" id="updated">Sin actualización todavía.</p>
+ <p class="note">
+ El precio principal procede del índice BRTI. YES y NO son
+ precios de contratos, no el precio del Bitcoin.
+ </p>
+</section>
+
+<section class="panel">
+ <div class="section">CONFIGURACIÓN DEL RADAR</div>
+ <p class="note">
+ Actualización automática de datos. Señales técnicas basadas
+ en tendencia y momentum. No ejecuta operaciones ni garantiza
+ resultados.
+ </p>
+ <button onclick="location.reload()">RECARGAR RADAR</button>
+</section>
+
 </div>
+</div>
+
+</main>
 
 <script>
+const $ = id => document.getElementById(id);
 
-const chartOptions = {
-    layout: {
-        background: { color: "#111b2b" },
-        textColor: "#9aabc1"
-    },
-    grid: {
-        vertLines: { color: "#1d2a3d" },
-        horzLines: { color: "#1d2a3d" }
-    },
-    rightPriceScale: {
-        borderColor: "#263247"
-    },
-    timeScale: {
-        borderColor: "#263247",
-        timeVisible: true,
-        secondsVisible: false
-    },
-    crosshair: {
-        mode: LightweightCharts.CrosshairMode.Normal
-    }
-};
+const money = n => n == null
+ ? "--"
+ : "$" + Number(n).toLocaleString("en-US",{
+     minimumFractionDigits:2,
+     maximumFractionDigits:2
+   });
 
-const mainChart = LightweightCharts.createChart(
-    document.getElementById("mainChart"),
-    chartOptions
-);
+const cents = n => n == null
+ ? "--¢"
+ : (Number(n)*100).toFixed(1)+"¢";
 
-const candles = mainChart.addCandlestickSeries({
-    upColor: "#00d69a",
-    downColor: "#ff5268",
-    borderUpColor: "#00d69a",
-    borderDownColor: "#ff5268",
-    wickUpColor: "#00d69a",
-    wickDownColor: "#ff5268"
-});
+let chart = null;
+let series = null;
+let lastSignal = "";
+let closeTime = null;
 
-const e9 = mainChart.addLineSeries({
-    color: "#42a5ff",
-    lineWidth: 2,
-    title: "EMA 9"
-});
+function setupChart(){
+ const el = $("chart");
 
-const e21 = mainChart.addLineSeries({
-    color: "#ffb84d",
-    lineWidth: 2,
-    title: "EMA 21"
-});
+ if(typeof LightweightCharts === "undefined"){
+  $("connection").textContent="ERROR: No cargó la gráfica";
+  return;
+ }
 
-const vwapLine = mainChart.addLineSeries({
-    color: "#c58aff",
-    lineWidth: 2,
-    title: "VWAP"
-});
+ chart = LightweightCharts.createChart(el,{
+  width:el.clientWidth,
+  height:470,
+  layout:{
+   background:{color:"#111a2a"},
+   textColor:"#aebed2"
+  },
+  grid:{
+   vertLines:{color:"#1d2b40"},
+   horzLines:{color:"#1d2b40"}
+  },
+  timeScale:{
+   timeVisible:true,
+   secondsVisible:false,
+   borderColor:"#34445a"
+  },
+  rightPriceScale:{borderColor:"#34445a"}
+ });
 
-const rsiChart = LightweightCharts.createChart(
-    document.getElementById("rsiChart"),
-    chartOptions
-);
-
-const rsiLine = rsiChart.addLineSeries({
-    color: "#c58aff",
-    lineWidth: 2
-});
-
-rsiLine.createPriceLine({
-    price: 70,
-    color: "#ff5268",
-    lineStyle: 2
-});
-
-rsiLine.createPriceLine({
-    price: 30,
-    color: "#00d69a",
-    lineStyle: 2
-});
-
-const macdChart = LightweightCharts.createChart(
-    document.getElementById("macdChart"),
-    chartOptions
-);
-
-const macdLine = macdChart.addLineSeries({
-    color: "#42a5ff",
-    lineWidth: 2
-});
-
-const macdSignalLine = macdChart.addLineSeries({
-    color: "#ffb84d",
-    lineWidth: 2
-});
-
-const macdHistogram = macdChart.addHistogramSeries({
-    priceFormat: { type: "price", precision: 4 }
-});
-
-function resizeCharts() {
-    const width = document.getElementById("mainChart").clientWidth;
-
-    mainChart.applyOptions({ width });
-    rsiChart.applyOptions({
-        width: document.getElementById("rsiChart").clientWidth
-    });
-    macdChart.applyOptions({
-        width: document.getElementById("macdChart").clientWidth
-    });
+ series = chart.addCandlestickSeries({
+  upColor:"#00d69a",
+  downColor:"#ff5268",
+  borderUpColor:"#00d69a",
+  borderDownColor:"#ff5268",
+  wickUpColor:"#00d69a",
+  wickDownColor:"#ff5268"
+ });
 }
 
-window.addEventListener("resize", resizeCharts);
+function renderCandles(rows){
+ if(!series || !rows) return;
 
-function money(value) {
-    return "$" + Number(value).toLocaleString(
-        "en-US",
-        {minimumFractionDigits: 2, maximumFractionDigits: 2}
-    );
+ const clean = rows.filter(x =>
+  Number.isFinite(x.time) &&
+  Number.isFinite(x.open) &&
+  Number.isFinite(x.high) &&
+  Number.isFinite(x.low) &&
+  Number.isFinite(x.close)
+ );
+
+ series.setData(clean);
+
+ if(clean.length){
+  chart.timeScale().fitContent();
+ }
 }
 
-let previousSignal = null;
-let lastAlertTime = 0;
-let firstLoad = true;
+function renderSignal(s, reason){
+ $("signal").textContent=s;
+ $("reason").textContent=reason;
 
-function addAlert(message, type) {
+ $("signal").className =
+  s==="SUBE" ? "green" :
+  s==="BAJA" ? "red" : "yellow";
 
-    const box = document.getElementById("alerts");
+ $("up").className="signal"+(s==="SUBE"?" active-up":"");
+ $("down").className="signal"+(s==="BAJA"?" active-down":"");
+ $("wait").className="signal"+(s==="ESPERAR"?" active-wait":"");
 
-    const item = document.createElement("div");
+ if(lastSignal && lastSignal!==s && "Notification" in window &&
+    Notification.permission==="granted"){
+  new Notification("Bitcoin Radar: "+s);
+ }
 
-    item.className = "alert " + type;
-
-    const now = new Date().toLocaleTimeString(
-        "es-US",
-        {timeZone: "America/New_York"}
-    );
-
-    item.textContent = now + " · " + message;
-
-    box.prepend(item);
-
-    while (box.children.length > 30) {
-        box.removeChild(box.lastChild);
-    }
+ lastSignal=s;
 }
 
-function updateAlerts(data) {
+async function getJSON(url){
+ const response=await fetch(url,{cache:"no-store"});
+ const data=await response.json();
 
-    const signal = data.signal.signal;
-    const now = Date.now();
+ if(!response.ok){
+  throw new Error(data.error || "Error consultando "+url);
+ }
 
-    if (firstLoad) {
-        previousSignal = signal;
-        firstLoad = false;
-        return;
-    }
-
-    if (signal !== previousSignal && now - lastAlertTime > 20000) {
-
-        if (signal === "SUBE") {
-            addAlert("SEÑAL ALCISTA: aumenta la presión compradora.", "buy");
-        }
-
-        else if (signal === "BAJA") {
-            addAlert("SEÑAL BAJISTA: aumenta la presión vendedora.", "sell");
-        }
-
-        else {
-            addAlert("INDECISIÓN: no hay confirmación suficiente. ESPERAR.", "wait");
-        }
-
-        previousSignal = signal;
-        lastAlertTime = now;
-    }
-
-    if (signal === "ESPERAR") {
-        document.getElementById("recommendation").textContent =
-            "ESPERAR: mercado lateral o sin confirmación clara. Evita entradas impulsivas.";
-        document.getElementById("recommendation").className = "alert wait";
-    }
-
-    else if (signal === "SUBE") {
-        document.getElementById("recommendation").textContent =
-            "TENDENCIA ALCISTA: vigilar confirmación y posibles retrocesos antes de entrar.";
-        document.getElementById("recommendation").className = "alert buy";
-    }
-
-    else {
-        document.getElementById("recommendation").textContent =
-            "TENDENCIA BAJISTA: vigilar confirmación y posibles rebotes antes de entrar.";
-        document.getElementById("recommendation").className = "alert sell";
-    }
+ return data;
 }
 
-function updateInterface(data) {
+async function updateAll(){
+ try{
+  const [btc,market]=await Promise.all([
+   getJSON("/api/data"),
+   getJSON("/api/kalshi")
+  ]);
 
-    const signal = data.signal;
+  $("price").textContent=money(btc.price);
+  $("avg60").textContent=money(btc.avg60);
+  $("avg15").textContent=money(btc.avg15);
 
-    document.getElementById("price").textContent =
-        money(data.price);
+  renderSignal(btc.signal,btc.reason);
+  renderCandles(btc.candles);
 
-    document.getElementById("up").textContent =
-        signal.up_percent + "%";
+  if(market.available){
+   $("marketTitle").textContent=market.title || "Bitcoin 15 minutos";
+   $("ticker").textContent="Ticker: "+market.ticker;
+   $("yesAsk").textContent=cents(market.yes_ask);
+   $("noAsk").textContent=cents(market.no_ask);
+   $("yesBid").textContent="Bid: "+cents(market.yes_bid);
+   $("noBid").textContent="Bid: "+cents(market.no_bid);
+   $("marketStatus").textContent="Cotizaciones recibidas de Kalshi.";
+   closeTime=market.close_ts;
+  }else{
+   $("marketTitle").textContent="Contrato no disponible";
+   $("marketStatus").textContent=market.message || "Sin mercado abierto.";
+  }
 
-    document.getElementById("down").textContent =
-        signal.down_percent + "%";
+  $("connection").textContent=btc.connected
+   ? "● BRTI CONECTADO"
+   : "● SIN CONEXIÓN BRTI";
 
-    document.getElementById("upbar").style.width =
-        signal.up_percent + "%";
+  $("connection").className=btc.connected?"green":"red";
 
-    document.getElementById("downbar").style.width =
-        signal.down_percent + "%";
+  $("updated").textContent="Última actualización: "+
+   new Date().toLocaleTimeString();
 
-    document.getElementById("trend").textContent =
-        signal.trend;
-
-    document.getElementById("signal").textContent =
-        "SEÑAL: " + signal.signal;
-
-    document.getElementById("score").textContent =
-        "Fuerza del movimiento: " + signal.score;
-
-    document.getElementById("source").textContent =
-        "Fuente: " + data.source;
-
-    document.getElementById("ema9").textContent =
-        money(data.last.ema9);
-
-    document.getElementById("ema21").textContent =
-        money(data.last.ema21);
-
-    document.getElementById("vwap").textContent =
-        money(data.last.vwap);
-
-    document.getElementById("rsiValue").textContent =
-        Number(data.last.rsi).toFixed(2);
-
-    document.getElementById("macdValue").textContent =
-        Number(data.last.macd).toFixed(4);
-
-    document.getElementById("volume").textContent =
-        Number(data.last.volume).toFixed(4);
-
-    document.getElementById("connection").textContent =
-        "● EN VIVO";
-
-    document.getElementById("connection").style.color =
-        "#00d69a";
-
-    const times = data.candles;
-
-    const previous = times[times.length - 2];
-    const current = times[times.length - 1];
-
-    const change = previous
-        ? ((current.close - previous.close) / previous.close) * 100
-        : 0;
-
-    const changeElement = document.getElementById("change");
-
-    changeElement.textContent =
-        (change >= 0 ? "+" : "") + change.toFixed(3) + "%";
-
-    changeElement.className =
-        "price " + (change >= 0 ? "green" : "red");
-
-    const now = new Date();
-
-    document.getElementById("clock").textContent =
-        now.toLocaleTimeString("es-US", {
-            timeZone: "America/New_York"
-        });
-
-    document.getElementById("date").textContent =
-        now.toLocaleDateString("es-US", {
-            timeZone: "America/New_York",
-            weekday: "long",
-            year: "numeric",
-            month: "long",
-            day: "numeric"
-        });
-
-    const trend = signal.trend;
-
-    document.getElementById("trend").className =
-        "trend " +
-        (trend === "ALCISTA" ? "green" :
-        trend === "BAJISTA" ? "red" : "blue");
-
-    updateAlerts(data);
+ }catch(error){
+  $("connection").textContent="ERROR: "+error.message;
+  $("connection").className="red";
+ }
 }
 
-async function updateRadar() {
+function updateTimer(){
+ if(!closeTime) return;
 
-    try {
+ const seconds=Math.max(
+  0,
+  closeTime-Math.floor(Date.now()/1000)
+ );
 
-        const response = await fetch(
-            "/api/data?t=" + Date.now(),
-            {cache: "no-store"}
-        );
-
-        if (!response.ok) {
-            throw new Error("Error del servidor");
-        }
-
-        const data = await response.json();
-
-        if (data.error) {
-            throw new Error(data.error);
-        }
-
-        candles.setData(data.chart.candles);
-        e9.setData(data.chart.ema9);
-        e21.setData(data.chart.ema21);
-        vwapLine.setData(data.chart.vwap);
-
-        rsiLine.setData(data.chart.rsi_series);
-
-        macdLine.setData(data.chart.macd);
-        macdSignalLine.setData(data.chart.macd_signal);
-        macdHistogram.setData(data.chart.macd_hist);
-
-        updateInterface(data);
-
-        if (firstLoad) {
-            mainChart.timeScale().fitContent();
-            rsiChart.timeScale().fitContent();
-            macdChart.timeScale().fitContent();
-        }
-
-        resizeCharts();
-
-    } catch(error) {
-
-        document.getElementById("connection").textContent =
-            "● SIN CONEXIÓN";
-
-        document.getElementById("connection").style.color =
-            "#ff5268";
-
-        console.error(error);
-    }
+ $("timer").textContent=
+  String(Math.floor(seconds/60)).padStart(2,"0")+":"+
+  String(seconds%60).padStart(2,"0");
 }
 
-updateRadar();
+window.addEventListener("resize",()=>{
+ if(chart){
+  chart.applyOptions({
+   width:$("chart").clientWidth
+  });
+ }
+});
 
-setInterval(updateRadar, 3000);
+setupChart();
+updateAll();
 
+setInterval(updateAll,2000);
+setInterval(updateTimer,1000);
 </script>
 </body>
 </html>
 """
 
-# ==========================================================
-# API PRINCIPAL DEL RADAR
-# ==========================================================
 
 @app.route("/")
 def home():
-    return render_template_string(PAGE)
+    return render_template_string(HTML)
 
 
 @app.route("/api/data")
 def api_data():
+    with lock:
+        price = latest["price"]
+        avg60 = latest["avg60"]
+        avg15 = latest["avg15"]
+        connected = latest["connected"]
+        error = latest["error"]
+        rows = list(candles.values())
 
+    rows.sort(key=lambda x: x["time"])
+
+    signal, reason = calculate_signal()
+
+    return jsonify({
+        "price": price,
+        "avg60": avg60,
+        "avg15": avg15,
+        "connected": connected,
+        "error": error,
+        "signal": signal,
+        "reason": reason,
+        "candles": rows
+    })
+
+
+@app.route("/api/kalshi")
+def api_kalshi():
     try:
-
-        df, source = get_btc_data()
-
-        # Actualizar el último precio con el ticker de Coinbase.
-
-        if source == "COINBASE":
-
-            try:
-
-                ticker = session.get(
-                    "https://api.exchange.coinbase.com/products/BTC-USD/ticker",
-                    timeout=5
-                )
-
-                ticker.raise_for_status()
-
-                spot = float(ticker.json()["price"])
-
-                last_index = df.index[-1]
-
-                df.loc[last_index, "close"] = spot
-
-                df.loc[last_index, "high"] = max(
-                    float(df.loc[last_index, "high"]),
-                    spot
-                )
-
-                df.loc[last_index, "low"] = min(
-                    float(df.loc[last_index, "low"]),
-                    spot
-                )
-
-            except Exception:
-                pass
-
-        df = calculate_indicators(df)
-
-        last = df.iloc[-1]
-
-        signal = calculate_signal(df)
-
-        chart = prepare_chart_data(df)
-
+        return jsonify(get_kalshi_market())
+    except Exception as exc:
+        app.logger.exception("Error consultando mercado Kalshi")
         return jsonify({
+            "available": False,
+            "message": str(exc)
+        }), 502
 
-            "price": round(float(last["close"]), 2),
-
-            "source": source,
-
-            "signal": signal,
-
-            "last": {
-
-                "ema9": round(float(last["ema9"]), 2),
-
-                "ema21": round(float(last["ema21"]), 2),
-
-                "vwap": round(float(last["vwap"]), 2),
-
-                "rsi": (
-                    round(float(last["rsi"]), 2)
-                    if pd.notna(last["rsi"])
-                    else 50
-                ),
-
-                "macd": round(float(last["macd"]), 4),
-
-                "volume": round(float(last["volume"]), 4)
-
-            },
-
-            "candles": chart["candles"],
-
-            "chart": chart,
-
-            "time": get_miami_time()
-
-        })
-
-    except Exception as error:
-
-        return jsonify({
-            "error": str(error)
-        }), 503
-
-
-# ==========================================================
-# INICIAR APLICACIÓN
-# ==========================================================
 
 if __name__ == "__main__":
+    start_brtI()
+
+    port = int(os.environ.get("PORT", "10000"))
 
     app.run(
         host="0.0.0.0",
-        port=10000
+        port=port,
+        threaded=True
     )
