@@ -313,7 +313,7 @@ def get_kalshi_market():
     market_cache["updated"] = now
 
     return result
-    HTML = r"""
+HTML = r"""
 <!DOCTYPE html>
 <html lang="es">
 <head>
