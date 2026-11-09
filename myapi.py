@@ -466,139 +466,71 @@ HTML = r"""
 <title>Bitcoin Radar PRO | Kalshi BTC 15M</title>
 <script src="https://unpkg.com/lightweight-charts@4.2.2/dist/lightweight-charts.standalone.production.js"></script>
 <style>
-:root{--bg:#080d18;--panel:#111a2a;--panel2:#182438;--line:#263750;--muted:#91a4bd;--white:#edf4ff;--green:#00d69a;--red:#ff5268;--yellow:#ffc857;--blue:#36a3ff;--purple:#c58cff}
-*{box-sizing:border-box}
-body{margin:0;padding:12px;background:var(--bg);color:var(--white);font-family:Arial,sans-serif}
-main{max-width:1180px;margin:auto}
-header{display:flex;justify-content:space-between;align-items:center;gap:10px;margin:5px 0 14px;flex-wrap:wrap}
-h1{font-size:19px;letter-spacing:1.4px;margin:0 0 5px}
-.sub{font-size:10px;color:var(--green)}
-button{border:1px solid #3b526e;background:#1b2b42;color:white;border-radius:8px;padding:10px 13px;font-weight:bold}
-button:active{transform:scale(.98)}
-.panel{background:var(--panel);border:1px solid var(--line);border-radius:13px;padding:13px;margin-bottom:12px}
-.metrics{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;margin-bottom:12px}
-.metric{background:var(--panel2);padding:12px;border-radius:9px;min-width:0}
-.metric small,.muted{font-size:10px;color:var(--muted)}
-.metric strong{display:block;font-size:19px;margin-top:7px;overflow-wrap:anywhere}
-.section{font-size:11px;color:#aebed2;letter-spacing:1px;margin:2px 0 12px;font-weight:bold}
-.green{color:var(--green)}.red{color:var(--red)}.yellow{color:var(--yellow)}.blue{color:var(--blue)}
-.signal-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
-.signal{padding:13px 5px;text-align:center;border-radius:9px;background:#182438;font-size:11px;font-weight:bold;border:1px solid #344963;display:flex;flex-direction:column;gap:7px;align-items:center}.signal strong{font-size:20px}
-.signal.active-up{background:#103d34;border-color:var(--green);color:var(--green)}
-.signal.active-down{background:#3b202b;border-color:var(--red);color:var(--red)}
-.signal.active-wait{background:#40351e;border-color:var(--yellow);color:var(--yellow)}
-.chart{width:100%;height:360px}
-.small-chart{height:150px}
-.legend{display:flex;flex-wrap:wrap;gap:12px;font-size:10px;color:#aabbd0;margin-bottom:10px}
-.legend span{display:flex;align-items:center;gap:5px}
-.dot{width:8px;height:8px;border-radius:50%}
-.two{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}
-.quote{background:var(--panel2);border-radius:10px;padding:12px}
-.quote b{font-size:10px;color:var(--muted)}
-.quote strong{display:block;font-size:25px;margin-top:6px}
-.formgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}
-label{display:block;font-size:10px;color:var(--muted);margin-bottom:5px}
-input,select{width:100%;background:#0b1422;color:var(--white);border:1px solid #344963;border-radius:8px;padding:11px;font-size:14px}
-.actionrow{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
-.actionrow button{flex:1}
-.note{font-size:10px;line-height:1.5;color:#8293a9}
-table{width:100%;border-collapse:collapse;font-size:12px}
-td{padding:8px 3px;border-bottom:1px solid #24344b}
-td:last-child{text-align:right;font-weight:bold}
-.alertrow{display:flex;gap:9px;align-items:center;padding:8px 0;border-bottom:1px solid #24344b;font-size:12px}
-.pill{font-size:10px;border-radius:20px;padding:4px 7px;background:#263750;color:#b9cbe0}
-footer{text-align:center;color:#71839b;font-size:10px;padding:12px}
-@media(min-width:700px){body{padding:22px}.metrics{grid-template-columns:repeat(5,1fr)}.chart{height:490px}.small-chart{height:170px}.layout{display:grid;grid-template-columns:1.4fr 1fr;gap:12px}.layout .panel{height:fit-content}}
+:root{--bg:#070b16;--panel:#101a2b;--panel2:#17263b;--line:#293d59;--muted:#91a5c0;--white:#edf5ff;--green:#00df9a;--red:#ff536b;--yellow:#ffd04a;--blue:#32aaff;--purple:#b58cff}
+*{box-sizing:border-box}body{margin:0;padding:11px;background:radial-gradient(ellipse at top,#14213a 0,#070b16 55%);color:var(--white);font-family:Arial,sans-serif}main{max-width:1100px;margin:auto}
+header{display:flex;justify-content:space-between;align-items:center;gap:8px;margin:5px 0 12px}h1{font-size:19px;letter-spacing:1.3px;margin:0 0 5px}.sub{font-size:10px;color:var(--green)}
+button{border:1px solid #385474;background:#1b2c46;color:white;border-radius:10px;padding:11px 13px;font-weight:bold;cursor:pointer}button:active{transform:scale(.98)}
+.panel{background:linear-gradient(145deg,#121f33,#0e1727);border:1px solid var(--line);border-radius:14px;padding:12px;margin-bottom:10px;box-shadow:0 8px 24px #0004}.section{font-size:10px;color:#b9cbe2;letter-spacing:1.2px;margin:1px 0 10px;font-weight:bold}
+.top-grid{display:grid;grid-template-columns:1fr 1.2fr 1fr;gap:7px;margin-bottom:10px}.top-card{min-width:0;background:var(--panel2);border:1px solid #314966;border-radius:12px;padding:11px 8px;text-align:center}.top-card small{font-size:9px;color:var(--muted);font-weight:bold;letter-spacing:.5px}.top-card strong{display:block;font-size:clamp(17px,4vw,23px);margin:8px 0 6px;overflow-wrap:anywhere}.top-card.center{border-color:#98752c;background:linear-gradient(145deg,#2a251b,#17263b)}.top-card.bull{border-color:#087b62}.top-card.bear{border-color:#873748}
+.bar{height:6px;background:#26364d;border-radius:9px;overflow:hidden}.bar span{display:block;height:100%;width:0%;border-radius:9px;transition:width .25s}.bull .bar span{background:var(--green)}.bear .bar span{background:var(--red)}
+.green{color:var(--green)}.red{color:var(--red)}.yellow{color:var(--yellow)}.blue{color:var(--blue)}.muted{font-size:10px;color:var(--muted)}
+.chart-panel{padding:10px}.legend{display:flex;flex-wrap:wrap;gap:12px;font-size:9px;color:#aabbd0;margin-bottom:8px}.legend span{display:flex;align-items:center;gap:5px}.dot{width:7px;height:7px;border-radius:50%}.chart{width:100%;height:310px}.mini-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px}.mini-panel{min-width:0;padding:9px 7px}.mini-panel .section{font-size:9px;margin-bottom:5px}.small-chart{height:105px}.mini-value{font-size:13px;font-weight:bold;margin-bottom:4px}
+.bottom-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0}.bottom-card{background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:12px;text-align:center}.bottom-card small{font-size:9px;color:var(--muted);letter-spacing:.7px}.bottom-card strong{display:block;font-size:22px;margin-top:6px}.trade-buttons{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin:8px 0 12px}.trade-buttons button{font-size:17px;padding:16px 8px;border-radius:12px;letter-spacing:1px}.btn-up{background:linear-gradient(135deg,#087d61,#00bd83);border-color:#00e2a0}.btn-down{background:linear-gradient(135deg,#8d263c,#e3425b);border-color:#ff6378}.note{font-size:10px;line-height:1.5;color:#8293a9}.two{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.quote{background:var(--panel2);border-radius:10px;padding:11px}.quote b{font-size:10px;color:var(--muted)}.quote strong{display:block;font-size:23px;margin-top:6px}.formgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}label{display:block;font-size:10px;color:var(--muted);margin-bottom:5px}input,select{width:100%;background:#0b1422;color:var(--white);border:1px solid #344963;border-radius:8px;padding:11px;font-size:14px}.actionrow{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.actionrow button{flex:1}table{width:100%;border-collapse:collapse;font-size:12px}td{padding:8px 3px;border-bottom:1px solid #24344b}td:last-child{text-align:right;font-weight:bold}.alertrow{display:flex;gap:9px;align-items:center;padding:8px 0;border-bottom:1px solid #24344b;font-size:12px}.pill{font-size:10px;border-radius:20px;padding:4px 7px;background:#263750;color:#b9cbe0}footer{text-align:center;color:#71839b;font-size:10px;padding:12px}
+@media(min-width:760px){body{padding:20px}.chart{height:430px}.small-chart{height:125px}.mini-panel{padding:11px}.top-card{padding:14px}.lower-layout{display:grid;grid-template-columns:1.25fr .9fr;gap:10px}.lower-layout .panel{height:fit-content}}
+@media(max-width:370px){body{padding:7px}.top-card{padding:8px 5px}.top-card small{font-size:8px}.top-card strong{font-size:16px}.chart{height:270px}.small-chart{height:90px}.mini-panel{padding:7px 4px}}
 </style>
 </head>
 <body>
 <main>
-<header>
- <div><h1>BITCOIN RADAR PRO</h1><div class="sub" id="connection">● CONECTANDO DATOS...</div></div>
- <button onclick="updateAll()">ACTUALIZAR</button>
-</header>
+<header><div><h1>BITCOIN RADAR PRO</h1><div class="sub" id="connection">● CONECTANDO DATOS...</div></div><button onclick="updateAll()">ACTUALIZAR</button></header>
 
-<div class="metrics">
- <div class="metric"><small>BTC / USD ACTUAL</small><strong id="btcPrice">--</strong></div>
- <div class="metric"><small>PRECIO ESTIMADO EN 15 MIN</small><strong id="projectedPrice">--</strong><small id="projectedChange">--</small></div>
- <div class="metric"><small>SEÑAL TÉCNICA</small><strong id="mainSignal" class="yellow">INDECISO</strong></div>
- <div class="metric"><small>RSI 14</small><strong id="rsiValue">--</strong></div>
- <div class="metric"><small>CONTRATO CIERRA EN</small><strong id="timer">--:--</strong></div>
+<div class="top-grid">
+ <div class="top-card bull"><small>▲ ALCISTA</small><strong class="green" id="bullProb">--%</strong><div class="bar"><span id="bullBar"></span></div></div>
+ <div class="top-card center"><small>PREDICCIÓN · 15 MIN</small><strong class="yellow" id="projectedPrice">--</strong><small id="projectedChange">PRECIO ESTIMADO</small></div>
+ <div class="top-card bear"><small>▼ BAJISTA</small><strong class="red" id="bearProb">--%</strong><div class="bar"><span id="bearBar"></span></div></div>
 </div>
 
-<div class="layout">
-<div>
- <section class="panel">
-  <div class="section">RADAR DE DIRECCIÓN</div>
-  <div class="signal-grid">
-   <div class="signal active-down" id="downSignal">▼ BAJISTA <strong id="bearProb">--%</strong></div>
-   <div class="signal active-up" id="upSignal">▲ ALCISTA <strong id="bullProb">--%</strong></div>
-   <div class="signal active-wait" id="waitSignal">Ⅱ INDECISO <strong id="sideProb">--%</strong></div>
-  </div>
-  <p class="note" id="explanation">Esperando confirmación de indicadores.</p>
- </section>
+<section class="panel chart-panel">
+ <div class="section">BTC / USD · VELAS JAPONESAS · 1 MINUTO <span id="mainSignal" class="yellow">· INDECISO</span></div>
+ <div class="legend"><span><i class="dot" style="background:#ffd04a"></i>EMA 9</span><span><i class="dot" style="background:#32aaff"></i>EMA 21</span><span><i class="dot" style="background:#b58cff"></i>VWAP</span></div>
+ <div id="priceChart" class="chart"></div>
+ <p class="note" id="explanation">Esperando confirmación de indicadores.</p>
+</section>
 
- <section class="panel">
-  <div class="section">BTC · VELAS JAPONESAS · 1 MINUTO</div>
-  <div class="legend">
-   <span><i class="dot" style="background:#ffc857"></i>EMA 9</span>
-   <span><i class="dot" style="background:#36a3ff"></i>EMA 21</span>
-   <span><i class="dot" style="background:#c58cff"></i>VWAP</span>
-  </div>
-  <div id="priceChart" class="chart"></div>
- </section>
- <section class="panel"><div class="section">VOLUMEN</div><div id="volumeChart" class="chart small-chart"></div></section>
- <section class="panel"><div class="section">RSI 14</div><div id="rsiChart" class="chart small-chart"></div></section>
- <section class="panel"><div class="section">MACD</div><div id="macdChart" class="chart small-chart"></div></section>
+<div class="mini-grid">
+ <section class="panel mini-panel"><div class="section">RSI 14</div><div class="mini-value purple" id="rsiValue">--</div><div id="rsiChart" class="chart small-chart"></div></section>
+ <section class="panel mini-panel"><div class="section">MACD</div><div class="mini-value blue">MACD / SEÑAL</div><div id="macdChart" class="chart small-chart"></div></section>
+ <section class="panel mini-panel"><div class="section">VOLUMEN</div><div class="mini-value yellow">BTC</div><div id="volumeChart" class="chart small-chart"></div></section>
 </div>
 
+<div class="bottom-grid">
+ <div class="bottom-card"><small>TIEMPO RESTANTE · KALSHI 15M</small><strong class="yellow" id="timer">--:--</strong></div>
+ <div class="bottom-card"><small>PRECIO ACTUAL BTC/USD</small><strong class="blue" id="btcPrice">--</strong></div>
+</div>
+<div class="trade-buttons"><button class="btn-up" type="button" onclick="selectDirection('SUBE')">▲ SUBE</button><button class="btn-down" type="button" onclick="selectDirection('BAJA')">▼ BAJA</button></div>
+<div class="note" id="directionNote">Los botones son indicadores visuales; no envían órdenes a Kalshi.</div>
+
+<div class="lower-layout">
 <div>
  <section class="panel">
   <div class="section">MERCADO KALSHI · BTC 15 MINUTOS</div>
-  <div id="marketTitle" style="font-size:13px;font-weight:bold;margin-bottom:8px">Buscando contrato...</div>
-  <div class="muted" id="marketTicker">Ticker: --</div>
-  <div class="two" style="margin-top:10px">
-   <div class="quote"><b>YES · COMPRA</b><strong class="green" id="yesAsk">--¢</strong><span class="muted" id="yesBid">Bid: --</span></div>
-   <div class="quote"><b>NO · COMPRA</b><strong class="red" id="noAsk">--¢</strong><span class="muted" id="noBid">Bid: --</span></div>
-  </div>
-  <p class="note" id="marketMessage">Los precios se consultan directamente en la API pública de Kalshi.</p>
-  <div class="muted" id="strikeInfo"></div>
+  <div id="marketTitle" style="font-size:13px;font-weight:bold;margin-bottom:8px">Buscando contrato...</div><div class="muted" id="marketTicker">Ticker: --</div>
+  <div class="two" style="margin-top:10px"><div class="quote"><b>YES · COMPRA</b><strong class="green" id="yesAsk">--¢</strong><span class="muted" id="yesBid">Bid: --</span></div><div class="quote"><b>NO · COMPRA</b><strong class="red" id="noAsk">--¢</strong><span class="muted" id="noBid">Bid: --</span></div></div>
+  <p class="note" id="marketMessage">Los precios se consultan directamente en la API pública de Kalshi.</p><div class="muted" id="strikeInfo"></div>
  </section>
-
  <section class="panel">
   <div class="section">MI OPERACIÓN · SEGUIMIENTO MANUAL</div>
-  <div class="formgrid">
-   <div><label>LADO COMPRADO</label><select id="side"><option value="yes">YES</option><option value="no">NO</option></select></div>
-   <div><label>CONTRATOS</label><input id="quantity" type="number" min="1" step="1" value="1"></div>
-   <div><label>PRECIO DE ENTRADA (¢)</label><input id="entry" type="number" min="1" max="99" step="1" placeholder="Ej. 52"></div>
-   <div><label>OBJETIVO DE SALIDA (¢)</label><input id="target" type="number" min="1" max="99" step="1" placeholder="Ej. 70"></div>
-   <div><label>LÍMITE DE PÉRDIDA (¢)</label><input id="stop" type="number" min="1" max="99" step="1" placeholder="Ej. 40"></div>
-   <div><label>ALERTA SONORA</label><select id="sound"><option value="on">Activada</option><option value="off">Desactivada</option></select></div>
-  </div>
-  <div class="actionrow">
-   <button onclick="saveTrade()">GUARDAR OPERACIÓN</button>
-   <button onclick="clearTrade()">CERRAR / BORRAR</button>
-  </div>
-  <table style="margin-top:10px">
-   <tr><td>Precio actual de salida estimado</td><td id="currentExit">--</td></tr>
-   <tr><td>Ganancia / pérdida estimada</td><td id="pnl">--</td></tr>
-   <tr><td>Estado</td><td id="tradeStatus">Sin operación guardada</td></tr>
-  </table>
-  <p class="note">El cálculo es una estimación antes de comisiones y deslizamiento. Introduce tu entrada real. El panel no compra ni vende por ti.</p>
- </section>
-
- <section class="panel">
-  <div class="section">ALERTAS INTELIGENTES</div>
-  <div class="alertrow"><span class="pill">SEÑAL</span> Aviso cuando cambia SUBE / BAJA / ESPERAR</div>
-  <div class="alertrow"><span class="pill">OBJETIVO</span> Aviso al alcanzar el precio objetivo</div>
-  <div class="alertrow"><span class="pill">STOP</span> Aviso al alcanzar el límite de pérdida</div>
-  <div class="alertrow"><span class="pill">SALIDA</span> Aviso si se debilita la señal técnica</div>
-  <div class="actionrow"><button onclick="enableSound()">ACTIVAR SONIDO</button></div>
-  <p class="note" id="alertStatus">Las alertas iguales no se repiten en cada actualización. Se avisa al cambiar de condición.</p>
+  <div class="formgrid"><div><label>LADO COMPRADO</label><select id="side"><option value="yes">YES</option><option value="no">NO</option></select></div><div><label>CONTRATOS</label><input id="quantity" type="number" min="1" step="1" value="1"></div><div><label>PRECIO DE ENTRADA (¢)</label><input id="entry" type="number" min="1" max="99" step="1" placeholder="Ej. 52"></div><div><label>OBJETIVO DE SALIDA (¢)</label><input id="target" type="number" min="1" max="99" step="1" placeholder="Ej. 70"></div><div><label>LÍMITE DE PÉRDIDA (¢)</label><input id="stop" type="number" min="1" max="99" step="1" placeholder="Ej. 40"></div><div><label>ALERTA SONORA</label><select id="sound"><option value="on">Activada</option><option value="off">Desactivada</option></select></div></div>
+  <div class="actionrow"><button onclick="saveTrade()">GUARDAR OPERACIÓN</button><button onclick="clearTrade()">CERRAR / BORRAR</button></div>
+  <table style="margin-top:10px"><tr><td>Precio actual de salida estimado</td><td id="currentExit">--</td></tr><tr><td>Ganancia / pérdida estimada</td><td id="pnl">--</td></tr><tr><td>Estado</td><td id="tradeStatus">Sin operación guardada</td></tr></table>
+  <p class="note">Estimación antes de comisiones y deslizamiento. El panel no compra ni vende por ti.</p>
  </section>
 </div>
+<div>
+ <section class="panel"><div class="section">ALERTAS INTELIGENTES</div><div class="alertrow"><span class="pill">SEÑAL</span> Aviso cuando cambia SUBE / BAJA / ESPERAR</div><div class="alertrow"><span class="pill">OBJETIVO</span> Aviso al alcanzar el precio objetivo</div><div class="alertrow"><span class="pill">STOP</span> Aviso al alcanzar el límite de pérdida</div><div class="alertrow"><span class="pill">SALIDA</span> Aviso si se debilita la señal técnica</div><div class="actionrow"><button onclick="enableSound()">ACTIVAR SONIDO</button></div><p class="note" id="alertStatus">Las alertas iguales no se repiten en cada actualización.</p></section>
 </div>
-<footer>BTC desde Coinbase (Binance.US solo como respaldo). Kalshi se consulta por su API pública. El precio a 15 min y los porcentajes son estimaciones heurísticas, no probabilidades calibradas ni garantías. El precio de Coinbase puede diferir del índice BRTI usado para liquidar Kalshi.</footer>
+</div>
+<footer>BTC desde Coinbase (Binance.US solo como respaldo). Kalshi se consulta por su API pública. Precio proyectado y porcentajes heurísticos, no garantías. Coinbase puede diferir del índice BRTI usado para liquidar Kalshi.</footer>
 </main>
 
 <script>
@@ -615,19 +547,19 @@ const priceOptions = (el,h) => ({
  crosshair:{mode:LightweightCharts.CrosshairMode.Normal},
  handleScroll:true,handleScale:true
 });
-const pc=LightweightCharts.createChart($("priceChart"),priceOptions($("priceChart"),360));
+const pc=LightweightCharts.createChart($("priceChart"),priceOptions($("priceChart"),310));
 const candle=pc.addCandlestickSeries({upColor:"#00d69a",downColor:"#ff5268",borderUpColor:"#00d69a",borderDownColor:"#ff5268",wickUpColor:"#00d69a",wickDownColor:"#ff5268"});
 const e9=pc.addLineSeries({color:"#ffc857",lineWidth:2,title:"EMA 9"});
 const e21=pc.addLineSeries({color:"#36a3ff",lineWidth:2,title:"EMA 21"});
 const vw=pc.addLineSeries({color:"#c58cff",lineWidth:2,title:"VWAP"});
-const vc=LightweightCharts.createChart($("volumeChart"),priceOptions($("volumeChart"),150));
+const vc=LightweightCharts.createChart($("volumeChart"),priceOptions($("volumeChart"),105));
 const vol=vc.addHistogramSeries({priceFormat:{type:"volume"},priceScaleId:""});
 vc.priceScale("").applyOptions({scaleMargins:{top:.1,bottom:0}});
-const rc=LightweightCharts.createChart($("rsiChart"),priceOptions($("rsiChart"),150));
+const rc=LightweightCharts.createChart($("rsiChart"),priceOptions($("rsiChart"),105));
 const rsi=rc.addLineSeries({color:"#bd8aff",lineWidth:2,title:"RSI"});
 [70,50,30].forEach((p,i)=>rsi.createPriceLine({price:p,color:i===0?"#ff5268":i===1?"#71839c":"#00d69a",lineStyle:LightweightCharts.LineStyle.Dashed,title:String(p)}));
 rc.priceScale("right").applyOptions({autoScale:false,scaleMargins:{top:.1,bottom:.1}});
-const mc=LightweightCharts.createChart($("macdChart"),priceOptions($("macdChart"),150));
+const mc=LightweightCharts.createChart($("macdChart"),priceOptions($("macdChart"),105));
 const ml=mc.addLineSeries({color:"#36a3ff",lineWidth:2,title:"MACD"});
 const ms=mc.addLineSeries({color:"#ffc857",lineWidth:2,title:"Signal"});
 const mh=mc.addHistogramSeries({lastValueVisible:false});
@@ -665,21 +597,18 @@ function enableSound(){
 }
 function renderSignal(signal, probabilities){
  const label=signal==="SUBE"?"ALCISTA":signal==="BAJA"?"BAJISTA":"INDECISO";
- $("mainSignal").textContent=label;
+ $("mainSignal").textContent="· "+label;
  $("mainSignal").className=signal==="SUBE"?"green":signal==="BAJA"?"red":"yellow";
- $("upSignal").className="signal"+(signal==="SUBE"?" active-up":"");
- $("downSignal").className="signal"+(signal==="BAJA"?" active-down":"");
- $("waitSignal").className="signal"+(signal==="ESPERAR"?" active-wait":"");
  if(probabilities){
   $("bullProb").textContent=probabilities.bullish+"%";
   $("bearProb").textContent=probabilities.bearish+"%";
-  $("sideProb").textContent=probabilities.indecisive+"%";
+  $("bullBar").style.width=probabilities.bullish+"%";
+  $("bearBar").style.width=probabilities.bearish+"%";
  }
- if(lastAlertKey && signal!==lastAlertKey){
-  notifyOnce("signal:"+signal,"Cambio de señal","El radar cambió a "+label+".");
- }
+ if(lastAlertKey && signal!==lastAlertKey){notifyOnce("signal:"+signal,"Cambio de señal","El radar cambió a "+label+".");}
  if(signal!==lastAlertKey){lastAlertKey=signal;}
 }
+function selectDirection(side){ $("directionNote").textContent="Dirección seleccionada: "+side+". Es una referencia visual, no ejecuta ninguna operación."; }
 function parsePriceForSide(side){
  if(!marketData||!marketData.available)return null;
  return side==="yes"?marketData.yes_bid:marketData.no_bid;
@@ -793,7 +722,7 @@ async function updateAll(){
  finally{busy=false;}
 }
 function resizeCharts(){
- [[pc,"priceChart",360],[vc,"volumeChart",150],[rc,"rsiChart",150],[mc,"macdChart",150]].forEach(([chart,id,h])=>chart.applyOptions({width:$(id).clientWidth,height:h}));
+ [[pc,"priceChart",310],[vc,"volumeChart",105],[rc,"rsiChart",105],[mc,"macdChart",105]].forEach(([chart,id,h])=>chart.applyOptions({width:$(id).clientWidth,height:h}));
 }
 window.addEventListener("resize",resizeCharts);
 updateAll();
