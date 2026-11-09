@@ -1,489 +1,132 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-
-<title>Bitcoin Radar PRO by Jady</title>
-
-<script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
-
-<style>
-* {
-    box-sizing: border-box;
-}
-
-body {
-    margin: 0;
-    background: #080b14;
-    color: #f4f6ff;
-    font-family: Arial, sans-serif;
-}
-
-header {
-    padding: 20px;
-    text-align: center;
-    background: #101629;
-    border-bottom: 1px solid #28334e;
-}
-
-header h1 {
-    margin: 0;
-    color: #00e5ff;
-    font-size: 25px;
-    letter-spacing: 1px;
-}
-
-header p {
-    color: #8995b5;
-    font-size: 12px;
-}
-
-.container {
-    width: 100%;
-    max-width: 1100px;
-    margin: auto;
-    padding: 14px;
-}
-
-.grid {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 12px;
-}
-
-.card {
-    background: #11182a;
-    border: 1px solid #263653;
-    border-radius: 13px;
-    padding: 15px;
-    min-width: 0;
-}
-
-.label {
-    color: #8997b8;
-    font-size: 12px;
-    margin-bottom: 8px;
-}
-
-.value {
-    font-size: 23px;
-    font-weight: bold;
-    overflow-wrap: anywhere;
-}
-
-.price {
-    color: #00e5ff;
-    font-size: 29px;
-}
-
-.green {
-    color: #00e59b;
-}
-
-.red {
-    color: #ff5577;
-}
-
-.yellow {
-    color: #ffc857;
-}
-
-.status {
-    display: inline-block;
-    padding: 7px 11px;
-    border-radius: 20px;
-    background: #263653;
-    font-size: 12px;
-}
-
-.signal-box {
-    text-align: center;
-    margin-top: 13px;
-    padding: 20px;
-    border-radius: 14px;
-    background: #11182a;
-    border: 1px solid #263653;
-}
-
-.signal {
-    font-size: 34px;
-    font-weight: bold;
-    margin: 8px;
-}
-
-#chart {
-    height: 350px;
-    width: 100%;
-    margin-top: 12px;
-}
-
-.chart-card,
-.market-card {
-    margin-top: 13px;
-}
-
-.market-row {
-    display: flex;
-    justify-content: space-between;
-    gap: 10px;
-    padding: 9px 0;
-    border-bottom: 1px solid #263653;
-    font-size: 13px;
-}
-
-footer {
-    text-align: center;
-    color: #66728f;
-    font-size: 11px;
-    padding: 22px;
-}
-
-@media(max-width: 480px) {
-    .value {
-        font-size: 19px;
-    }
-
-    .price {
-        font-size: 24px;
-    }
-
-    #chart {
-        height: 290px;
-    }
-}
-</style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BTC Radar PRO - Live WebSocket</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Librería oficial TradingView Lightweight Charts para velas profesionales perfectas -->
+  <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    body { background-color: #0b0e14; color: #ffffff; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    .card-bg { background-color: #121824; border: 1px solid #1e293b; }
+  </style>
 </head>
+<body class="p-3 max-w-md mx-auto select-none pb-8">
 
-<body>
-
-<header>
-    <h1>₿ BITCOIN RADAR PRO</h1>
-    <p>BY JADY ♛ | KALSHI BTC 15 MIN</p>
-    <span class="status" id="connection">CONECTANDO...</span>
-</header>
-
-<div class="container">
-
-    <div class="grid">
-
-        <div class="card">
-            <div class="label">PRECIO BRTI</div>
-            <div class="value price" id="btcPrice">--</div>
-            <div class="label">Índice de referencia</div>
+  <!-- Header -->
+  <div class="flex items-center justify-between mb-3">
+    <div class="flex items-center gap-2">
+      <div class="w-8 h-8 rounded-full bg-amber-500/20 text-amber-500 flex items-center justify-center font-bold text-lg">₿</div>
+      <div>
+        <div class="flex items-center gap-1.5">
+          <span class="font-extrabold text-base tracking-wide">BTC Radar</span>
+          <span class="bg-fuchsia-600/30 text-fuchsia-400 text-[10px] font-bold px-1.5 py-0.5 rounded border border-fuchsia-500/40">PRO</span>
         </div>
-
-        <div class="card">
-            <div class="label">PROMEDIO 60 SEGUNDOS</div>
-            <div class="value" id="avg60">--</div>
-            <div class="label">Datos recibidos</div>
-        </div>
-
-        <div class="card">
-            <div class="label">PROMEDIO 15 MINUTOS</div>
-            <div class="value" id="avg15">--</div>
-            <div class="label">Promedio de ticks recibidos</div>
-        </div>
-
-        <div class="card">
-            <div class="label">FUERZA DE SEÑAL</div>
-            <div class="value" id="strength">0%</div>
-            <div class="label">Indicador técnico</div>
-        </div>
-
+        <p class="text-[10px] text-gray-400">Análisis en Tiempo Real • Coinbase</p>
+      </div>
     </div>
-
-    <div class="signal-box">
-        <div class="label">SEÑAL DEL RADAR</div>
-        <div class="signal yellow" id="signal">ESPERAR</div>
-        <div id="reason">Esperando datos suficientes</div>
+    <div class="flex items-center gap-2">
+      <div class="flex items-center gap-1.5 bg-emerald-950/60 text-emerald-400 text-xs px-2.5 py-1 rounded-full border border-emerald-500/30">
+        <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+        <span class="font-semibold text-[11px]">En Vivo</span>
+      </div>
+      <button class="w-8 h-8 rounded-full card-bg flex items-center justify-center text-gray-400 hover:text-white">
+        <i class="fa-solid fa-gear text-xs"></i>
+      </button>
     </div>
+  </div>
 
-    <div class="card chart-card">
-        <div class="label">GRÁFICA BRTI · VELAS DE 1 MINUTO</div>
-        <div id="chart"></div>
+  <!-- Prediction Probability Bars -->
+  <div class="grid grid-cols-3 gap-2 mb-3">
+    <div class="card-bg rounded-xl p-2.5 flex flex-col justify-between border-emerald-500/30 shadow-lg shadow-emerald-950/20">
+      <div class="flex items-center gap-1 text-[11px] font-bold text-emerald-400">
+        <i class="fa-solid fa-arrow-trend-up text-xs"></i> Alcista
+      </div>
+      <div class="text-xl font-black text-emerald-400 mt-1" id="prob-alcista">67.8%</div>
+      <div class="w-full bg-slate-800 h-1 rounded-full mt-1.5 overflow-hidden">
+        <div class="bg-emerald-400 h-full rounded-full" style="width: 67.8%"></div>
+      </div>
     </div>
-    
-    <div class="card market-card">
-        <div class="label">CONTRATO KALSHI BTC 15M</div>
-
-        <div class="market-row">
-            <span>Contrato</span>
-            <strong id="ticker">--</strong>
-        </div>
-
-        <div class="market-row">
-            <span>YES BID</span>
-            <strong id="yesBid">--</strong>
-        </div>
-
-        <div class="market-row">
-            <span>YES ASK</span>
-            <strong id="yesAsk">--</strong>
-        </div>
-
-        <div class="market-row">
-            <span>NO BID</span>
-            <strong id="noBid">--</strong>
-        </div>
-
-        <div class="market-row">
-            <span>NO ASK</span>
-            <strong id="noAsk">--</strong>
-        </div>
-
-        <div class="market-row">
-            <span>Último precio</span>
-            <strong id="lastPrice">--</strong>
-        </div>
-
-        <div class="market-row">
-            <span>Cierre del contrato</span>
-            <strong id="closeTime">--</strong>
-        </div>
+    <div class="card-bg rounded-xl p-2 text-center flex flex-col justify-center border-slate-800">
+      <span class="text-[9px] text-gray-400 font-medium">Predicción 15 min</span>
+      <div class="text-xs font-bold text-emerald-400 mt-0.5" id="pred-price">↑ 76,842.50</div>
+      <span class="text-[10px] text-emerald-400 font-semibold" id="pred-change">(+0.73%)</span>
     </div>
-
-    <div class="card market-card">
-        <div class="label">ESTADO DEL SISTEMA</div>
-        <div id="systemStatus">Iniciando...</div>
-        <div id="systemError" class="red"></div>
+    <div class="card-bg rounded-xl p-2.5 flex flex-col justify-between items-end border-rose-500/30 shadow-lg shadow-rose-950/20">
+      <div class="flex items-center gap-1 text-[11px] font-bold text-rose-400">
+        Bajista <i class="fa-solid fa-arrow-trend-down text-xs"></i>
+      </div>
+      <div class="text-xl font-black text-rose-400 mt-1" id="prob-bajista">32.2%</div>
+      <div class="w-full bg-slate-800 h-1 rounded-full mt-1.5 overflow-hidden flex justify-end">
+        <div class="bg-rose-500 h-full rounded-full" style="width: 32.2%"></div>
+      </div>
     </div>
+  </div>
 
-</div>
+  <!-- Timeframe Selector & Indicators Legend -->
+  <div class="flex items-center justify-between text-xs mb-2">
+    <div class="flex bg-slate-900 rounded-lg p-0.5 border border-slate-800">
+      <button class="px-2.5 py-1 text-[11px] rounded bg-purple-600 text-white font-semibold">1m</button>
+      <button class="px-2.5 py-1 text-[11px] text-gray-400 hover:text-white">3m</button>
+      <button class="px-2.5 py-1 text-[11px] text-gray-400 hover:text-white">5m</button>
+      <button class="px-2.5 py-1 text-[11px] text-gray-400 hover:text-white">15m</button>
+    </div>
+    <div class="flex items-center gap-2 text-[10px] text-gray-400">
+      <span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-cyan-400"></span>EMA 9</span>
+      <span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span>EMA 21</span>
+      <span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-fuchsia-400"></span>VWAP</span>
+    </div>
+  </div>
 
-<footer>
-    BITCOIN RADAR PRO BY JADY · SOLO LECTURA · SIN OPERACIONES AUTOMÁTICAS
-</footer>
+  <!-- Chart Card -->
+  <div class="card-bg rounded-xl p-3 mb-3 relative overflow-hidden">
+    <div class="flex justify-between items-center mb-1 text-xs">
+      <span class="text-gray-400 font-medium">BTC/USD</span>
+      <span class="font-mono text-emerald-400 font-bold bg-emerald-950/40 px-2 py-0.5 rounded border border-emerald-500/30" id="badge-price">76,734.32</span>
+    </div>
+    <div class="h-64 w-full" id="tradingview-chart"></div>
+  </div>
+    <!-- Technical Indicators Row -->
+  <div class="grid grid-cols-3 gap-2 mb-3">
+    <div class="card-bg rounded-xl p-2.5">
+      <div class="text-[10px] text-gray-400 font-medium">RSI (14)</div>
+      <div class="text-lg font-black text-cyan-400" id="rsi-val">72.4</div>
+      <div class="h-1.5 w-full bg-slate-800 rounded-full mt-1.5 overflow-hidden">
+        <div class="bg-cyan-400 h-full rounded-full" style="width: 72.4%"></div>
+      </div>
+    </div>
+    <div class="card-bg rounded-xl p-2.5">
+      <div class="text-[10px] text-gray-400 font-medium">MACD</div>
+      <div class="text-lg font-black text-emerald-400" id="macd-val">+124.6</div>
+      <div class="flex gap-0.5 h-2 items-end mt-1">
+        <div class="w-1/4 h-1 bg-emerald-500/40 rounded-sm"></div>
+        <div class="w-1/4 h-2 bg-emerald-500 rounded-sm"></div>
+        <div class="w-1/4 h-1.5 bg-emerald-500 rounded-sm"></div>
+        <div class="w-1/4 h-0.5 bg-emerald-500/30 rounded-sm"></div>
+      </div>
+    </div>
+    <div class="card-bg rounded-xl p-2.5">
+      <div class="text-[10px] text-gray-400 font-medium">Volumen</div>
+      <div class="text-lg font-black text-purple-400" id="vol-val">2.8K</div>
+      <div class="h-1.5 w-full bg-slate-800 rounded-full mt-1.5 overflow-hidden">
+        <div class="bg-purple-400 h-full rounded-full" style="width: 58%"></div>
+      </div>
+    </div>
+  </div>
 
-<script>
-const chartElement = document.getElementById("chart");
-
-const chart = LightweightCharts.createChart(chartElement, {
-    layout: {
-        background: { color: "#11182a" },
-        textColor: "#aab6d3"
-    },
-    grid: {
-        vertLines: { color: "#202c42" },
-        horzLines: { color: "#202c42" }
-    },
-    rightPriceScale: {
-        borderColor: "#34415c"
-    },
-    timeScale: {
-        borderColor: "#34415c",
-        timeVisible: true,
-        secondsVisible: false
-    }
-});
-
-const candleSeries = chart.addSeries(
-    LightweightCharts.CandlestickSeries,
-    {
-        upColor: "#00d99a",
-        downColor: "#ff5577",
-        borderUpColor: "#00d99a",
-        borderDownColor: "#ff5577",
-        wickUpColor: "#00d99a",
-        wickDownColor: "#ff5577"
-    }
-);
-
-const ema9Series = chart.addSeries(
-    LightweightCharts.LineSeries,
-    {
-        color: "#00e5ff",
-        lineWidth: 2,
-        title: "EMA 9"
-    }
-);
-
-const ema21Series = chart.addSeries(
-    LightweightCharts.LineSeries,
-    {
-        color: "#ffbd59",
-        lineWidth: 2,
-        title: "EMA 21"
-    }
-);
-
-function money(value) {
-    if (value === null || value === undefined) return "--";
-
-    return Number(value).toLocaleString("en-US", {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2
-    });
-}
-
-function cents(value) {
-    if (value === null || value === undefined) return "--";
-    return (Number(value) * 100).toFixed(1) + "¢";
-}
-
-function updateSignal(signal) {
-    const element = document.getElementById("signal");
-
-    element.textContent = signal;
-    element.className = "signal";
-
-    if (signal === "SUBE") {
-        element.classList.add("green");
-    } else if (signal === "BAJA") {
-        element.classList.add("red");
-    } else {
-        element.classList.add("yellow");
-    }
-}
-
-function updateChart(rows) {
-    if (!Array.isArray(rows)) return;
-
-    const valid = rows.filter(row =>
-        Number.isFinite(row.time) &&
-        Number.isFinite(row.open) &&
-        Number.isFinite(row.high) &&
-        Number.isFinite(row.low) &&
-        Number.isFinite(row.close)
-    );
-
-    if (!valid.length) return;
-
-    candleSeries.setData(valid.map(row => ({
-        time: row.time,
-        open: row.open,
-        high: row.high,
-        low: row.low,
-        close: row.close
-    })));
-
-    ema9Series.setData(valid
-        .filter(row => row.ema9 !== null)
-        .map(row => ({
-            time: row.time,
-            value: row.ema9
-        }))
-    );
-
-    ema21Series.setData(valid
-        .filter(row => row.ema21 !== null)
-        .map(row => ({
-            time: row.time,
-            value: row.ema21
-        }))
-    );
-}
-
-async function updateRadar() {
-    try {
-        const response = await fetch("/api/data", {
-            cache: "no-store"
-        });
-
-        if (!response.ok) {
-            throw new Error("Error consultando los datos");
-        }
-
-        const data = await response.json();
-
-        document.getElementById("btcPrice").textContent =
-            money(data.price);
-
-        document.getElementById("avg60").textContent =
-            money(data.average_60s);
-
-        document.getElementById("avg15").textContent =
-            money(data.average_15m);
-
-        document.getElementById("strength").textContent =
-            (data.strength || 0) + "%";
-
-        updateSignal(data.signal || "ESPERAR");
-
-        document.getElementById("reason").textContent =
-            data.reason || "Sin información";
-
-        document.getElementById("connection").textContent =
-            data.connected ? "BRTI EN VIVO" : "SIN TICKS RECIENTES";
-
-        document.getElementById("systemStatus").textContent =
-            data.connected
-                ? "Conectado y recibiendo datos"
-                : "Esperando datos BRTI";
-
-        document.getElementById("systemError").textContent =
-            data.error || data.warning || "";
-
-        updateChart(data.candles);
-
-    } catch (error) {
-        document.getElementById("systemStatus").textContent =
-            "Error actualizando el radar";
-
-        document.getElementById("systemError").textContent =
-            error.message;
-    }
-}
-
-async function updateKalshi() {
-    try {
-        const response = await fetch("/api/kalshi", {
-            cache: "no-store"
-        });
-
-        if (!response.ok) {
-            throw new Error("No se pudo consultar Kalshi");
-        }
-
-        const market = await response.json();
-
-        if (!market || market.error) {
-            document.getElementById("ticker").textContent =
-                "Sin contrato disponible";
-            return;
-        }
-
-        document.getElementById("ticker").textContent =
-            market.ticker || "--";
-
-        document.getElementById("yesBid").textContent =
-            cents(market.yes_bid);
-
-        document.getElementById("yesAsk").textContent =
-            cents(market.yes_ask);
-
-        document.getElementById("noBid").textContent =
-            cents(market.no_bid);
-
-        document.getElementById("noAsk").textContent =
-            cents(market.no_ask);
-
-        document.getElementById("lastPrice").textContent =
-            cents(market.last_price);
-
-        document.getElementById("closeTime").textContent =
-            market.close_time || "--";
-
-    } catch (error) {
-        document.getElementById("ticker").textContent =
-            "Error consultando Kalshi";
-    }
-}
-
-function resizeChart() {
-    chart.applyOptions({
-        width: chartElement.clientWidth
-    });
-}
-
-window.addEventListener("resize", resizeChart);
-
-updateRadar();
-updateKalshi();
-
-setInterval(updateRadar, 2000);
-setInterval(updateKalshi, 10000);
-</script>
-
-</body>
-</html>
+  <!-- Timer & Current Price -->
+  <div class="grid grid-cols-2 gap-2 mb-3">
+    <div class="card-bg rounded-xl p-3 flex flex-col justify-center">
+      <div class="flex items-center gap-1.5 text-xs text-gray-400 mb-0.5">
+        <i class="fa-regular fa-clock"></i>
+        <span>Tiempo Restante</span>
+      </div>
+      <div class="font-mono text-2xl font-black tracking-wider text-slate-100" id="timer">00:07:18</div>
+      <div class="w-full bg-slate-800 h-1 rounded-full mt-1.5 overflow-hidden">
+        <div class="bg-fuchsia-500 h-full rounded-full" style="width: 45%"></div>
+      </div>
+    </div>
+    <div class="card-bg rounded-xl p-3 flex flex-col justify-center">
+      <div class="flex items-center gap-1.5 text-xs text-
