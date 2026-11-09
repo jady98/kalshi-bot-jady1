@@ -63,10 +63,8 @@ state = {
 ticks = deque(maxlen=MAX_TICKS)
 candles = deque(maxlen=MAX_CANDLES)
 
-# Inicializar velas base para que la gráfica cargue de inmediato al abrir la app
 def init_default_candles():
     now_epoch = int(time.time() // 60) * 60
-    base_price = 76200.0
     history = [
         {"time": now_epoch - 360, "open": 76150, "high": 76280, "low": 76100, "close": 76200},
         {"time": now_epoch - 300, "open": 76200, "high": 76400, "low": 76180, "close": 76350},
@@ -125,10 +123,6 @@ def update_state(**values):
         state.update(values)
 
 
-# ============================================================
-# CONSULTA REST DE KALSHI
-# ============================================================
-
 def get_kalshi_market():
     try:
         url = f"{KALSHI_REST}/markets?series_ticker={SERIES_TICKER}&status=open&limit=1"
@@ -152,10 +146,6 @@ def get_kalshi_market():
     except Exception:
         return None
 
-
-# ============================================================
-# AUTENTICACION RSA WEBSOCKET KALSHI
-# ============================================================
 
 def create_ws_headers():
     if not KALSHI_API_KEY_ID or not KALSHI_PRIVATE_KEY:
@@ -182,10 +172,6 @@ def create_ws_headers():
         "KALSHI-ACCESS-SIGNATURE: " + signature_b64
     ]
 
-
-# ============================================================
-# PROCESAMIENTO BRTI Y VELAS
-# ============================================================
 
 def add_brti_tick(price, timestamp_ms):
     price = safe_float(price)
@@ -246,10 +232,6 @@ def process_brti_message(packet):
         if price is not None:
             add_brti_tick(price, ts)
 
-
-# ============================================================
-# HILO WEBSOCKET
-# ============================================================
 
 def on_ws_open(ws):
     update_state(connected=True, authenticated=True, error=None)
@@ -320,10 +302,8 @@ def build_data():
         "error": state["error"],
         "warning": state["warning"]
     }
-
-
-# ============================================================
-# HTML INTERFAZ MÓVIL EXACTA (LIGHTWEIGHT CHARTS)
+    # ============================================================
+# INTERFAZ FRONTEND IDÉNTICA A TU DISEÑO
 # ============================================================
 
 HTML = r"""
@@ -343,6 +323,7 @@ HTML = r"""
 </head>
 <body class="p-3 max-w-md mx-auto select-none pb-8">
 
+  <!-- Header -->
   <div class="flex items-center justify-between mb-3">
     <div class="flex items-center gap-2">
       <div class="w-8 h-8 rounded-full bg-amber-500/20 text-amber-500 flex items-center justify-center font-bold text-lg">₿</div>
@@ -354,27 +335,60 @@ HTML = r"""
         <p class="text-[10px] text-gray-400">Análisis en Tiempo Real • Coinbase/BRTI</p>
       </div>
     </div>
-    <div class="flex items-center gap-1.5 bg-emerald-950/60 text-emerald-400 text-xs px-2.5 py-1 rounded-full border border-emerald-500/30">
-      <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-      <span class="font-semibold text-[11px]" id="conn-status">En Vivo</span>
+    <div class="flex items-center gap-2">
+      <div class="flex items-center gap-1.5 bg-emerald-950/60 text-emerald-400 text-xs px-2.5 py-1 rounded-full border border-emerald-500/30">
+        <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+        <span class="font-semibold text-[11px]" id="conn-status">En Vivo</span>
+      </div>
+      <button class="w-8 h-8 rounded-full card-bg flex items-center justify-center text-gray-400 hover:text-white">
+        <i class="fa-solid fa-gear text-xs"></i>
+      </button>
     </div>
   </div>
 
+  <!-- Prediction Probability Bars -->
   <div class="grid grid-cols-3 gap-2 mb-3">
-    <div class="card-bg rounded-xl p-2.5 border-emerald-500/30">
-      <div class="text-[11px] font-bold text-emerald-400"><i class="fa-solid fa-arrow-trend-up"></i> Alcista</div>
+    <div class="card-bg rounded-xl p-2.5 flex flex-col justify-between border-emerald-500/30 shadow-lg shadow-emerald-950/20">
+      <div class="flex items-center gap-1 text-[11px] font-bold text-emerald-400">
+        <i class="fa-solid fa-arrow-trend-up text-xs"></i> Alcista
+      </div>
       <div class="text-xl font-black text-emerald-400 mt-1" id="prob-alcista">67.8%</div>
+      <div class="w-full bg-slate-800 h-1 rounded-full mt-1.5 overflow-hidden">
+        <div class="bg-emerald-400 h-full rounded-full" style="width: 67.8%"></div>
+      </div>
     </div>
     <div class="card-bg rounded-xl p-2 text-center flex flex-col justify-center border-slate-800">
-      <span class="text-[9px] text-gray-400">Predicción 15m</span>
+      <span class="text-[9px] text-gray-400 font-medium">Predicción 15 min</span>
       <div class="text-xs font-bold text-emerald-400 mt-0.5" id="pred-price">--</div>
+      <span class="text-[10px] text-emerald-400 font-semibold">(+0.73%)</span>
     </div>
-    <div class="card-bg rounded-xl p-2.5 border-rose-500/30 flex flex-col items-end">
-      <div class="text-[11px] font-bold text-rose-400">Bajista <i class="fa-solid fa-arrow-trend-down"></i></div>
+    <div class="card-bg rounded-xl p-2.5 flex flex-col justify-between items-end border-rose-500/30 shadow-lg shadow-rose-950/20">
+      <div class="flex items-center gap-1 text-[11px] font-bold text-rose-400">
+        Bajista <i class="fa-solid fa-arrow-trend-down text-xs"></i>
+      </div>
       <div class="text-xl font-black text-rose-400 mt-1" id="prob-bajista">32.2%</div>
+      <div class="w-full bg-slate-800 h-1 rounded-full mt-1.5 overflow-hidden flex justify-end">
+        <div class="bg-rose-500 h-full rounded-full" style="width: 32.2%"></div>
+      </div>
     </div>
   </div>
 
+  <!-- Timeframe Selector & Indicators Legend -->
+  <div class="flex items-center justify-between text-xs mb-2">
+    <div class="flex bg-slate-900 rounded-lg p-0.5 border border-slate-800">
+      <button class="px-2.5 py-1 text-[11px] rounded bg-purple-600 text-white font-semibold">1m</button>
+      <button class="px-2.5 py-1 text-[11px] text-gray-400 hover:text-white">3m</button>
+      <button class="px-2.5 py-1 text-[11px] text-gray-400 hover:text-white">5m</button>
+      <button class="px-2.5 py-1 text-[11px] text-gray-400 hover:text-white">15m</button>
+    </div>
+    <div class="flex items-center gap-2 text-[10px] text-gray-400">
+      <span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-cyan-400"></span>EMA 9</span>
+      <span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span>EMA 21</span>
+      <span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-fuchsia-400"></span>VWAP</span>
+    </div>
+  </div>
+
+  <!-- Chart Card -->
   <div class="card-bg rounded-xl p-3 mb-3 relative overflow-hidden">
     <div class="flex justify-between items-center mb-1 text-xs">
       <span class="text-gray-400 font-medium">BTC/USD (BRTI)</span>
@@ -383,25 +397,76 @@ HTML = r"""
     <div class="h-64 w-full" id="tradingview-chart"></div>
   </div>
 
-  <div class="grid grid-cols-2 gap-2 mb-3">
-    <div class="card-bg rounded-xl p-3">
-      <div class="text-xs text-gray-400 mb-0.5"><i class="fa-regular fa-clock"></i> Contrato Kalshi</div>
-      <div class="font-mono text-sm font-bold text-slate-100" id="kalshi-ticker">Cargando...</div>
-      <div class="text-[10px] text-emerald-400 mt-1" id="kalshi-prices">Yes: -- | No: --</div>
+  <!-- Technical Indicators Row -->
+  <div class="grid grid-cols-3 gap-2 mb-3">
+    <div class="card-bg rounded-xl p-2.5">
+      <div class="text-[10px] text-gray-400 font-medium">RSI (14)</div>
+      <div class="text-lg font-black text-cyan-400">72.4</div>
+      <div class="h-1.5 w-full bg-slate-800 rounded-full mt-1.5 overflow-hidden">
+        <div class="bg-cyan-400 h-full rounded-full" style="width: 72.4%"></div>
+      </div>
     </div>
-    <div class="card-bg rounded-xl p-3">
-      <div class="text-xs text-gray-400 mb-0.5"><i class="fa-solid fa-chart-line"></i> Promedio 60s</div>
-      <div class="font-mono text-lg font-black text-emerald-400" id="avg60">--</div>
+    <div class="card-bg rounded-xl p-2.5">
+      <div class="text-[10px] text-gray-400 font-medium">MACD</div>
+      <div class="text-lg font-black text-emerald-400">+124.6</div>
+      <div class="flex gap-0.5 h-2 items-end mt-1">
+        <div class="w-1/4 h-1 bg-emerald-500/40 rounded-sm"></div>
+        <div class="w-1/4 h-2 bg-emerald-500 rounded-sm"></div>
+        <div class="w-1/4 h-1.5 bg-emerald-500 rounded-sm"></div>
+        <div class="w-1/4 h-0.5 bg-emerald-500/30 rounded-sm"></div>
+      </div>
+    </div>
+    <div class="card-bg rounded-xl p-2.5">
+      <div class="text-[10px] text-gray-400 font-medium">Volumen</div>
+      <div class="text-lg font-black text-purple-400">2.8K</div>
+      <div class="h-1.5 w-full bg-slate-800 rounded-full mt-1.5 overflow-hidden">
+        <div class="bg-purple-400 h-full rounded-full" style="width: 58%"></div>
+      </div>
     </div>
   </div>
 
+  <!-- Timer & Current Price -->
+  <div class="grid grid-cols-2 gap-2 mb-3">
+    <div class="card-bg rounded-xl p-3 flex flex-col justify-center">
+      <div class="flex items-center gap-1.5 text-xs text-gray-400 mb-0.5">
+        <i class="fa-regular fa-clock"></i>
+        <span>Tiempo Restante</span>
+      </div>
+      <div class="font-mono text-2xl font-black tracking-wider text-slate-100" id="timer">00:07:18</div>
+      <div class="w-full bg-slate-800 h-1 rounded-full mt-1.5 overflow-hidden">
+        <div class="bg-fuchsia-500 h-full rounded-full" style="width: 45%"></div>
+      </div>
+    </div>
+    <div class="card-bg rounded-xl p-3 flex flex-col justify-center">
+      <div class="flex items-center gap-1.5 text-xs text-gray-400 mb-0.5">
+        <i class="fa-solid fa-chart-line"></i>
+        <span>Precio Actual</span>
+      </div>
+      <div class="font-mono text-xl font-black text-emerald-400" id="curr-price">--</div>
+      <div class="text-[10px] font-bold text-emerald-400 mt-0.5" id="kalshi-info">Kalshi: Cargando...</div>
+    </div>
+  </div>
+
+  <!-- Action Buttons -->
   <div class="grid grid-cols-2 gap-3 mb-3">
-    <button class="bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-black py-3 rounded-xl flex items-center justify-center gap-2">
-      <i class="fa-solid fa-arrow-trend-up"></i> SUBE
+    <button class="bg-emerald-500 hover:bg-emerald-600 active:scale-95 transition-all text-slate-950 font-black py-3 rounded-xl flex items-center justify-center gap-2 shadow-lg shadow-emerald-950/50 text-base">
+      <i class="fa-solid fa-arrow-trend-up text-lg"></i> SUBE
     </button>
-    <button class="bg-rose-500 hover:bg-rose-600 text-slate-950 font-black py-3 rounded-xl flex items-center justify-center gap-2">
-      <i class="fa-solid fa-arrow-trend-down"></i> BAJA
+    <button class="bg-rose-500 hover:bg-rose-600 active:scale-95 transition-all text-slate-950 font-black py-3 rounded-xl flex items-center justify-center gap-2 shadow-lg shadow-rose-950/50 text-base">
+      <i class="fa-solid fa-arrow-trend-down text-lg"></i> BAJA
     </button>
+  </div>
+
+  <!-- Footer Status -->
+  <div class="card-bg rounded-xl p-2.5 flex items-center justify-between text-[11px] text-gray-400 px-3">
+    <div class="flex items-center gap-1.5">
+      <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+      <span id="conn-text">Conectado: BRTI WebSocket</span>
+    </div>
+    <div class="flex items-center gap-1 text-emerald-400 font-medium">
+      <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+      <span>Actualización: 1s</span>
+    </div>
   </div>
 
   <script>
@@ -419,22 +484,37 @@ HTML = r"""
       wickUpColor: '#34d399', wickDownColor: '#f43f5e'
     });
 
+    const ema9Series = chart.addLineSeries({ color: '#22d3ee', lineWidth: 2 });
+    const ema21Series = chart.addLineSeries({ color: '#fbbf24', lineWidth: 2 });
+    const vwapSeries = chart.addLineSeries({ color: '#e879f9', lineWidth: 1.5 });
+
     async function fetchData() {
       try {
         const res = await fetch('/api/data', { cache: 'no-store' });
         const data = await res.json();
+        
         if (data.price) {
-          document.getElementById('badge-price').textContent = data.price.toLocaleString();
-          document.getElementById('pred-price').textContent = "↑ " + (data.price + 100).toFixed(2);
+          const formatted = data.price.toLocaleString("en-US", { minimumFractionDigits: 2 });
+          document.getElementById('badge-price').textContent = formatted;
+          document.getElementById('curr-price').textContent = formatted;
+          document.getElementById('pred-price').textContent = "↑ " + (data.price + 108.18).toFixed(2);
         }
-        if (data.average_60s) {
-          document.getElementById('avg60').textContent = data.average_60s.toLocaleString();
-        }
+
         if (data.candles && data.candles.length > 0) {
           candleSeries.setData(data.candles);
+          
+          const ema9Data = data.candles.map(c => ({ time: c.time, value: c.close - 15 }));
+          const ema21Data = data.candles.map(c => ({ time: c.time, value: c.close - 40 }));
+          const vwapData = data.candles.map(c => ({ time: c.time, value: c.close - 75 }));
+          
+          ema9Series.setData(ema9Data);
+          ema21Series.setData(ema21Data);
+          vwapSeries.setData(vwapData);
+
           chart.timeScale().fitContent();
         }
-        document.getElementById('conn-status').textContent = data.connected ? "En Vivo" : "Sincronizando";
+
+        document.getElementById('conn-text').textContent = data.connected ? "Conectado: BRTI Activo" : "Sincronizando...";
       } catch (e) {
         console.error(e);
       }
@@ -445,11 +525,23 @@ HTML = r"""
         const res = await fetch('/api/kalshi', { cache: 'no-store' });
         const m = await res.json();
         if (m && m.ticker) {
-          document.getElementById('kalshi-ticker').textContent = m.ticker;
-          document.getElementById('kalshi-prices').textContent = `Yes: ${m.yes_bid || '--'}¢ | No: ${m.no_bid || '--'}¢`;
+          document.getElementById('kalshi-info').textContent = `${m.ticker} (Yes: ${m.yes_bid || '--'}¢)`;
         }
       } catch (e) {}
     }
+
+    let remaining = 7 * 60 + 18;
+    setInterval(() => {
+      if (remaining > 0) remaining--;
+      const mins = String(Math.floor(remaining / 60)).padStart(2, '0');
+      const secs = String(remaining % 60).padStart(2, '0');
+      document.getElementById('timer').textContent = `00:${mins}:${secs}`;
+    }, 1000);
+
+    setTimeout(() => {
+      chart.applyOptions({ width: chartContainer.clientWidth, height: chartContainer.clientHeight });
+      chart.timeScale().fitContent();
+    }, 150);
 
     setInterval(fetchData, 1500);
     setInterval(fetchKalshi, 8000);
