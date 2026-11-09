@@ -129,4 +129,172 @@
       </div>
     </div>
     <div class="card-bg rounded-xl p-3 flex flex-col justify-center">
-      <div class="flex items-center gap-1.5 text-xs text-
+      <div class="flex items-center gap-1.5 text-xs text-gray-400 mb-0.5">
+        <i class="fa-solid fa-chart-line"></i>
+        <span>Precio Actual</span>
+      </div>
+      <div class="font-mono text-xl font-black text-emerald-400" id="curr-price">76,734.32</div>
+      <div class="text-[10px] font-bold text-emerald-400 mt-0.5" id="curr-delta">+482.17 (+0.63%)</div>
+    </div>
+  </div>
+
+  <!-- Action Buttons -->
+  <div class="grid grid-cols-2 gap-3 mb-3">
+    <button class="bg-emerald-500 hover:bg-emerald-600 active:scale-95 transition-all text-slate-950 font-black py-3 rounded-xl flex items-center justify-center gap-2 shadow-lg shadow-emerald-950/50 text-base">
+      <i class="fa-solid fa-arrow-trend-up text-lg"></i> SUBE
+    </button>
+    <button class="bg-rose-500 hover:bg-rose-600 active:scale-95 transition-all text-slate-950 font-black py-3 rounded-xl flex items-center justify-center gap-2 shadow-lg shadow-rose-950/50 text-base">
+      <i class="fa-solid fa-arrow-trend-down text-lg"></i> BAJA
+    </button>
+  </div>
+
+  <!-- Footer Status -->
+  <div class="card-bg rounded-xl p-2.5 flex items-center justify-between text-[11px] text-gray-400 px-3">
+    <div class="flex items-center gap-1.5">
+      <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+      <span>Conectado: Coinbase</span>
+    </div>
+    <div class="flex items-center gap-1 text-emerald-400 font-medium">
+      <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+      <span>Actualización: 1s</span>
+    </div>
+  </div>
+
+  <script>
+    // Configuración del Gráfico de Velas Reales (Lightweight Charts)
+    const chartContainer = document.getElementById('tradingview-chart');
+    const chart = LightweightCharts.createChart(chartContainer, {
+      layout: {
+        background: { color: '#121824' },
+        textColor: '#94a3b8',
+      },
+      grid: {
+        vertLines: { color: '#1e293b' },
+        horzLines: { color: '#1e293b' },
+      },
+      rightPriceScale: {
+        borderColor: '#1e293b',
+      },
+      timeScale: {
+        borderColor: '#1e293b',
+        timeVisible: true,
+        secondsVisible: false,
+      },
+    });
+
+    const candleSeries = chart.addCandlestickSeries({
+      upColor: '#34d399',
+      downColor: '#f43f5e',
+      borderUpColor: '#34d399',
+      borderDownColor: '#f43f5e',
+      wickUpColor: '#34d399',
+      wickDownColor: '#f43f5e',
+    });
+
+    const ema9Series = chart.addLineSeries({ color: '#22d3ee', lineWidth: 2 });
+    const ema21Series = chart.addLineSeries({ color: '#fbbf24', lineWidth: 2 });
+    const vwapSeries = chart.addLineSeries({ color: '#e879f9', lineWidth: 1.5 });
+
+    const initialData = [
+      { time: 1730000000, open: 76150, high: 76250, low: 76100, close: 76200 },
+      { time: 1730000060, open: 76200, high: 76400, low: 76180, close: 76350 },
+      { time: 1730000120, open: 76350, high: 76380, low: 76250, close: 76280 },
+      { time: 1730000180, open: 76280, high: 76550, low: 76270, close: 76520 },
+      { time: 1730000240, open: 76520, high: 76530, low: 76420, close: 76480 },
+      { time: 1730000300, open: 76480, high: 76720, low: 76450, close: 76700 },
+      { time: 1730000360, open: 76700, high: 76780, low: 76650, close: 76734.32 },
+    ];
+
+    candleSeries.setData(initialData);
+    ema9Series.setData([
+      { time: 1730000000, value: 76120 },
+      { time: 1730000060, value: 76250 },
+      { time: 1730000120, value: 76300 },
+      { time: 1730000180, value: 76400 },
+      { time: 1730000240, value: 76450 },
+      { time: 1730000300, value: 76580 },
+      { time: 1730000360, value: 76650 }
+    ]);
+    ema21Series.setData([
+      { time: 1730000000, value: 76050 },
+      { time: 1730000060, value: 76150 },
+      { time: 1730000120, value: 76220 },
+      { time: 1730000180, value: 76310 },
+      { time: 1730000240, value: 76380 },
+      { time: 1730000300, value: 76490 },
+      { time: 1730000360, value: 76570 }
+    ]);
+    vwapSeries.setData([
+      { time: 1730000000, value: 75980 },
+      { time: 1730000060, value: 76050 },
+      { time: 1730000120, value: 76120 },
+      { time: 1730000180, value: 76200 },
+      { time: 1730000240, value: 76280 },
+      { time: 1730000300, value: 76350 },
+      { time: 1730000360, value: 76420 }
+    ]);
+
+    chart.timeScale().fitContent();
+
+    let remaining = 7 * 60 + 18;
+    setInterval(() => {
+      if (remaining > 0) remaining--;
+      const mins = String(Math.floor(remaining / 60)).padStart(2, '0');
+      const secs = String(remaining % 60).padStart(2, '0');
+      document.getElementById('timer').textContent = `00:${mins}:${secs}`;
+    }, 1000);
+
+    const ws = new WebSocket('wss://ws-feed.exchange.coinbase.com');
+
+    ws.onopen = () => {
+      ws.send(JSON.stringify({
+        type: 'subscribe',
+        product_ids: ['BTC-USD'],
+        channels: ['ticker']
+      }));
+    };
+
+    let lastCandleTime = Math.floor(Date.now() / 1000);
+    let currentOpen = 76700;
+    let currentHigh = 76780;
+    let currentLow = 76650;
+
+    ws.onmessage = (event) => {
+      const response = JSON.parse(event.data);
+      if (response.type === 'ticker' && response.price) {
+        const price = parseFloat(response.price);
+        const formattedPrice = price.toFixed(2);
+
+        document.getElementById('curr-price').textContent = formattedPrice;
+        document.getElementById('badge-price').textContent = formattedPrice;
+        document.getElementById('pred-price').textContent = `↑ ${(price + 108.18).toFixed(2)}`;
+
+        const nowTime = Math.floor(Date.now() / 1000);
+        const candleTime = Math.floor(nowTime / 60) * 60;
+
+        if (candleTime > lastCandleTime) {
+          lastCandleTime = candleTime;
+          currentOpen = price;
+          currentHigh = price;
+          currentLow = price;
+        } else {
+          if (price > currentHigh) currentHigh = price;
+          if (price < currentLow) currentLow = price;
+        }
+
+        candleSeries.update({
+          time: candleTime,
+          open: currentOpen,
+          high: currentHigh,
+          low: currentLow,
+          close: price
+        });
+      }
+    };
+
+    window.addEventListener('resize', () => {
+      chart.applyOptions({ width: chartContainer.clientWidth });
+    });
+  </script>
+</body>
+</html>
