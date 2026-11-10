@@ -1,4 +1,3 @@
-
 import os
 import time
 import threading
@@ -261,11 +260,20 @@ def start_worker():
     with lock:
         if worker_started:
             return
-
         worker_started = True
 
+    def runner():
+        global worker_started
+        try:
+            background_worker()
+        except Exception:
+            log.exception("El actualizador terminó inesperadamente")
+        finally:
+            with lock:
+                worker_started = False
+
     threading.Thread(
-        target=background_worker,
+        target=runner,
         daemon=True,
         name="BTC-RADAR"
     ).start()
@@ -481,8 +489,29 @@ def health():
     })
 
 
+@app.route("/api/coinbase-test")
+def coinbase_test():
+    try:
+        price = coinbase_price()
+        return jsonify({
+            "ok": True,
+            "provider": "Coinbase Exchange",
+            "product": PRODUCT,
+            "price": price,
+            "checked_at": int(time.time())
+        })
+    except Exception as exc:
+        log.exception("Error conectando con Coinbase")
+        return jsonify({
+            "ok": False,
+            "provider": "Coinbase Exchange",
+            "error": str(exc)
+        }), 502
+
+
 @app.route("/api/data")
 def api_data():
+    start_worker()
     with lock:
         data = [c.copy() for c in candles]
         price = current_price
@@ -495,11 +524,11 @@ def api_data():
     fresh = age is not None and age < 20
 
     return jsonify({
-        "connected": bool(is_connected and fresh),
+            "connected": bool(is_connected and fresh),
         "provider": source if fresh and is_connected else "Desconectado",
         "price": round(price, 2) if price else None,
         "updated": age,
-        "error": error,
+        "error": error or ("Esperando respuesta de Coinbase" if not fresh else ""),
         "candles": data,
         "analysis": analyze(data),
         "forecast": forecast_15m(data),
@@ -1019,4 +1048,4 @@ if __name__ == "__main__":
         host="0.0.0.0",
         port=int(os.environ.get("PORT",10000)),
         debug=False
-)
+    )
