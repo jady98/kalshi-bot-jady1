@@ -5,6 +5,8 @@ import logging
 from datetime import datetime, timezone, timedelta
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 from flask import Flask, jsonify, render_template_string
 
 app = Flask(__name__)
@@ -14,7 +16,7 @@ log = logging.getLogger("BTC_RADAR")
 COINBASE = "https://api.exchange.coinbase.com"
 KRAKEN = "https://api.kraken.com/0"
 PRODUCT = "BTC-USD"
-POLL_SECONDS = 3
+POLL_SECONDS = 1
 MAX_CANDLES = 300
 
 lock = threading.RLock()
@@ -27,6 +29,19 @@ last_error = ""
 worker_started = False
 
 session = requests.Session()
+retry = Retry(
+    total=2,
+    connect=2,
+    read=2,
+    status=2,
+    backoff_factor=0.25,
+    status_forcelist=(429, 500, 502, 503, 504),
+    allowed_methods=frozenset(["GET"]),
+    respect_retry_after_header=False
+)
+adapter = HTTPAdapter(max_retries=retry, pool_connections=4, pool_maxsize=4)
+session.mount("https://", adapter)
+session.mount("http://", adapter)
 session.headers.update({
     "User-Agent": "BTC-Radar-PRO/4.0",
     "Accept": "application/json"
@@ -34,9 +49,9 @@ session.headers.update({
 
 
 def get_json(url, params=None, timeout=8):
-    r = session.get(url, params=params, timeout=timeout)
-    r.raise_for_status()
-    return r.json()
+    response = session.get(url, params=params, timeout=(3, timeout))
+    response.raise_for_status()
+    return response.json()
 
 
 def load_coinbase():
@@ -239,19 +254,25 @@ def update_price():
 
 
 def background_worker():
+    """Actualiza el precio en segundo plano con un ciclo estable de 1 segundo."""
     load_history()
+    next_tick = time.monotonic()
 
     while True:
         try:
             if not candles:
                 load_history()
-
             update_price()
-
         except Exception:
             log.exception("Error actualizando BTC")
 
-        time.sleep(POLL_SECONDS)
+        next_tick += POLL_SECONDS
+        delay = next_tick - time.monotonic()
+        if delay > 0:
+            time.sleep(delay)
+        else:
+            # Evita acumular ciclos si un proveedor tarda demasiado.
+            next_tick = time.monotonic()
 
 
 def start_worker():
@@ -493,26 +514,30 @@ def health():
 def coinbase_test():
     try:
         price = coinbase_price()
-        return jsonify({
+        response = jsonify({
             "ok": True,
             "provider": "Coinbase Exchange",
             "product": PRODUCT,
             "price": price,
             "checked_at": int(time.time())
         })
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        return response
     except Exception as exc:
         log.exception("Error conectando con Coinbase")
-        return jsonify({
+        response = jsonify({
             "ok": False,
             "provider": "Coinbase Exchange",
             "error": str(exc)
-        }), 502
+        })
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        return response, 502
 
 
 @app.route("/api/data")
 def api_data():
     start_worker()
-    with lock:
+        with lock:
         data = [c.copy() for c in candles]
         price = current_price
         updated = last_update
@@ -523,8 +548,8 @@ def api_data():
     age = round(time.time() - updated, 1) if updated else None
     fresh = age is not None and age < 20
 
-    return jsonify({
-            "connected": bool(is_connected and fresh),
+    response = jsonify({
+        "connected": bool(is_connected and fresh),
         "provider": source if fresh and is_connected else "Desconectado",
         "price": round(price, 2) if price else None,
         "updated": age,
@@ -534,6 +559,9 @@ def api_data():
         "forecast": forecast_15m(data),
         "server_time": int(time.time())
     })
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    return response
 
 
 PAGE = r"""
@@ -1033,7 +1061,7 @@ window.addEventListener("resize",()=>{
 refresh();
 updateTimer();
 
-setInterval(refresh,3000);
+setInterval(refresh,1000);
 setInterval(updateTimer,250);
 
 </script>
@@ -1048,4 +1076,4 @@ if __name__ == "__main__":
         host="0.0.0.0",
         port=int(os.environ.get("PORT",10000)),
         debug=False
-    )
+)
