@@ -1,4 +1,5 @@
 import json
+import math
 import threading
 import time
 from collections import deque
@@ -9,9 +10,12 @@ from flask import Flask, jsonify, render_template_string
 
 app = Flask(__name__)
 
-# ==================================================
-# CONFIGURACION
-# ==================================================
+# ============================================================
+# BITCOIN RADAR LIVE - COINBASE
+# Datos en vivo, velas de 1 minuto, EMA 9/21, RSI, VWAP,
+# fuerza compradora/vendedora y prediccion separada a 15 minutos.
+# La prediccion es una estimacion tecnica, no una garantia.
+# ============================================================
 
 PRODUCT_ID = "BTC-USD"
 REST_URL = "https://api.exchange.coinbase.com"
@@ -19,81 +23,107 @@ WS_URL = "wss://advanced-trade-ws.coinbase.com"
 
 MAX_CANDLES = 300
 STALE_SECONDS = 20
-
+PREDICTION_HORIZON = 15
 lock = threading.RLock()
 
 candles = deque(maxlen=MAX_CANDLES)
-tick_history = deque(maxlen=180)
+ticks = deque(maxlen=1200)
+trade_flow = deque(maxlen=5000)
 current_price = None
-last_update = 0
+last_update = 0.0
 last_error = ""
 last_source = "NINGUNA"
 ws_connected = False
 services_started = False
-
 session = requests.Session()
-session.headers.update({
-    "User-Agent": "BitcoinRadar/3.0",
-    "Accept": "application/json"
-})
+session.headers.update({"User-Agent": "BitcoinRadarLive/4.0", "Accept": "application/json"})
 
 
-# ==================================================
-# ACTUALIZAR PRECIO Y VELAS
-# ==================================================
+def ema(values, period):
+    values = [float(v) for v in values]
+    if not values:
+        return None
+    alpha = 2.0 / (period + 1.0)
+    result = values[0]
+    for value in values[1:]:
+        result = alpha * value + (1.0 - alpha) * result
+    return result
 
-def update_price(price, source="COINBASE"):
+
+def rsi(values, period=14):
+    values = [float(v) for v in values]
+    if len(values) < period + 1:
+        return None
+    gains, losses = [], []
+    for i in range(len(values) - period, len(values)):
+        change = values[i] - values[i - 1]
+        gains.append(max(change, 0.0))
+        losses.append(max(-change, 0.0))
+    avg_gain = sum(gains) / period
+    avg_loss = sum(losses) / period
+    if avg_loss == 0:
+        return 100.0 if avg_gain > 0 else 50.0
+    rs = avg_gain / avg_loss
+    return 100.0 - (100.0 / (1.0 + rs))
+
+
+def vwap_from_candles(history):
+    rows = [c for c in history if float(c.get("volume", 0) or 0) > 0]
+    if not rows:
+        return None
+    volume_sum = sum(float(c["volume"]) for c in rows)
+    if volume_sum <= 0:
+        return None
+    weighted = sum(
+        ((float(c["high"]) + float(c["low"]) + float(c["close"])) / 3.0)
+        * float(c["volume"]) for c in rows
+    )
+    return weighted / volume_sum
+
+
+def update_price(price, source="WEBSOCKET"):
     global current_price, last_update, last_source
-
     price = float(price)
-    if price <= 0:
+    if not math.isfinite(price) or price <= 0:
         return
-
     now = time.time()
-    now_int = int(now)
-    minute = now_int - (now_int % 60)
-
+    bucket = int(now // 60) * 60
     with lock:
         current_price = price
-        last_update = now_int
+        last_update = now
         last_source = source
-
-        # Guardar el último precio recibido de cada segundo.
-        if tick_history and int(tick_history[-1]["time"]) == now_int:
-            tick_history[-1] = {
-                "time": now,
-                "price": price
-            }
-        else:
-            tick_history.append({
-                "time": now,
-                "price": price
-            })
-
-        # Mantener las velas originales de un minuto.
-        if candles and candles[-1]["time"] == minute:
-            candle = candles[-1]
-            candle["high"] = max(candle["high"], price)
-            candle["low"] = min(candle["low"], price)
-            candle["close"] = price
+        ticks.append({"time": now, "price": price})
+        if candles and int(candles[-1]["time"]) == bucket:
+            c = candles[-1]
+            c["high"] = max(float(c["high"]), price)
+            c["low"] = min(float(c["low"]), price)
+            c["close"] = price
         else:
             candles.append({
-                "time": minute,
-                "open": price,
-                "high": price,
-                "low": price,
-                "close": price,
-                "volume": 0.0
+                "time": bucket, "open": price, "high": price,
+                "low": price, "close": price, "volume": 0.0
             })
 
 
-# ==================================================
-# HISTORIAL DE COINBASE
-# ==================================================
+def record_trade(side, size, price=None):
+    now = time.time()
+    side = str(side or "").upper()
+    try:
+        size = float(size)
+    except (TypeError, ValueError):
+        return
+    if size <= 0 or side not in ("BUY", "SELL"):
+        return
+    with lock:
+        trade_flow.append({"time": now, "side": side, "size": size})
+        if price is not None and candles:
+            bucket = int(now // 60) * 60
+            if int(candles[-1]["time"]) == bucket:
+                candles[-1]["volume"] = float(candles[-1].get("volume", 0)) + size
+
 
 def load_history():
     global last_error
-
     try:
         response = session.get(
             f"{REST_URL}/products/{PRODUCT_ID}/candles",
@@ -101,135 +131,95 @@ def load_history():
             timeout=15
         )
         response.raise_for_status()
-
-        raw = response.json()
         history = []
-
-        for item in raw:
+        for item in response.json():
             if len(item) < 6:
                 continue
-
             history.append({
-                "time": int(item[0]),
-                "low": float(item[1]),
-                "high": float(item[2]),
-                "open": float(item[3]),
-                "close": float(item[4]),
-                "volume": float(item[5])
+                "time": int(item[0]), "low": float(item[1]),
+                "high": float(item[2]), "open": float(item[3]),
+                "close": float(item[4]), "volume": float(item[5])
             })
-
         history.sort(key=lambda x: x["time"])
-
         with lock:
-            existing = {
-                c["time"]: dict(c)
-                for c in candles
-            }
-
-            for candle in history:
-                if candle["time"] not in existing:
-                    existing[candle["time"]] = candle
-
-            merged = sorted(
-                existing.values(),
-                key=lambda x: x["time"]
-            )
-
+            existing = {int(c["time"]): dict(c) for c in history}
+            for c in candles:
+                existing[int(c["time"])] = dict(c)
+            merged = sorted(existing.values(), key=lambda x: x["time"])
             candles.clear()
             candles.extend(merged[-MAX_CANDLES:])
             last_error = ""
-
     except Exception as exc:
         with lock:
-            last_error = "Historial: " + str(exc)
+            last_error = "Historial Coinbase: " + str(exc)
 
-
-# ==================================================
-# ACTUALIZACION MANUAL REAL
-# ==================================================
 
 def force_coinbase_update():
     global last_error
-
     try:
-        response = session.get(
-            f"{REST_URL}/products/{PRODUCT_ID}/ticker",
-            timeout=10
-        )
+        response = session.get(f"{REST_URL}/products/{PRODUCT_ID}/ticker", timeout=10)
         response.raise_for_status()
-
-        data = response.json()
-        price = float(data["price"])
-
-        update_price(price, "ACTUALIZACION MANUAL")
-
+        update_price(float(response.json()["price"]), "REST MANUAL")
         with lock:
             last_error = ""
-
         return True
-
     except Exception as exc:
         with lock:
-            last_error = "Actualización manual: " + str(exc)
-
+            last_error = "Actualizacion manual: " + str(exc)
         return False
 
 
-# ==================================================
-# WEBSOCKET COINBASE
-# ==================================================
-
 def on_open(ws):
     global ws_connected, last_error
-
     try:
+        # Dos canales: ticker para precio y market_trades para flujo comprador/vendedor.
         ws.send(json.dumps({
             "type": "subscribe",
             "product_ids": [PRODUCT_ID],
             "channel": "ticker"
         }))
-
+        ws.send(json.dumps({
+            "type": "subscribe",
+            "product_ids": [PRODUCT_ID],
+            "channel": "market_trades"
+        }))
         with lock:
             ws_connected = True
             last_error = ""
-
     except Exception as exc:
         with lock:
             ws_connected = False
-            last_error = "Suscripción: " + str(exc)
+            last_error = "Suscripcion Coinbase: " + str(exc)
 
 
 def on_message(ws, message):
     global last_error
-
     try:
         data = json.loads(message)
-
-        if data.get("channel") != "ticker":
-            return
-
-        for event in data.get("events", []):
-            for ticker in event.get("tickers", []):
-
-                if ticker.get("product_id") != PRODUCT_ID:
-                    continue
-
-                price = ticker.get("price")
-
-                if price is not None:
-                    update_price(price, "WEBSOCKET")
-
-                    with lock:
-                        last_error = ""
-
+        channel = data.get("channel")
+        if channel == "ticker":
+            for event in data.get("events", []):
+                for ticker in event.get("tickers", []):
+                    if ticker.get("product_id") == PRODUCT_ID and ticker.get("price") is not None:
+                        update_price(ticker["price"], "WEBSOCKET")
+        elif channel == "market_trades":
+            for event in data.get("events", []):
+                for trade in event.get("trades", []):
+                    if trade.get("product_id") == PRODUCT_ID:
+                        record_trade(
+                            trade.get("side"),
+                            trade.get("size"),
+                            trade.get("price")
+                        )
+        with lock:
+            last_error = ""
     except Exception as exc:
         with lock:
-            last_error = "Datos WebSocket: " + str(exc)
+            last_error = "Mensaje WebSocket: " + str(exc)
 
 
 def on_error(ws, error):
     global ws_connected, last_error
-
     with lock:
         ws_connected = False
         last_error = "WebSocket: " + str(error)
@@ -237,304 +227,157 @@ def on_error(ws, error):
 
 def on_close(ws, close_status_code, close_msg):
     global ws_connected
-
     with lock:
         ws_connected = False
 
 
 def websocket_worker():
     global ws_connected, last_error
-
     while True:
         try:
             ws = websocket.WebSocketApp(
-                WS_URL,
-                on_open=on_open,
-                on_message=on_message,
-                on_error=on_error,
-                on_close=on_close
+                WS_URL, on_open=on_open, on_message=on_message,
+                on_error=on_error, on_close=on_close
             )
-
-            ws.run_forever(
-                ping_interval=20,
-                ping_timeout=10
-            )
-
+            ws.run_forever(ping_interval=20, ping_timeout=10)
         except Exception as exc:
             with lock:
-                last_error = "Reconexión: " + str(exc)
+                last_error = "Reconectando WebSocket: " + str(exc)
                 ws_connected = False
-
         with lock:
             ws_connected = False
-
         time.sleep(5)
 
 
-# ==================================================
-# RESPALDO REST
-# ==================================================
-
 def rest_fallback_worker():
     global last_error
-
     while True:
         try:
             with lock:
                 updated = last_update
-
             if time.time() - updated > 8:
-                response = session.get(
-                    f"{REST_URL}/products/{PRODUCT_ID}/ticker",
-                    timeout=10
-                )
+                response = session.get(f"{REST_URL}/products/{PRODUCT_ID}/ticker", timeout=10)
                 response.raise_for_status()
-
-                data = response.json()
-                update_price(float(data["price"]), "REST")
-
+                update_price(float(response.json()["price"]), "REST RESPALDO")
         except Exception as exc:
             with lock:
                 last_error = "Respaldo REST: " + str(exc)
-
         time.sleep(5)
 
 
-# ==================================================
-# SERVICIOS EN SEGUNDO PLANO
-# ==================================================
-
 def start_background_services():
     global services_started
-
     with lock:
         if services_started:
             return
-
         services_started = True
-
-    threading.Thread(
-        target=load_history,
-        daemon=True
-    ).start()
-
-    threading.Thread(
-        target=websocket_worker,
-        daemon=True
-    ).start()
-
-    threading.Thread(
-        target=rest_fallback_worker,
-        daemon=True
-    ).start()
+    threading.Thread(target=load_history, daemon=True).start()
+    threading.Thread(target=websocket_worker, daemon=True).start()
+    threading.Thread(target=rest_fallback_worker, daemon=True).start()
 
 
-# ==================================================
-# ANALISIS TECNICO
-# ==================================================
+def momentum_pct(price, ticks_snapshot, seconds, now):
+    target = now - seconds
+    old = next((t for t in reversed(ticks_snapshot) if float(t["time"]) <= target), None)
+    if old is None or target - float(old["time"]) > 4:
+        return None
+    old_price = float(old["price"])
+    return ((price / old_price) - 1.0) * 100.0 if old_price > 0 else None
 
 
-def calculate_signal(price, history, tick_data):
-
-    closes = [
-        float(c["close"])
-        for c in history
-        if c.get("close") is not None
-    ]
-
+def calculate_indicators(price, history, ticks_snapshot, flow_snapshot):
+    closes = [float(c["close"]) for c in history]
+    ema9 = ema(closes[-60:], 9) if len(closes) >= 9 else None
+    ema21 = ema(closes[-100:], 21) if len(closes) >= 21 else None
+    rsi_value = rsi(closes, 14)
+    vwap_value = vwap_from_candles(history)
     now = time.time()
+    m5 = momentum_pct(price, ticks_snapshot, 5, now)
+    m15 = momentum_pct(price, ticks_snapshot, 15, now)
+    m30 = momentum_pct(price, ticks_snapshot, 30, now)
 
-    def tick_momentum(seconds):
-        if not tick_data:
-            return None
+    flow_cutoff = now - 60
+    recent_flow = [t for t in flow_snapshot if float(t["time"]) >= flow_cutoff]
+    buy_volume = sum(float(t["size"]) for t in recent_flow if t["side"] == "BUY")
+    sell_volume = sum(float(t["size"]) for t in recent_flow if t["side"] == "SELL")
+    total_flow = buy_volume + sell_volume
+    buy_pct = (buy_volume / total_flow * 100.0) if total_flow else None
+    sell_pct = (sell_volume / total_flow * 100.0) if total_flow else None
 
-        target = now - seconds
-        sample = None
+    score = 0.0
+    if ema9 is not None and ema21 is not None:
+        score += 2 if ema9 > ema21 else -2 if ema9 < ema21 else 0
+    if vwap_value is not None:
+        score += 1 if price > vwap_value else -1 if price < vwap_value else 0
+    if rsi_value is not None:
+        score += 1 if rsi_value >= 55 else -1 if rsi_value <= 45 else 0
+    for value, weight in ((m5, 1.5), (m15, 2.0), (m30, 1.0)):
+        if value is not None:
+            score += weight if value > 0 else -weight if value < 0 else 0
+    if buy_pct is not None:
+        score += 1 if buy_pct >= 55 else -1 if buy_pct <= 45 else 0
 
-        for tick in reversed(tick_data):
-            if float(tick["time"]) <= target:
-                sample = tick
-                break
-
-        if sample is None or target - float(sample["time"]) > 3:
-            return None
-
-        old_price = float(sample["price"])
-
-        if old_price <= 0:
-            return None
-
-        return ((price / old_price) - 1) * 100
-
-    m5 = tick_momentum(5)
-    m15 = tick_momentum(15)
-    m30 = tick_momentum(30)
-
-    def empty_result():
-        return {
-            "direction": "ESPERANDO DATOS",
-            "signal": "ESPERAR",
-            "prediction": round(price, 2),
-            "confidence": 0,
-            "momentum_5s_pct": round(m5, 5) if m5 is not None else None,
-            "momentum_15s_pct": round(m15, 5) if m15 is not None else None,
-            "momentum_30s_pct": round(m30, 5) if m30 is not None else None
-        }
-
-    if len(closes) < 22:
-        return empty_result()
-
-    def ema(values, period):
-        alpha = 2 / (period + 1)
-        result = values[0]
-
-        for value in values[1:]:
-            result = alpha * value + (1 - alpha) * result
-
-        return result
-
-    ema9 = ema(closes[-40:], 9)
-    ema21 = ema(closes[-80:], 21)
-
-    momentum3 = (price / closes[-4]) - 1
-    momentum7 = (price / closes[-8]) - 1
-
-    recent = history[-5:]
-
-    bullish = sum(
-        1 for candle in recent
-        if float(candle["close"]) > float(candle["open"])
-    )
-
-    bearish = sum(
-        1 for candle in recent
-        if float(candle["close"]) < float(candle["open"])
-    )
-
-    score = 0
-
-    if ema9 > ema21:
-        score += 1
-    elif ema9 < ema21:
-        score -= 1
-
-    if momentum3 > 0:
-        score += 2
-    elif momentum3 < 0:
-        score -= 2
-
-    if momentum7 > 0:
-        score += 2
-    elif momentum7 < 0:
-        score -= 2
-
-    if bullish > bearish:
-        score += 1
-    elif bearish > bullish:
-        score -= 1
-
-    # Impulso de corto plazo.
-    for momentum, weight in ((m5, 2), (m15, 2), (m30, 1)):
-        if momentum is not None:
-            if momentum > 0:
-                score += weight
-            elif momentum < 0:
-                score -= weight
-
-    if score > 0:
+    if score >= 1.5:
         direction, signal = "ALCISTA", "SUBE"
-    elif score < 0:
+    elif score <= -1.5:
         direction, signal = "BAJISTA", "BAJA"
     else:
         direction, signal = "NEUTRAL", "ESPERAR"
 
-    short_values = [
-        value for value in (m5, m15, m30)
-        if value is not None
-    ]
+    # Proyeccion limitada y basada en momentum observado; no es garantia.
+    usable = [v for v in (m5, m15, m30) if v is not None]
+    short_change = (sum(usable) / len(usable) / 100.0) if usable else 0.0
+    projected_change = max(-0.0025, min(0.0025, short_change * 3.0))
+    projected_price = price * (1.0 + projected_change)
 
-    if short_values:
-        projected_change = (
-            sum(short_values) / len(short_values)
-        ) / 100
-    else:
-        projected_change = momentum3 * 0.5
-
-    projected_change = max(
-        -0.003,
-        min(0.003, projected_change)
-    )
-
-    prediction = price * (1 + projected_change)
-    confidence = min(90, 50 + abs(score) * 5)
-
+    # La confianza mostrada es fuerza relativa del puntaje, no probabilidad calibrada.
+    confidence = min(90, int(50 + abs(score) * 6))
     return {
-        "direction": direction,
-        "signal": signal,
-        "prediction": round(prediction, 2),
-        "confidence": confidence,
+        "direction": direction, "signal": signal, "score": round(score, 2),
+        "ema9": round(ema9, 2) if ema9 is not None else None,
+        "ema21": round(ema21, 2) if ema21 is not None else None,
+        
+        "rsi": round(rsi_value, 2) if rsi_value is not None else None,
+        "vwap": round(vwap_value, 2) if vwap_value is not None else None,
+        "buy_pct": round(buy_pct, 1) if buy_pct is not None else None,
+        "sell_pct": round(sell_pct, 1) if sell_pct is not None else None,
+        "buy_volume": round(buy_volume, 6),
+        "sell_volume": round(sell_volume, 6),
         "momentum_5s_pct": round(m5, 5) if m5 is not None else None,
         "momentum_15s_pct": round(m15, 5) if m15 is not None else None,
-        "momentum_30s_pct": round(m30, 5) if m30 is not None else None
+        "momentum_30s_pct": round(m30, 5) if m30 is not None else None,
+        "prediction": round(projected_price, 2),
+        "confidence": confidence
     }
 
 
-# ==================================================
-# API PRINCIPAL
-# ==================================================
-
 def get_api_data():
-
     with lock:
         price = current_price
         history = [dict(c) for c in candles]
-        tick_data = [dict(t) for t in tick_history]
+        tick_snapshot = [dict(t) for t in ticks]
+        flow_snapshot = [dict(t) for t in trade_flow]
         updated = last_update
         error = last_error
         source = last_source
         socket_status = ws_connected
 
-    now = int(time.time())
-
-    live = bool(
-        price is not None
-        and updated > 0
-        and now - updated <= STALE_SECONDS
-    )
-
-    countdown = 900 - (now % 900)
-
+    now = time.time()
+    live = bool(price is not None and updated > 0 and now - updated <= STALE_SECONDS)
+    countdown = 900 - (int(now) % 900)
     if price is None:
         return {
-            "ok": False,
-            "connected": False,
-            "status": "ESPERANDO COINBASE",
-            "price": None,
-            "candles": history,
-            "countdown": countdown,
-            "error": error
+            "ok": False, "connected": False, "status": "ESPERANDO COINBASE",
+            "price": None, "candles": history, "countdown": countdown, "error": error
         }
 
-    analysis = calculate_signal(price, history, tick_data)
-
+    indicators = calculate_indicators(price, history, tick_snapshot, flow_snapshot)
     return {
-        "ok": True,
-        "connected": live,
-        "websocket_connected": socket_status,
+        "ok": True, "connected": live, "websocket_connected": socket_status,
         "status": "EN VIVO" if live else "SIN DATOS RECIENTES",
-        "price": round(price, 2),
-        "direction": analysis["direction"],
-        "signal": analysis["signal"],
-        "prediction": analysis["prediction"],
-        "confidence": analysis["confidence"],
-        "momentum_5s_pct": analysis["momentum_5s_pct"],
-        "momentum_15s_pct": analysis["momentum_15s_pct"],
-        "momentum_30s_pct": analysis["momentum_30s_pct"],
-        "countdown": countdown,
-        "last_update": updated,
-        "source": source,
-        "candles": history[-MAX_CANDLES:],
-        "error": error
+        "price": round(price, 2), "candles": history[-MAX_CANDLES:],
+        "countdown": countdown, "last_update": updated, "source": source,
+        "error": error, **indicators
     }
 
 
@@ -553,114 +396,28 @@ def api():
 @app.route("/refresh")
 def refresh():
     start_background_services()
-
     success = force_coinbase_update()
     data = get_api_data()
     data["manual_refresh"] = success
-
     return jsonify(data)
 
 
 @app.route("/health")
 def health():
-
     with lock:
-        price = current_price
-        updated = last_update
-        error = last_error
-        source = last_source
-        count = len(candles)
-        socket_status = ws_connected
-
-    live = bool(
-        price is not None
-        and updated > 0
-        and time.time() - updated <= STALE_SECONDS
-    )
-
+        price, updated, error = current_price, last_update, last_error
+        source, count, socket_status = last_source, len(candles), ws_connected
+    live = bool(price is not None and updated > 0 and time.time() - updated <= STALE_SECONDS)
     return jsonify({
-        "ok": True,
-        "coinbase_live": live,
-        "websocket_connected": socket_status,
-        "price": price,
-        "last_update": updated,
-        "source": source,
-        "candles": count,
-        "error": error
+        "ok": True, "coinbase_live": live, "websocket_connected": socket_status,
+        "price": price, "last_update": updated, "source": source,
+        "candles": count, "error": error
     })
 
 
-# ==================================================
-# PRUEBA DE POLYMARKET
-# ==================================================
-
-@app.route("/polymarket-test")
-def polymarket_test():
-
-    url = "https://gateway.polymarket.us/v1/events"
-
-    try:
-        response = requests.get(
-            url,
-            params={
-                "limit": 100,
-                "offset": 0,
-                "active": "true",
-                "closed": "false"
-            },
-            headers={"Accept": "application/json"},
-            timeout=15
-        )
-
-        response.raise_for_status()
-        data = response.json()
-
-        if isinstance(data, list):
-            events = data
-        elif isinstance(data, dict):
-            events = data.get("events", [])
-        else:
-            events = []
-
-        matches = []
-
-        for event in events:
-            slug = str(event.get("slug", "")).lower()
-            title = str(event.get("title", "")).lower()
-            search_text = slug + " " + title
-
-            if (
-                ("btc" in search_text or "bitcoin" in search_text)
-                and "15m" in search_text
-                and "updown" in search_text
-                and event.get("active") is not False
-                and event.get("closed") is not True
-            ):
-                matches.append({
-                    "slug": event.get("slug"),
-                    "title": event.get("title"),
-                    "startDate": event.get("startDate"),
-                    "endDate": event.get("endDate"),
-                    "active": event.get("active"),
-                    "closed": event.get("closed")
-                })
-
-        return jsonify({
-            "ok": True,
-            "total_events": len(events),
-            "matches": matches
-        })
-
-    except Exception as exc:
-        return jsonify({
-            "ok": False,
-            "error": str(exc)
-        }), 500
-
-
-# ==================================================
-# INTERFAZ VISUAL
-# ==================================================
+# ============================================================
+# INTERFAZ
+# ============================================================
 
 HTML = r"""
 <!DOCTYPE html>
@@ -669,706 +426,251 @@ HTML = r"""
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Bitcoin Radar Live</title>
-
 <style>
-* {
-    box-sizing: border-box;
-}
-
-body {
-    margin: 0;
-    padding: 16px;
-    background: #0b1020;
-    color: #f4f6ff;
-    font-family: Arial, sans-serif;
-}
-
-main {
-    max-width: 650px;
-    margin: auto;
-}
-
-.header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 10px;
-    margin-bottom: 18px;
-}
-
-h1 {
-    font-size: 21px;
-    margin: 0;
-    }
-        font-size: 21px;
-    margin: 0;
-}
-
-.status {
-    font-size: 12px;
-    color: #ffbd59;
-}
-
-.card {
-    background: #151d32;
-    border: 1px solid #26334e;
-    border-radius: 15px;
-    padding: 18px;
-    margin-bottom: 14px;
-}
-
-.label {
-    color: #9eacc7;
-    font-size: 12px;
-    letter-spacing: 1px;
-}
-
-.price {
-    font-size: 34px;
-    font-weight: bold;
-    margin-top: 8px;
-}
-
-.signal {
-    text-align: center;
-    font-size: 30px;
-    font-weight: bold;
-    padding: 15px;
-    margin-top: 8px;
-}
-
-.up {
-    color: #25d695;
-}
-
-.down {
-    color: #ff6475;
-}
-
-.prediction {
-    font-size: 27px;
-    font-weight: bold;
-    margin-top: 8px;
-}
-
-.countdown {
-    font-size: 32px;
-    font-weight: bold;
-    margin-top: 8px;
-    font-variant-numeric: tabular-nums;
-}
-
-canvas {
-    width: 100%;
-    height: 300px;
-    display: block;
-    touch-action: none;
-}
-
-.small {
-    color: #93a1bd;
-    font-size: 12px;
-    line-height: 1.6;
-}
-
-.row {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 12px;
-}
-
-.value {
-    font-weight: bold;
-    margin-top: 6px;
-}
-
-button {
-    border: 0;
-    border-radius: 9px;
-    padding: 10px 14px;
-    color: white;
-    background: #294a83;
-    font-weight: bold;
-    cursor: pointer;
-}
-
-button:disabled {
-    opacity: 0.5;
-}
-
-.chart-controls {
-    display: flex;
-    gap: 8px;
-    margin: 12px 0;
-}
-
-.chart-controls button {
-    min-width: 45px;
-}
+*{box-sizing:border-box}
+body{margin:0;padding:14px;background:#080d18;color:#edf2ff;font-family:Arial,sans-serif}
+main{max-width:1000px;margin:auto}
+.header{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:14px}
+h1{font-size:20px;margin:0;letter-spacing:.5px}
+.status{font-size:11px;color:#ffbd59;font-weight:bold}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.card{background:#111a2b;border:1px solid #263650;border-radius:13px;padding:14px;margin-bottom:10px;min-width:0}
+.label{font-size:11px;letter-spacing:.8px;color:#91a2c1}
+.price{font-size:clamp(27px,6vw,38px);font-weight:700;margin:7px 0}
+.value{font-size:18px;font-weight:700;margin-top:6px;overflow-wrap:anywhere}
+.signal{font-size:28px;font-weight:800;margin:8px 0}
+.up{color:#22d69a}.down{color:#ff6475}.neutral{color:#f4c76b}
+.small{font-size:11px;line-height:1.6;color:#91a2c1}
+.row{display:flex;justify-content:space-between;align-items:center;gap:10px}
+.metric{padding:10px;background:#0b1322;border-radius:9px;min-width:0}
+.metric .value{font-size:15px}
+button{border:0;border-radius:8px;padding:9px 12px;color:#fff;background:#294a83;font-weight:bold}
+button:disabled{opacity:.5}
+.controls{display:flex;gap:7px;flex-wrap:wrap;margin:12px 0}
+.controls button{min-width:44px}
+canvas{width:100%;height:330px;display:block;touch-action:none}
+.bar{height:9px;border-radius:8px;background:#26334e;overflow:hidden;display:flex;margin:9px 0}
+.buybar{background:#22d69a}.sellbar{background:#ff6475}
+.prediction{font-size:25px;font-weight:800;margin:7px 0}
+.tag{display:inline-block;padding:4px 7px;border-radius:6px;background:#202d45;color:#bdcbea;font-size:10px}
+@media(max-width:600px){.grid{grid-template-columns:1fr}.header{align-items:flex-start}.card{padding:12px}canvas{height:280px}}
 </style>
 </head>
-
 <body>
 <main>
 <div class="header">
-    <h1>BITCOIN RADAR LIVE</h1>
-    <div id="status" class="status">CONECTANDO...</div>
+  <h1>BITCOIN RADAR LIVE</h1>
+  <div id="status" class="status">CONECTANDO...</div>
 </div>
 
 <section class="card">
-
-    <div class="label">BITCOIN / USD · COINBASE</div>
-    <div id="price" class="price">Cargando...</div>
-    <div class="small">Precio real recibido de Coinbase</div>
-    <div id="tickMomentum" class="small">
-        Impulso 5s / 15s / 30s: esperando datos
-    </div>
-
+  <div class="label">BITCOIN / USD · COINBASE</div>
+  <div id="price" class="price">Cargando...</div>
+  <div class="row"><span class="small">Precio recibido de Coinbase</span><span id="source" class="tag">SIN FUENTE</span></div>
+  <div id="tickMomentum" class="small">Impulso: esperando datos</div>
 </section>
 
-<section class="card">
-
-    <div class="label">RADAR DE DIRECCIÓN</div>
-
-    <div id="direction" class="signal">
-        ESPERANDO DATOS
-    </div>
-
+<div class="grid">
+  <section class="card">
+    <div class="label">RADAR ACTUAL · ANÁLISIS TÉCNICO</div>
+    <div id="direction" class="signal neutral">ESPERANDO</div>
     <div class="row">
-        <div>
-            <div class="label">SEÑAL</div>
-            <div id="signal" class="value">ESPERAR</div>
-        </div>
-
-        <div>
-            <div class="label">CONFIANZA TÉCNICA</div>
-            <div id="confidence" class="value">--</div>
-        </div>
+      <div><div class="label">SEÑAL</div><div id="signal" class="value">ESPERAR</div></div>
+      <div><div class="label">FUERZA TÉCNICA</div><div id="confidence" class="value">--</div></div>
     </div>
+    <div class="small">Describe las condiciones actuales; no garantiza el próximo movimiento.</div>
+  </section>
 
+  <section class="card">
+    <div class="label">PREDICCIÓN AL CIERRE · 15 MIN</div>
+    <div id="predDirection" class="signal neutral">ESPERANDO</div>
+    <div class="prediction" id="prediction">--</div>
+    <div class="row"><span class="label">ESTIMACIÓN TÉCNICA</span><span id="predStrength" class="value">--</span></div>
+    <div class="small">Proyección experimental basada en indicadores y momentum. No es una probabilidad estadística validada.</div>
+  </section>
+</div>
+
+<section class="card">
+  <div class="label">INDICADORES EN VIVO</div>
+  <div class="grid" style="margin-top:10px">
+    <div class="metric"><div class="label">EMA 9</div><div id="ema9" class="value">--</div></div>
+    <div class="metric"><div class="label">EMA 21</div><div id="ema21" class="value">--</div></div>
+    <div class="metric"><div class="label">RSI 14</div><div id="rsi" class="value">--</div></div>
+    <div class="metric"><div class="label">VWAP</div><div id="vwap" class="value">--</div></div>
+  </div>
 </section>
 
 <section class="card">
-    <div class="label">PRECIO ESTIMADO AL CIERRE</div>
-    <div id="prediction" class="prediction">--</div>
-    <div class="small">
-        Proyección experimental. No garantiza el precio futuro.
-    </div>
+  <div class="label">FUERZA COMPRADORA / VENDEDORA · ÚLTIMOS 60 SEGUNDOS</div>
+  <div class="bar"><div id="buyBar" class="buybar" style="width:50%"></div><div id="sellBar" class="sellbar" style="width:50%"></div></div>
+  <div class="row">
+    <div><div class="label">COMPRADORES</div><div id="buyPct" class="value up">--</div></div>
+    <div style="text-align:right"><div class="label">VENDEDORES</div><div id="sellPct" class="value down">--</div></div>
+  </div>
+  <div id="flowNote" class="small">Esperando operaciones de Coinbase.</div>
 </section>
 
 <section class="card">
-    <div class="label">TIEMPO RESTANTE · 15 MINUTOS</div>
-    <div id="countdown" class="countdown">15:00</div>
+  <div class="row"><div class="label">VELAS DE 1 MINUTO · EMA 9 / EMA 21</div><button id="refreshButton" onclick="manualRefresh()">ACTUALIZAR</button></div>
+  <div class="controls">
+    <button onclick="zoomIn()">+</button><button onclick="zoomOut()">−</button>
+    <button onclick="resetZoom()">AJUSTAR</button><button onclick="goLive()">EN VIVO</button>
+  </div>
+  <canvas id="chart" width="1000" height="430"></canvas>
+  <div class="small">Desliza para revisar velas anteriores. Usa dos dedos para acercar o alejar.</div>
 </section>
 
 <section class="card">
-
-    <div class="row">
-        <div class="label">VELAS DE 1 MINUTO</div>
-
-        <button id="refreshButton" onclick="manualRefresh()">
-            ACTUALIZAR
-        </button>
-    </div>
-
-    <div class="chart-controls">
-        <button onclick="zoomIn()">+</button>
-        <button onclick="zoomOut()">−</button>
-        <button onclick="resetZoom()">AJUSTAR</button>
-        <button onclick="goLive()">EN VIVO</button>
-    </div>
-
-    <canvas id="chart" width="900" height="360"></canvas>
-
-    <div class="small">
-        Usa dos dedos para acercar o alejar.
-        Desliza para revisar velas anteriores.
-    </div>
-
+  <div class="row"><div><div class="label">CIERRE DEL BLOQUE ACTUAL</div><div id="countdown" class="prediction">15:00</div></div>
+    <div><div class="label">ESTADO WEBSOCKET</div><div id="socket" class="value">COMPROBANDO</div></div>
+  </div>
+  <div id="updated" class="small">Esperando actualización...</div>
+  <div id="error" class="small"></div>
 </section>
-
-<section class="card">
-
-    <div class="label">ESTADO DE DATOS</div>
-
-    <div id="source" class="value">Esperando...</div>
-    <div id="socket" class="small">WebSocket: comprobando</div>
-    <div id="updated" class="small">Esperando actualización...</div>
-    <div id="error" class="small"></div>
-
-</section>
-
 </main>
 
 <script>
-
-const money = value =>
-    Number(value).toLocaleString("en-US", {
-        style: "currency",
-        currency: "USD",
-        maximumFractionDigits: 2
-    });
-
-function setText(id, value) {
-    document.getElementById(id).textContent = value;
+const $ = id => document.getElementById(id);
+const money = v => v === null || v === undefined ? "--" :
+  Number(v).toLocaleString("en-US",{style:"currency",currency:"USD",maximumFractionDigits:2});
+const pct = v => v === null || v === undefined ? "--" : Number(v).toFixed(1)+"%";
+const fmtMomentum = v => v === null || v === undefined ? "--" :
+  (Number(v)>0?"+":"")+Number(v).toFixed(5)+"%";
+function formatTime(seconds){
+  const m=Math.floor(seconds/60),s=seconds%60;
+  return String(m).padStart(2,"0")+":"+String(s).padStart(2,"0");
 }
 
-function formatTime(seconds) {
-    const m = Math.floor(seconds / 60);
-    const s = seconds % 60;
+let chartData=[],zoomLevel=1,chartOffset=0;
+function zoomIn(){zoomLevel=Math.min(8,zoomLevel*1.3);drawChart(chartData)}
+function zoomOut(){zoomLevel=Math.max(.5,zoomLevel/1.3);drawChart(chartData)}
+function resetZoom(){zoomLevel=1;chartOffset=0;drawChart(chartData)}
+function goLive(){chartOffset=0;drawChart(chartData)}
 
-    return String(m).padStart(2, "0") +
-        ":" + String(s).padStart(2, "0");
+function calcEmaSeries(values,period){
+  if(!values.length)return [];
+  const a=2/(period+1);let v=values[0];const out=[v];
+  for(let i=1;i<values.length;i++){v=a*values[i]+(1-a)*v;out.push(v)}
+  return out;
+}
+function drawChart(data){
+  chartData=data||[];
+  const canvas=$("chart"),ctx=canvas.getContext("2d");
+  const W=canvas.width,H=canvas.height;
+  ctx.clearRect(0,0,W,H);
+  if(!chartData.length){ctx.fillStyle="#91a2c1";ctx.fillText("Esperando velas...",25,35);return}
+  const count=Math.max(12,Math.min(chartData.length,Math.floor(100/zoomLevel)));
+  const maxOffset=Math.max(0,chartData.length-count);
+  chartOffset=Math.max(0,Math.min(chartOffset,maxOffset));
+  const end=chartData.length-chartOffset,start=Math.max(0,end-count);
+  const visible=chartData.slice(start,end);
+  const closes=visible.map(c=>Number(c.close));
+  const e9=calcEmaSeries(closes,9),e21=calcEmaSeries(closes,21);
+  const vals=visible.flatMap(c=>[Number(c.high),Number(c.low)]).concat(e9,e21);
+  let min=Math.min(...vals),max=Math.max(...vals);
+  let pad=Math.max((max-min)*.12,2);min-=pad;max+=pad;
+  const left=82,right=W-12,top=18,bottom=H-30,usable=bottom-top;
+  const y=p=>bottom-((p-min)/(max-min))*usable;
+  ctx.font="13px Arial";ctx.strokeStyle="#263650";ctx.lineWidth=1;
+  for(let i=0;i<5;i++){
+    const yy=top+usable*i/4;
+    ctx.beginPath();ctx.moveTo(left,yy);ctx.lineTo(right,yy);ctx.stroke();
+    const val=max-(max-min)*i/4;ctx.fillStyle="#91a2c1";
+    ctx.fillText(money(val),4,yy-3);
+  }
+  const step=(right-left)/visible.length,cw=Math.max(3,Math.min(18,step*.62));
+  visible.forEach((c,i)=>{
+    const x=left+i*step+step/2,up=Number(c.close)>=Number(c.open);
+    const color=up?"#22d69a":"#ff6475";
+    ctx.strokeStyle=color;ctx.fillStyle=color;ctx.lineWidth=2;
+    ctx.beginPath();ctx.moveTo(x,y(Number(c.high)));ctx.lineTo(x,y(Number(c.low)));ctx.stroke();
+    const oy=y(Number(c.open)),cy=y(Number(c.close));
+    ctx.fillRect(x-cw/2,Math.min(oy,cy),cw,Math.max(2,Math.abs(cy-oy)));
+  });
+  function line(series,color){
+    if(!series.length)return;
+    ctx.beginPath();ctx.strokeStyle=color;ctx.lineWidth=2;
+    series.forEach((v,i)=>{const x=left+i*step+step/2;if(i===0)ctx.moveTo(x,y(v));else ctx.lineTo(x,y(v))});
+    ctx.stroke();
+  }
+  line(e9,"#f4c76b");line(e21,"#69a8ff");
+  ctx.fillStyle="#f4c76b";ctx.fillText("EMA 9",left+5,14);
+  ctx.fillStyle="#69a8ff";ctx.fillText("EMA 21",left+65,14);
 }
 
-
-// ==================================================
-// CONTROL DEL ZOOM
-// ==================================================
-
-let chartData = [];
-let zoomLevel = 1;
-let chartOffset = 0;
-
-function zoomIn() {
-    zoomLevel = Math.min(8, zoomLevel * 1.3);
-    drawChart(chartData);
-}
-
-function zoomOut() {
-    zoomLevel = Math.max(0.5, zoomLevel / 1.3);
-    drawChart(chartData);
-}
-
-function resetZoom() {
-    zoomLevel = 1;
-    chartOffset = 0;
-    drawChart(chartData);
-}
-
-function goLive() {
-    chartOffset = 0;
-    drawChart(chartData);
-}
-
-
-// ==================================================
-// GRAFICA DE VELAS
-// ==================================================
-
-function drawChart(data) {
-
-    chartData = data || [];
-
-    const canvas = document.getElementById("chart");
-    const ctx = canvas.getContext("2d");
-
-    const width = canvas.width;
-    const height = canvas.height;
-
-    ctx.clearRect(0, 0, width, height);
-
-    if (!chartData.length) {
-        ctx.fillStyle = "#93a1bd";
-        ctx.fillText("Esperando velas...", 25, 40);
-        return;
-    }
-
-    const visibleCount = Math.max(
-        10,
-        Math.min(
-            chartData.length,
-            Math.floor(100 / zoomLevel)
-        )
-    );
-
-    const maxOffset = Math.max(
-        0,
-        chartData.length - visibleCount
-    );
-
-    chartOffset = Math.max(
-        0,
-        Math.min(chartOffset, maxOffset)
-    );
-
-    const end = chartData.length - chartOffset;
-    const start = Math.max(0, end - visibleCount);
-
-    const visible = chartData.slice(start, end);
-
-    const values = visible.flatMap(c => [
-        Number(c.high),
-        Number(c.low)
-    ]);
-
-    let min = Math.min(...values);
-    let max = Math.max(...values);
-
-    const padding = Math.max((max - min) * 0.12, 1);
-
-    min -= padding;
-    max += padding;
-
-    const top = 20;
-    const bottom = height - 25;
-    const usableHeight = bottom - top;
-
-    const y = price =>
-        bottom - ((price - min) / (max - min)) * usableHeight;
-
-    ctx.strokeStyle = "#26334e";
-    ctx.lineWidth = 1;
-    ctx.font = "13px Arial";
-
-    for (let i = 0; i < 5; i++) {
-
-        const yy = top + (usableHeight / 4) * i;
-
-        ctx.beginPath();
-        ctx.moveTo(0, yy);
-        ctx.lineTo(width, yy);
-        ctx.stroke();
-
-        const priceLabel =
-            max - ((max - min) / 4) * i;
-
-        ctx.fillStyle = "#93a1bd";
-        ctx.fillText(
-            money(priceLabel),
-            8,
-            yy - 4
-        );
-    }
-
-    const chartLeft = 100;
-    const chartWidth = width - chartLeft - 10;
-    const step = chartWidth / visible.length;
-
-    const candleWidth = Math.max(
-        3,
-        Math.min(24, step * 0.65)
-    );
-
-    visible.forEach((c, i) => {
-
-        const x = chartLeft + i * step + step / 2;
-
-        const rising = c.close >= c.open;
-
-        const color = rising
-            ? "#25d695"
-            : "#ff6475";
-
-        ctx.strokeStyle = color;
-        ctx.fillStyle = color;
-        ctx.lineWidth = 2;
-
-        ctx.beginPath();
-        ctx.moveTo(x, y(c.high));
-        ctx.lineTo(x, y(c.low));
-        ctx.stroke();
-
-        const openY = y(c.open);
-        const closeY = y(c.close);
-
-        ctx.fillRect(
-            x - candleWidth / 2,
-            Math.min(openY, closeY),
-            candleWidth,
-            Math.max(2, Math.abs(closeY - openY))
-        );
-
-    });
-
-}
-
-
-// ==================================================
-// ZOOM CON DOS DEDOS Y DESPLAZAMIENTO
-// ==================================================
-
-let pointers = new Map();
-let initialDistance = 0;
-let initialZoom = 1;
-let previousX = 0;
-
-const canvas = document.getElementById("chart");
-
-function distance(a, b) {
-    return Math.hypot(
-        a.x - b.x,
-        a.y - b.y
-    );
-}
-
-canvas.addEventListener("pointerdown", event => {
-
-    canvas.setPointerCapture(event.pointerId);
-
-    pointers.set(event.pointerId, {
-        x: event.clientX,
-        y: event.clientY
-    });
-
-    if (pointers.size === 1) {
-        previousX = event.clientX;
-    }
-
-    if (pointers.size === 2) {
-        const points = Array.from(pointers.values());
-
-        initialDistance = distance(
-            points[0],
-            points[1]
-        );
-
-        initialZoom = zoomLevel;
-    }
-
+let pointers=new Map(),initialDistance=0,initialZoom=1,previousX=0;
+const canvas=$("chart");
+function distance(a,b){return Math.hypot(a.x-b.x,a.y-b.y)}
+canvas.addEventListener("pointerdown",e=>{
+  canvas.setPointerCapture(e.pointerId);pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  if(pointers.size===1)previousX=e.clientX;
+  if(pointers.size===2){const p=[...pointers.values()];initialDistance=distance(p[0],p[1]);initialZoom=zoomLevel}
 });
-
-canvas.addEventListener("pointermove", event => {
-
-    if (!pointers.has(event.pointerId)) return;
-
-    pointers.set(event.pointerId, {
-        x: event.clientX,
-        y: event.clientY
-    });
-
-    if (pointers.size === 2) {
-
-        const points = Array.from(pointers.values());
-
-        const currentDistance = distance(
-            points[0],
-            points[1]
-        );
-
-        if (initialDistance > 0) {
-
-            zoomLevel = Math.max(
-                0.5,
-                Math.min(
-                    8,
-                    initialZoom *
-                    currentDistance / initialDistance
-                )
-            );
-
-            drawChart(chartData);
-        }
-
-    } else if (pointers.size === 1) {
-
-        const delta = event.clientX - previousX;
-        previousX = event.clientX;
-
-        const visibleCount = Math.max(
-            10,
-            Math.floor(100 / zoomLevel)
-        );
-
-        const pixelsPerCandle =
-            canvas.clientWidth / visibleCount;
-
-        chartOffset += Math.round(
-            -delta / Math.max(1, pixelsPerCandle)
-        );
-
-        drawChart(chartData);
-    }
-
+canvas.addEventListener("pointermove",e=>{
+  if(!pointers.has(e.pointerId))return;
+  pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  if(pointers.size===2){
+    const p=[...pointers.values()],d=distance(p[0],p[1]);
+    if(initialDistance>0){zoomLevel=Math.max(.5,Math.min(8,initialZoom*d/initialDistance));drawChart(chartData)}
+  }else if(pointers.size===1){
+    const delta=e.clientX-previousX;previousX=e.clientX;
+    const visible=Math.max(12,Math.floor(100/zoomLevel));
+    chartOffset+=Math.round(-delta/Math.max(1,canvas.clientWidth/visible));drawChart(chartData);
+  }
 });
+function releasePointer(e){pointers.delete(e.pointerId);if(pointers.size<2)initialDistance=0}
+canvas.addEventListener("pointerup",releasePointer);
+canvas.addEventListener("pointercancel",releasePointer);
 
-function releasePointer(event) {
-    pointers.delete(event.pointerId);
-
-    if (pointers.size < 2) {
-        initialDistance = 0;
+let requestInProgress=false;
+async function refreshData(manual=false){
+  if(requestInProgress)return;requestInProgress=true;
+  const button=$("refreshButton");
+  if(manual){button.disabled=true;button.textContent="ACTUALIZANDO..."}
+  try{
+    const response=await fetch((manual?"/refresh":"/api")+"?_="+Date.now(),{cache:"no-store"});
+    if(!response.ok)throw new Error("HTTP "+response.status);
+    const d=await response.json();
+    if(d.price!==null&&d.price!==undefined){
+      $("price").textContent=money(d.price);
+      $("direction").textContent=d.direction||"ESPERANDO";
+      $("signal").textContent=d.signal||"ESPERAR";
+      $("confidence").textContent=(d.confidence??"--")+"%";
+      $("prediction").textContent=money(d.prediction);
+      $("predDirection").textContent=d.signal||"ESPERAR";
+      $("predStrength").textContent=(d.confidence??"--")+"% fuerza";
+      const cls=d.direction==="ALCISTA"?"up":d.direction==="BAJISTA"?"down":"neutral";
+      $("direction").className="signal "+cls;
+      $("predDirection").className="signal "+(d.signal==="SUBE"?"up":d.signal==="BAJA"?"down":"neutral");
+      $("ema9").textContent=money(d.ema9);$("ema21").textContent=money(d.ema21);
+      $("rsi").textContent=d.rsi===null?"--":Number(d.rsi).toFixed(1);
+      $("vwap").textContent=money(d.vwap);
+      $("buyPct").textContent=pct(d.buy_pct);$("sellPct").textContent=pct(d.sell_pct);
+      if(d.buy_pct!==null&&d.buy_pct!==undefined){
+        $("buyBar").style.width=d.buy_pct+"%";$("sellBar").style.width=d.sell_pct+"%";
+        $("flowNote").textContent="Volumen comprador: "+d.buy_volume+" BTC · vendedor: "+d.sell_volume+" BTC";
+      }else{$("flowNote").textContent="Coinbase aún no ha entregado suficiente flujo de operaciones."}
+      $("tickMomentum").textContent="Impulso 5s: "+fmtMomentum(d.momentum_5s_pct)+" | 15s: "+fmtMomentum(d.momentum_15s_pct)+" | 30s: "+fmtMomentum(d.momentum_30s_pct);
+      drawChart(d.candles);
     }
+    $("countdown").textContent=formatTime(d.countdown||0);
+    $("status").textContent=d.connected?"● EN VIVO":"● SIN DATOS";
+    $("status").style.color=d.connected?"#22d69a":"#ff6475";
+    $("source").textContent=d.source||"NINGUNA";
+    $("socket").textContent=d.websocket_connected?"CONECTADO":"DESCONECTADO";
+    if(d.last_update)$("updated").textContent="Último dato: "+new Date(d.last_update*1000).toLocaleTimeString();
+    $("error").textContent=manual?(d.manual_refresh?"Actualización completada.":(d.error||"No se pudo actualizar.")):(d.error||"");
+  }catch(err){$("status").textContent="ERROR DE CONEXIÓN";$("updated").textContent=String(err)}
+  finally{requestInProgress=false;if(manual){button.disabled=false;button.textContent="ACTUALIZAR"}}
 }
-
-canvas.addEventListener("pointerup", releasePointer);
-canvas.addEventListener("pointercancel", releasePointer);
-
-
-// ==================================================
-// RECIBIR DATOS AUTOMATICAMENTE
-// ==================================================
-
-let requestInProgress = false;
-
-async function refreshData(manual = false) {
-
-    if (requestInProgress) return;
-
-    requestInProgress = true;
-
-    const button = document.getElementById("refreshButton");
-
-    if (manual) {
-        button.disabled = true;
-        button.textContent = "ACTUALIZANDO...";
-    }
-
-    try {
-
-        const endpoint = manual ? "/refresh" : "/api";
-
-        const response = await fetch(
-            endpoint + "?_=" + Date.now(),
-            { cache: "no-store" }
-        );
-
-        if (!response.ok) {
-            throw new Error("HTTP " + response.status);
-        }
-
-        const data = await response.json();
-
-        if (data.price !== undefined && data.price !== null) {
-
-            setText("price", money(data.price));
-            setText("prediction", money(data.prediction));
-            setText("direction", data.direction);
-            setText("signal", data.signal);
-
-            setText(
-                "confidence",
-                data.confidence + "%"
-            );
-
-            const fmtMomentum = value => {
-                if (value === null || value === undefined) return "--";
-
-                const number = Number(value);
-
-                return (number > 0 ? "+" : "") +
-                    number.toFixed(5) + "%";
-            };
-
-            setText(
-                "tickMomentum",
-                "Impulso 5s: " + fmtMomentum(data.momentum_5s_pct) +
-                " | 15s: " + fmtMomentum(data.momentum_15s_pct) +
-                " | 30s: " + fmtMomentum(data.momentum_30s_pct)
-            );
-
-            const direction =
-                document.getElementById("direction");
-
-            direction.className =
-                "signal " +
-                (data.direction === "ALCISTA"
-                    ? "up"
-                    : data.direction === "BAJISTA"
-                    ? "down"
-                    : "");
-
-            drawChart(data.candles);
-        }
-
-        setText(
-            "countdown",
-            formatTime(data.countdown || 0)
-        );
-
-        const status = document.getElementById("status");
-
-        status.textContent = data.connected
-            ? "● EN VIVO"
-            : "● SIN DATOS";
-
-        status.style.color = data.connected
-            ? "#25d695"
-            : "#ff6475";
-
-        setText(
-            "source",
-            "Fuente: " + (data.source || "NINGUNA")
-        );
-
-        setText(
-            "socket",
-            "WebSocket: " +
-            (data.websocket_connected
-                ? "CONECTADO"
-                : "DESCONECTADO / RESPALDO REST")
-        );
-
-        if (data.last_update) {
-
-            setText(
-                "updated",
-                "Último dato: " +
-                new Date(
-                    data.last_update * 1000
-                ).toLocaleTimeString()
-            );
-        }
-
-        if (manual) {
-            setText(
-                "error",
-                data.manual_refresh
-                    ? "Actualización manual completada."
-                    : (data.error || "No se pudo actualizar Coinbase.")
-            );
-        } else {
-            setText("error", data.error || "");
-        }
-
-    } catch (error) {
-
-        setText("status", "ERROR DE CONEXIÓN");
-        setText("updated", String(error));
-
-    } finally {
-
-        requestInProgress = false;
-
-        if (manual) {
-            button.disabled = false;
-            button.textContent = "ACTUALIZAR";
-        }
-    }
-}
-
-function manualRefresh() {
-    refreshData(true);
-}
-
-
-// ==================================================
-// INICIO
-// ==================================================
-
+function manualRefresh(){refreshData(true)}
 refreshData();
-
-setInterval(() => {
-    refreshData(false);
-}, 1000);
-
+setInterval(()=>refreshData(false),1000);
 </script>
-
 </body>
 </html>
 """
 
-
-# ==================================================
-# INICIAR SERVIDOR
-# ==================================================
-
 if __name__ == "__main__":
-
     start_background_services()
-
-    app.run(
-        host="0.0.0.0",
-        port=10000,
-        threaded=True
-    )
+    app.run(host="0.0.0.0", port=10000, threaded=True)
