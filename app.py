@@ -1,414 +1,1029 @@
 import os
-import json
 import time
-import threading
-import logging
-from collections import deque
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 
 import requests
-import websocket
+import pandas as pd
+import numpy as np
 from flask import Flask, jsonify, render_template_string
 
 app = Flask(__name__)
-logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
-log = logging.getLogger("btc-radar")
 
-PRODUCT = "BTC-USD"
-REST_URL = f"https://api.exchange.coinbase.com/products/{PRODUCT}/candles"
-WS_URL = "wss://advanced-trade-ws.coinbase.com"
-lock = threading.RLock()
-candles = deque(maxlen=1200)
-current_price = 0.0
-last_update = 0.0
-connection_status = False
-ws_connected = False
-last_error = ""
+# ============================================================
+# BITCOIN RADAR PRO + KALSHI BTC 15M
+# Solo lectura. NO envia ordenes a Kalshi.
+# ============================================================
+
+SYMBOL = "BTCUSDT"
+INTERVAL = "1m"
+CANDLE_LIMIT = 200
+KALSHI_API = "https://external-api.kalshi.com/trade-api/v2"
+KALSHI_SERIES = "KXBTC15M"
+
+session = requests.Session()
+session.headers.update({"User-Agent": "BitcoinRadarPRO/3.0"})
 
 
-def safe_float(value, default=0.0):
+def get_market_data():
+    errors = []
+
     try:
+        r = session.get(
+            "https://api.exchange.coinbase.com/products/BTC-USD/candles",
+            params={"granularity": 60},
+            timeout=12
+        )
+        r.raise_for_status()
+        rows = r.json()
+
+        if not isinstance(rows, list) or not rows:
+            raise ValueError("Coinbase no devolvio velas")
+
+        df = pd.DataFrame(rows, columns=[
+            "time", "low", "high", "open", "close", "volume"
+        ])
+
+        df["time"] = pd.to_datetime(
+            df["time"], unit="s", utc=True
+        )
+
+        for col in ["open", "high", "low", "close", "volume"]:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+
+        df = df.sort_values("time").tail(CANDLE_LIMIT)
+        return df.dropna().reset_index(drop=True), "Coinbase"
+
+    except Exception as exc:
+        errors.append("Coinbase: " + str(exc))
+
+    try:
+        r = session.get(
+            "https://api.binance.us/api/v3/klines",
+            params={
+                "symbol": SYMBOL,
+                "interval": INTERVAL,
+                "limit": CANDLE_LIMIT
+            },
+            timeout=12
+        )
+        r.raise_for_status()
+        rows = r.json()
+
+        df = pd.DataFrame(rows, columns=[
+            "time", "open", "high", "low", "close", "volume",
+            "close_time", "quote_volume", "trades", "taker_buy",
+            "taker_quote", "ignore"
+        ])
+
+        df["time"] = pd.to_datetime(
+            df["time"], unit="ms", utc=True
+        )
+
+        for col in ["open", "high", "low", "close", "volume"]:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+
+        return df.dropna().reset_index(drop=True), "Binance.US"
+
+    except Exception as exc:
+        errors.append("Binance.US: " + str(exc))
+
+    raise RuntimeError("No se pudieron obtener datos BTC. " + " | ".join(errors))
+
+
+def calculate_indicators(df):
+    df = df.copy()
+    close = df["close"]
+
+    df["EMA9"] = close.ewm(span=9, adjust=False).mean()
+    df["EMA21"] = close.ewm(span=21, adjust=False).mean()
+
+    typical = (df["high"] + df["low"] + close) / 3
+    cumulative_volume = df["volume"].cumsum().replace(0, np.nan)
+    df["VWAP"] = (
+        (typical * df["volume"]).cumsum() / cumulative_volume
+    )
+
+    delta = close.diff()
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
+
+    avg_gain = gain.ewm(
+        alpha=1 / 14, adjust=False, min_periods=14
+    ).mean()
+
+    avg_loss = loss.ewm(
+        alpha=1 / 14, adjust=False, min_periods=14
+    ).mean()
+
+    rs = avg_gain / avg_loss.replace(0, np.nan)
+    df["RSI"] = 100 - (100 / (1 + rs))
+
+    df.loc[(avg_loss == 0) & (avg_gain > 0), "RSI"] = 100
+    df.loc[(avg_gain == 0) & (avg_loss > 0), "RSI"] = 0
+    df.loc[(avg_gain == 0) & (avg_loss == 0), "RSI"] = 50
+
+    ema12 = close.ewm(span=12, adjust=False).mean()
+    ema26 = close.ewm(span=26, adjust=False).mean()
+
+    df["MACD"] = ema12 - ema26
+    df["MACD_SIGNAL"] = df["MACD"].ewm(
+        span=9, adjust=False
+    ).mean()
+    df["MACD_HIST"] = df["MACD"] - df["MACD_SIGNAL"]
+
+    df["SUPPORT"] = df["low"].rolling(
+        50, min_periods=1
+    ).min()
+
+    df["RESISTANCE"] = df["high"].rolling(
+        50, min_periods=1
+    ).max()
+
+    return df
+
+
+def generate_signal(df):
+    last = df.iloc[-1]
+
+    if pd.isna(last["RSI"]) or pd.isna(last["VWAP"]):
+        return "ESPERAR"
+
+    bullish = (
+        last["EMA9"] > last["EMA21"]
+        and last["RSI"] > 50
+        and last["MACD"] > last["MACD_SIGNAL"]
+        and last["close"] > last["VWAP"]
+    )
+
+    bearish = (
+        last["EMA9"] < last["EMA21"]
+        and last["RSI"] < 50
+        and last["MACD"] < last["MACD_SIGNAL"]
+        and last["close"] < last["VWAP"]
+    )
+
+    if bullish:
+        return "SUBE"
+
+    if bearish:
+        return "BAJA"
+
+    return "ESPERAR"
+
+
+def as_float(value):
+    try:
+        if value is None or value == "":
+            return None
         return float(value)
     except (TypeError, ValueError):
-        return default
+        return None
 
 
-def minute_timestamp(ts=None):
-    ts = time.time() if ts is None else ts
-    return int(ts // 60) * 60
-
-
-def load_historical_candles():
-    global current_price
-    end = datetime.now(timezone.utc)
-    start = end - timedelta(minutes=300)
-    params = {"granularity": 60, "start": start.isoformat(), "end": end.isoformat()}
+def kalshi_market_data():
     try:
-        response = requests.get(REST_URL, params=params,
-                                headers={"User-Agent": "BTC-Radar-PRO/2.0"}, timeout=15)
+        response = session.get(
+            f"{KALSHI_API}/markets",
+            params={
+                "series_ticker": KALSHI_SERIES,
+                "status": "open",
+                "limit": 100
+            },
+            timeout=12
+        )
         response.raise_for_status()
-        rows = response.json()
-        parsed = []
-        for row in rows:
-            if len(row) < 6:
-                continue
-            parsed.append({"time": int(row[0]), "low": safe_float(row[1]),
-                           "high": safe_float(row[2]), "open": safe_float(row[3]),
-                           "close": safe_float(row[4]), "volume": safe_float(row[5])})
-        parsed.sort(key=lambda x: x["time"])
-        with lock:
-            candles.clear()
-            candles.extend(parsed)
-            if candles:
-                current_price = candles[-1]["close"]
-                # REST candles may be delayed; use newest candle close only as initial value.
-                global last_update
-                last_update = time.time()
-        log.info("Loaded %s Coinbase candles", len(parsed))
-        return True
-    except Exception as exc:
-        log.exception("Historical candle load failed: %s", exc)
-        return False
 
+        payload = response.json()
+        markets = payload.get("markets", []) or []
 
-def update_live_candle(price, size=0.0, trade_time=None):
-    global current_price, last_update
-    if price <= 0:
-        return
-    ts = minute_timestamp(trade_time)
-    with lock:
-        current_price = price
-        last_update = time.time()
-        if not candles:
-            candles.append({"time": ts, "open": price, "high": price,
-                            "low": price, "close": price, "volume": size})
-            return
-        last = candles[-1]
-        if ts == last["time"]:
-            last["high"] = max(last["high"], price)
-            last["low"] = min(last["low"], price)
-            last["close"] = price
-            last["volume"] += max(0.0, size)
-        elif ts > last["time"]:
-            # Fill missing minutes with flat candles so chart time stays continuous.
-            next_ts = last["time"] + 60
-            while next_ts < ts:
-                prev = candles[-1]["close"]
-                candles.append({"time": next_ts, "open": prev, "high": prev,
-                                "low": prev, "close": prev, "volume": 0.0})
-                next_ts += 60
-            candles.append({"time": ts, "open": price, "high": price,
-                            "low": price, "close": price, "volume": max(0.0, size)})
+        now = datetime.now(timezone.utc)
+        candidates = []
 
+        for market in markets:
+            close_text = (
+                market.get("close_time")
+                or market.get("expected_expiration_time")
+            )
 
-def websocket_message(ws, message):
-    global connection_status, ws_connected, last_error
-    try:
-        payload = json.loads(message)
-        if payload.get("type") == "error":
-            last_error = str(payload)
-            log.error("Coinbase websocket message error: %s", payload)
-            return
-        if payload.get("channel") == "subscriptions":
-            ws_connected = True
-            connection_status = True
-        if payload.get("channel") != "market_trades":
-            return
-        for event in payload.get("events", []):
-            for trade in event.get("trades", []):
-                price = safe_float(trade.get("price"))
-                size = safe_float(trade.get("size"))
-                # Coinbase trade time is ISO-8601; use local receipt time if parsing fails.
-                trade_ts = None
-                stamp = trade.get("time")
-                if stamp:
-                    try:
-                        trade_ts = datetime.fromisoformat(stamp.replace("Z", "+00:00")).timestamp()
-                    except Exception:
-                        pass
-                if price > 0:
-                    update_live_candle(price, size, trade_ts)
-    except Exception as exc:
-        log.exception("Websocket message parse failed: %s", exc)
+            close_dt = None
 
+            if close_text:
+                try:
+                    close_dt = datetime.fromisoformat(
+                        close_text.replace("Z", "+00:00")
+                    )
+                    if close_dt.tzinfo is None:
+                        close_dt = close_dt.replace(tzinfo=timezone.utc)
+                except ValueError:
+                    close_dt = None
 
-def websocket_open(ws):
-    global ws_connected
-    ws_connected = False
-    ws.send(json.dumps({"type": "subscribe", "channel": "market_trades", "product_ids": [PRODUCT]}))
-    log.info("Coinbase Advanced Trade websocket connected")
+            if close_dt is None or close_dt > now:
+                candidates.append((
+                    close_dt or datetime.max.replace(tzinfo=timezone.utc),
+                    market
+                ))
 
+        if not candidates:
+            return {
+                "available": False,
+                "message": "No se encontro un contrato BTC 15M abierto.",
+                "series": KALSHI_SERIES
+            }
 
-def websocket_close(ws, code, message):
-    global ws_connected
-    ws_connected = False
-    log.warning("Coinbase websocket closed (%s): %s", code, message)
+        candidates.sort(key=lambda item: item[0])
+        market = candidates[0][1]
 
+        yes_bid = as_float(market.get("yes_bid_dollars"))
+        yes_ask = as_float(market.get("yes_ask_dollars"))
+        no_bid = as_float(market.get("no_bid_dollars"))
+        no_ask = as_float(market.get("no_ask_dollars"))
 
-def websocket_error(ws, error):
-    global ws_connected, last_error
-    ws_connected = False
-    last_error = str(error)
-    log.error("Coinbase websocket error: %s", error)
+        yes_estimated = False
+        no_estimated = False
 
+        if yes_ask is None and no_bid is not None:
+            yes_ask = 1.0 - no_bid
+            yes_estimated = True
 
-def websocket_worker():
-    global ws_connected
-    while True:
-        try:
-            client = websocket.WebSocketApp(WS_URL, on_open=websocket_open,
-                                            on_message=websocket_message,
-                                            on_close=websocket_close,
-                                            on_error=websocket_error)
-            client.run_forever(ping_interval=20, ping_timeout=10)
-        except Exception as exc:
-            log.exception("Websocket worker exception: %s", exc)
-        ws_connected = False
-        time.sleep(3)
+        if no_ask is None and yes_bid is not None:
+            no_ask = 1.0 - yes_bid
+            no_estimated = True
 
+        close_ts = None
+        close_text = (
+            market.get("close_time")
+            or market.get("expected_expiration_time")
+        )
 
-def rest_price_worker():
-    """Keeps live price flowing when the Coinbase websocket is unavailable."""
-    global connection_status, last_error
-    ticker_url = f"https://api.exchange.coinbase.com/products/{PRODUCT}/ticker"
-    backup_url = f"https://api.coinbase.com/v2/prices/{PRODUCT}/spot"
-    session = requests.Session()
-    session.headers.update({"User-Agent": "BTC-Radar-PRO/2.1", "Accept": "application/json"})
-    while True:
-        try:
-            response = session.get(ticker_url, timeout=8)
-            response.raise_for_status()
-            payload = response.json()
-            price = safe_float(payload.get("price"))
-            if price <= 0:
-                raise ValueError("Coinbase ticker devolvió un precio inválido")
-            update_live_candle(price, 0.0)
-            connection_status = True
-            last_error = ""
-        except Exception as primary_exc:
+        if close_text:
             try:
-                response = session.get(backup_url, timeout=8)
-                response.raise_for_status()
-                payload = response.json()
-                price = safe_float((payload.get("data") or {}).get("amount"))
-                if price <= 0:
-                    raise ValueError("Coinbase spot devolvió un precio inválido")
-                update_live_candle(price, 0.0)
-                connection_status = True
-                last_error = ""
-            except Exception as backup_exc:
-                with lock:
-                    age = time.time() - last_update if last_update else 999999
-                    connection_status = age < 20
-                last_error = f"Ticker: {primary_exc}; respaldo: {backup_exc}"
-                log.warning("REST price polling failed: %s", last_error)
-        time.sleep(3)
+                close_dt = datetime.fromisoformat(
+                    close_text.replace("Z", "+00:00")
+                )
+                if close_dt.tzinfo is None:
+                    close_dt = close_dt.replace(tzinfo=timezone.utc)
+                close_ts = int(close_dt.timestamp())
+            except ValueError:
+                pass
 
-
-def ema(values, period):
-    if not values:
-        return []
-    alpha = 2.0 / (period + 1.0)
-    result = [values[0]]
-    for value in values[1:]:
-        result.append(value * alpha + result[-1] * (1.0 - alpha))
-    return result
-
-
-def analyze(data):
-    """Estimación basada solamente en velas OHLC y EMA 9/21."""
-    valid = [c for c in data if c.get("close", 0) > 0]
-    closes = [c["close"] for c in valid]
-    if len(closes) < 30:
-        return {"bull": 50.0, "bear": 50.0, "direction": "REUNIENDO DATOS",
-                "score": 0.0, "ema9": None, "ema21": None,
-                "candle_signal": "REUNIENDO DATOS"}
-    e9, e21 = ema(closes, 9), ema(closes, 21)
-    recent = valid[-6:]
-    candle_score = 0.0
-    for c in recent:
-        span = max(c["high"] - c["low"], 1e-9)
-        candle_score += max(-1.0, min(1.0, (c["close"] - c["open"]) / span))
-    candle_score /= len(recent)
-    momentum = (closes[-1] - closes[-6]) / closes[-6] * 100.0 if closes[-6] else 0.0
-    ema_gap = (e9[-1] - e21[-1]) / closes[-1] * 100.0 if closes[-1] else 0.0
-    score = (max(-2.0, min(2.0, ema_gap * 120.0)) * 2.0
-             + max(-2.0, min(2.0, momentum * 12.0)) * 1.5
-             + candle_score * 2.0)
-    score = max(-8.0, min(8.0, score))
-    bull = 50.0 + (score / 8.0) * 35.0
-    bear = 100.0 - bull
-    direction = "ALCISTA" if bull > 52 else "BAJISTA" if bull < 48 else "INDECISO"
-    candle_signal = ("VELAS ALCISTAS" if candle_score > 0.12 else
-                     "VELAS BAJISTAS" if candle_score < -0.12 else "VELAS MIXTAS")
-    return {"bull": round(bull, 1), "bear": round(bear, 1),
-            "direction": direction, "score": round(score, 2),
-            "ema9": round(e9[-1], 2), "ema21": round(e21[-1], 2),
-            "candle_signal": candle_signal}
-
-
-def aggregate_candles(data, minutes):
-    if minutes == 1:
-        return list(data)
-    grouped = {}
-    span = minutes * 60
-    for c in data:
-        bucket = (c["time"] // span) * span
-        if bucket not in grouped:
-            grouped[bucket] = {"time": bucket, "open": c["open"], "high": c["high"],
-                               "low": c["low"], "close": c["close"], "volume": c["volume"]}
-        else:
-            g = grouped[bucket]
-            g["high"] = max(g["high"], c["high"])
-            g["low"] = min(g["low"], c["low"])
-            g["close"] = c["close"]
-            g["volume"] += c["volume"]
-    return sorted(grouped.values(), key=lambda x: x["time"])
-
-
-def analyze(data):
-    """Lectura técnica basada únicamente en velas y EMA 9/21."""
-    closes = [c["close"] for c in data if c["close"] > 0]
-    if len(closes) < 30:
-        return {"bull": 50.0, "bear": 50.0, "neutral": 0.0,
-                "direction": "REUNIENDO DATOS", "score": 0.0,
-                "ema9": None, "ema21": None, "candle_signal": "DATOS INSUFICIENTES"}
-    e9, e21 = ema(closes, 9), ema(closes, 21)
-    score = 0.0
-    score += 3.0 if e9[-1] > e21[-1] else -3.0
-    score += 2.0 if closes[-1] > e9[-1] else -2.0
-    score += 1.5 if closes[-1] > e21[-1] else -1.5
-
-    # Confirmación con las últimas velas: cuerpo y secuencia de cierres.
-    recent = data[-5:]
-    bullish = sum(1 for c in recent if c["close"] > c["open"])
-    bearish = sum(1 for c in recent if c["close"] < c["open"])
-    score += (bullish - bearish) * 0.5
-
-    # Momentum de cierres, sin volumen ni osciladores adicionales.
-    if len(closes) >= 6 and closes[-6] > 0:
-        momentum = (closes[-1] - closes[-6]) / closes[-6] * 100.0
-        score += max(-1.5, min(1.5, momentum * 12.0))
-
-    score = max(-8.0, min(8.0, score))
-    # Porcentajes complementarios que siempre suman 100%.
-    bull = 50.0 + (score / 8.0) * 45.0
-    bear = 100.0 - bull
-    direction = "ALCISTA" if score > 0.35 else "BAJISTA" if score < -0.35 else "INDECISO"
-    candle_signal = "COMPRADORAS" if bullish > bearish else "VENDEDORAS" if bearish > bullish else "MIXTAS"
-    return {"bull": round(bull, 1), "bear": round(bear, 1), "neutral": 0.0,
-            "direction": direction, "score": round(score, 2),
-            "ema9": round(e9[-1], 2), "ema21": round(e21[-1], 2),
-            "candle_signal": candle_signal}
-
-
-def forecast_15m(data, price, prediction):
-    """Proyección heurística a 15 minutos basada en velas y EMA 9/21."""
-    closes = [c["close"] for c in data if c.get("close", 0) > 0]
-    if len(closes) < 30 or price <= 0:
-        return {"target": None, "change_pct": None, "direction": "ESPERANDO DATOS",
-                "horizon_minutes": 15, "method": "insufficient_data"}
-    recent = closes[-30:]
-    returns = [(recent[i] / recent[i - 1] - 1.0)
-               for i in range(1, len(recent)) if recent[i - 1] > 0]
-    avg_return = sum(returns) / max(1, len(returns))
-    score = safe_float(prediction.get("score"))
-    raw_pct = avg_return * 15.0 * 100.0 * 0.45 + (score / 8.0) * 0.08 * 0.55
-    projected_pct = max(-0.80, min(0.80, raw_pct))
-    target = price * (1.0 + projected_pct / 100.0)
-    direction = "SUBE" if projected_pct > 0.015 else "BAJA" if projected_pct < -0.015 else "LATERAL"
-    return {"target": round(target, 2), "change_pct": round(projected_pct, 3),
-            "direction": direction, "horizon_minutes": 15,
-            "range_pct": 0.80, "method": "candles_ema9_ema21_estimate"}
-
-
-
-PAGE = r'''<!doctype html>
-<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>BTC Radar PRO</title>
-<script src="https://unpkg.com/lightweight-charts@4.2.2/dist/lightweight-charts.standalone.production.js"></script>
-<style>
-:root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;background:#050610;color:#f5f4ff;font-family:Arial,sans-serif}header{display:flex;align-items:center;gap:12px;padding:15px;border-bottom:1px solid #29263f}.coin{width:48px;height:48px;border-radius:50%;background:#f7931a;display:grid;place-items:center;font-size:32px;font-weight:bold}.brand{font-size:24px;font-weight:900}.brand b{color:#b12cff}.sub{font-size:12px;color:#aaa7c5;margin-top:4px}.live{margin-left:auto;color:#00e88b;font-size:12px}.wrap{max-width:1000px;margin:auto;padding:10px}.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.card,.tile{background:#0b0d1c;border:1px solid #34314f;border-radius:15px;padding:12px;text-align:center;min-width:0}.card .label{font-size:12px;color:#c5c1dd}.pct{font-size:clamp(24px,6vw,34px);font-weight:bold;margin:9px 0}.green{color:#00e58b}.red{color:#ff4166}.purple{color:#bd55ff}.direction{font-size:22px;font-weight:900;margin:9px 0}.bar{height:8px;border-radius:20px;background:#28283a;overflow:hidden}.bar span{display:block;height:100%;width:0;background:currentColor}.tabs{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin:14px 0}.tf{background:#17172a;color:#ddd;border:1px solid #393650;border-radius:9px;padding:9px 15px}.tf.active{background:#8500ff;border-color:#a84bff;color:#fff}.chartbox{height:390px;border:1px solid #302d49;border-radius:14px;overflow:hidden;background:#080a16}.indicators{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px}.tile{text-align:left}.tile small{color:#aaa}.tile strong{display:block;font-size:20px;margin-top:8px}.bottom{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-top:10px}.bottom .tile strong{font-size:clamp(22px,5vw,32px)}.status{display:flex;justify-content:space-around;gap:8px;flex-wrap:wrap;background:#111326;border:1px solid #34314f;border-radius:30px;padding:13px;margin-top:14px;font-size:12px;color:#c9c5df}.note{text-align:center;color:#918da9;font-size:11px;padding:14px}.prediction-note{font-size:11px;color:#aaa;text-align:center;margin-top:7px}@media(max-width:420px){.brand{font-size:20px}.chartbox{height:340px}.tile{padding:10px 8px}.tile strong{font-size:17px}}
-</style></head><body>
-<header><div class="coin">₿</div><div><div class="brand">BTC Radar <b>PRO</b></div><div class="sub">Bitcoin / USD · Coinbase · velas + EMA 9/21</div></div><div class="live" id="live">● INICIANDO</div></header>
-<div class="wrap">
-<section class="cards">
-<div class="card"><div class="label">↗ Probabilidad alcista*</div><div class="pct green" id="bull">--%</div><div class="bar green"><span id="bullbar"></span></div></div>
-<div class="card"><div class="label">Señal técnica</div><div class="direction purple" id="direction">ESPERANDO</div><div class="label" id="score">Calculando...</div></div>
-<div class="card"><div class="label">↘ Probabilidad bajista*</div><div class="pct red" id="bear">--%</div><div class="bar red"><span id="bearbar"></span></div></div>
-</section>
-<div class="tabs"><button class="tf active" data-tf="1">1m</button><button class="tf" data-tf="3">3m</button><button class="tf" data-tf="5">5m</button><button class="tf" data-tf="15">15m</button></div>
-<div class="chartbox" id="chart"></div>
-<section class="indicators" style="grid-template-columns:repeat(2,1fr)"><div class="tile"><small>EMA 9</small><strong id="ema9">--</strong></div><div class="tile"><small>EMA 21</small><strong id="ema21">--</strong></div></section>
-<section class="bottom"><div class="tile"><small>⏱ Tiempo restante del bloque 15m</small><strong class="purple" id="countdown">15:00</strong><div class="bar purple" style="margin-top:9px"><span id="timebar" style="width:100%"></span></div></div><div class="tile"><small>Precio BTC/USD en vivo</small><strong class="green" id="price">$--</strong><small id="updated">Esperando actualización</small></div><div class="tile"><small>Estimación de precio en 15 minutos</small><strong class="purple" id="target">$--</strong><small id="targetchange">Sin estimación todavía</small></div><div class="tile"><small>Dirección estimada 15m</small><strong id="forecastdir">--</strong><small>Escenario técnico, no garantía</small></div></section>
-<div class="prediction-note">*Los porcentajes son una puntuación técnica normalizada, no probabilidades estadísticas calibradas.</div>
-<div class="status"><span id="connection">● Conectando Coinbase</span><span id="age">Último dato: --</span></div>
-<div class="note">BTC Radar PRO · Gráfica: velas japonesas + EMA 9/21, sin volumen ni otros indicadores. Fuente spot: Coinbase BTC-USD. Puede diferir del índice de liquidación BRTI de Kalshi. No ejecuta operaciones ni garantiza resultados.</div>
-</div>
-<script>
-const $=id=>document.getElementById(id);let tf=1,lastState=null,chart=null,candleSeries=null,ema9Series=null,ema21Series=null;
-function money(v){return Number(v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}
-function initChart(){if(!window.LightweightCharts){$('chart').textContent='No se pudo cargar la librería de gráficas. Comprueba la conexión.';return}chart=LightweightCharts.createChart($('chart'),{width:$('chart').clientWidth,height:$('chart').clientHeight,layout:{background:{color:'#080a16'},textColor:'#c7c4dc'},grid:{vertLines:{color:'#202238'},horzLines:{color:'#202238'}},rightPriceScale:{borderColor:'#34314f'},timeScale:{borderColor:'#34314f',timeVisible:true,secondsVisible:false},crosshair:{mode:LightweightCharts.CrosshairMode.Normal}});candleSeries=chart.addCandlestickSeries({upColor:'#00d98a',downColor:'#ff4166',borderUpColor:'#00d98a',borderDownColor:'#ff4166',wickUpColor:'#00d98a',wickDownColor:'#ff4166'});ema9Series=chart.addLineSeries({color:'#00aaff',lineWidth:2,priceLineVisible:false});ema21Series=chart.addLineSeries({color:'#ff9d2e',lineWidth:2,priceLineVisible:false});chart.timeScale().fitContent()}
-function ema(values,n){if(!values.length)return[];let a=2/(n+1),out=[values[0]];for(let i=1;i<values.length;i++)out.push(values[i]*a+out[i-1]*(1-a));return out}
-function vwap(data){let vol=0,val=0,out=[];for(const c of data){let typical=(c.high+c.low+c.close)/3;vol+=c.volume;val+=typical*c.volume;out.push(vol?val/vol:c.close)}return out}
-function updateChart(){if(!chart||!lastState)return;let data=lastState.timeframes[String(tf)]||[];if(!data.length)return;candleSeries.setData(data.map(c=>({time:c.time,open:c.open,high:c.high,low:c.low,close:c.close})));let closes=data.map(c=>c.close);ema9Series.setData(ema(closes,9).map((v,i)=>({time:data[i].time,value:v})));ema21Series.setData(ema(closes,21).map((v,i)=>({time:data[i].time,value:v})));chart.timeScale().scrollToRealTime()}
-function render(s){lastState=s;let p=s.prediction||{},f=s.forecast||{};$('bull').textContent=(p.bull??'--')+'%';$('bear').textContent=(p.bear??'--')+'%';$('bullbar').style.width=(p.bull||0)+'%';$('bearbar').style.width=(p.bear||0)+'%';$('direction').textContent=p.direction||'--';$('direction').className='direction '+(p.direction==='ALCISTA'?'green':p.direction==='BAJISTA'?'red':'purple');$('score').textContent='Fuerza técnica: '+(p.score??'--');$('price').textContent='$'+money(s.price);$('ema9').textContent=p.ema9?money(p.ema9):'--';$('ema21').textContent=p.ema21?money(p.ema21):'--';$('target').textContent=f.target?'$'+money(f.target):'$--';$('targetchange').textContent=f.change_pct!==null&&f.change_pct!==undefined?((f.change_pct>0?'+':'')+f.change_pct+'% estimado'): 'Esperando datos';$('forecastdir').textContent=f.direction||'--';$('forecastdir').className=f.direction==='SUBE'?'green':f.direction==='BAJA'?'red':'purple';$('connection').textContent=s.connected?'● Coinbase conectado':'● Coinbase desconectado';$('live').textContent=s.connected?'● EN VIVO':'● SIN CONEXIÓN';$('age').textContent='Último dato: '+s.update_age+' s';$('updated').textContent='Cambio sesión: '+(s.change>=0?'+':'')+s.change+'%';updateChart()}
-async function refresh(){try{let r=await fetch('/api/state?t='+Date.now(),{cache:'no-store'});if(!r.ok)throw Error('API '+r.status);render(await r.json())}catch(e){$('connection').textContent='● Esperando datos / reconectando';$('live').textContent='● SIN DATOS'}}
-function countdown(){let rem=900-Math.floor(Date.now()/1000)%900;$('countdown').textContent=String(Math.floor(rem/60)).padStart(2,'0')+':'+String(rem%60).padStart(2,'0');$('timebar').style.width=(rem/900*100)+'%'}
-document.querySelectorAll('.tf').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('.tf').forEach(x=>x.classList.remove('active'));b.classList.add('active');tf=Number(b.dataset.tf);updateChart()}));
-initChart();window.addEventListener('resize',()=>{if(chart)chart.applyOptions({width:$('chart').clientWidth,height:$('chart').clientHeight})});refresh();countdown();setInterval(refresh,2000);setInterval(countdown,250);
-</script></body></html>'''
+        return {
+            "available": True,
+            "series": KALSHI_SERIES,
+            "ticker": market.get("ticker"),
+            "title": (
+                market.get("title")
+                or market.get("subtitle")
+                or "Bitcoin 15 minutos"
+            ),
+            "status": market.get("status"),
+            "close_ts": close_ts,
+            "yes_bid": yes_bid,
+            "yes_ask": yes_ask,
+            "no_bid": no_bid,
+            "no_ask": no_ask,
+            "last_price": as_float(
+                market.get("last_price_dollars")
+            ),
+            "yes_ask_estimated": yes_estimated,
+            "no_ask_estimated": no_estimated,
+            "floor_strike": as_float(market.get("floor_strike")),
+            "cap_strike": as_float(market.get("cap_strike")),
+            "rules": market.get("rules_primary") or ""
+        }
+    except Exception as exc:
+        return {
+            "available": False,
+            "message": f"Error conectando a Kalshi: {str(exc)}",
+            "series": KALSHI_SERIES
+        }
 
 
 @app.route("/")
-def home():
-    return render_template_string(PAGE)
+def index():
+    return render_template_string(HTML)
 
 
-@app.route("/health")
-def health():
-    with lock:
-        count = len(candles)
-    return jsonify({"ok": True, "candles": count, "connected": connection_status, "websocket_connected": ws_connected,
-                    "last_error": last_error})
+@app.route("/api/data")
+def api_data():
+    try:
+        df_raw, source = get_market_data()
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 502
 
+    df = calculate_indicators(df_raw)
+    signal = generate_signal(df)
+    last = df.iloc[-1]
 
-@app.route("/api/state")
-def api_state():
-    with lock:
-        raw = list(candles)
-        price = current_price
-        updated = last_update
-        connected = connection_status and (time.time() - updated < 20 if updated else False)
-    if not raw or price <= 0:
-        return jsonify({"error": "Esperando datos de Coinbase", "connected": connected,
-                        "last_error": last_error}), 503
-    frames = {str(n): aggregate_candles(raw, n)[-180:] for n in (1, 3, 5, 15)}
-    prediction = analyze(raw)
-    forecast = forecast_15m(raw, price, prediction)
-    first = raw[0]["open"] or price
-    change = (price - first) / first * 100 if first else 0.0
-    return jsonify({"price": round(price, 2), "change": round(change, 3),
-                    "connected": connected, "update_age": round(time.time() - updated, 1) if updated else 999,
-                    "prediction": prediction, "forecast": forecast, "timeframes": frames})
+    def line(col):
+        out = []
+        for t, v in zip(df["time"], df[col]):
+            if pd.isna(v):
+                continue
+            out.append({
+                "time": int(pd.Timestamp(t).timestamp()),
+                "value": round(float(v), 4),
+            })
+        return out
 
+    candles = []
+    volume = []
+    for t, o, h, l, c, v in zip(
+        df["time"], df["open"], df["high"],
+        df["low"], df["close"], df["volume"]
+    ):
+        ts = int(pd.Timestamp(t).timestamp())
+        candles.append({
+            "time": ts,
+            "open": float(o),
+            "high": float(h),
+            "low": float(l),
+            "close": float(c),
+        })
+        volume.append({
+            "time": ts,
+            "value": float(v),
+            "color": "#00d69a" if c >= o else "#ff5268",
+        })
 
-_started = False
-_start_lock = threading.Lock()
+    macd_hist = []
+    for t, v in zip(df["time"], df["MACD_HIST"]):
+        if pd.isna(v):
+            continue
+        macd_hist.append({
+            "time": int(pd.Timestamp(t).timestamp()),
+            "value": round(float(v), 2),
+            "color": "#00d69a" if v >= 0 else "#ff5268",
+        })
 
+    return jsonify({
+        "price": float(last["close"]),
+        "signal": signal,
+        "rsi": None if pd.isna(last["RSI"]) else float(last["RSI"]),
+        "source": source,
+        "candles": candles,
+        "ema9": line("EMA9"),
+        "ema21": line("EMA21"),
+        "vwap": line("VWAP"),
+        "volume": volume,
+        "rsi_series": line("RSI"),
+        "macd": line("MACD"),
+        "macd_signal": line("MACD_SIGNAL"),
+        "macd_hist": macd_hist,
+        "support": None if pd.isna(last["SUPPORT"]) else float(last["SUPPORT"]),
+        "resistance": None if pd.isna(last["RESISTANCE"]) else float(last["RESISTANCE"]),
+        "market": kalshi_market_data(),
+    })
+    HTML = r"""
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#080d18">
+<title>Bitcoin Radar PRO</title>
 
-def start_background():
-    global _started
-    with _start_lock:
-        if _started:
-            return
-        _started = True
-    load_historical_candles()
-    threading.Thread(target=websocket_worker, daemon=True, name="coinbase-ws").start()
-    threading.Thread(target=rest_price_worker, daemon=True, name="coinbase-rest").start()
+<script src="https://unpkg.com/lightweight-charts@4.2.2/dist/lightweight-charts.standalone.production.js"></script>
 
+<style>
+:root {
+ --bg:#080d18;
+ --panel:#111a2a;
+ --panel2:#182438;
+ --line:#263750;
+ --muted:#91a4bd;
+ --white:#edf4ff;
+ --green:#00d69a;
+ --red:#ff5268;
+ --yellow:#ffc857;
+ --blue:#36a3ff;
+ --purple:#c58cff;
+}
+* {box-sizing:border-box}
+body {
+ margin:0;
+ padding:12px;
+ background:var(--bg);
+ color:var(--white);
+ font-family:Arial,sans-serif;
+}
+main {max-width:1180px;margin:auto}
+header {
+ display:flex;
+ justify-content:space-between;
+ align-items:center;
+ gap:10px;
+ margin:5px 0 14px;
+ flex-wrap:wrap;
+}
+h1 {font-size:19px;letter-spacing:1.4px;margin:0 0 5px}
+.sub {font-size:10px;color:var(--green)}
+button {
+ border:1px solid #3b526e;
+ background:#1b2b42;
+ color:white;
+ border-radius:8px;
+ padding:10px 13px;
+ font-weight:bold;
+ cursor:pointer;
+}
+.panel {
+ background:var(--panel);
+ border:1px solid var(--line);
+ border-radius:13px;
+ padding:13px;
+ margin-bottom:12px;
+}
+.metrics {
+ display:grid;
+ grid-template-columns:repeat(2,minmax(0,1fr));
+ gap:9px;
+ margin-bottom:12px;
+}
+.metric {
+ background:var(--panel2);
+ padding:12px;
+ border-radius:9px;
+ min-width:0;
+}
+.metric small,.muted {
+ font-size:10px;
+ color:var(--muted);
+}
+.metric strong {
+ display:block;
+ font-size:19px;
+ margin-top:7px;
+ overflow-wrap:anywhere;
+}
+.section {
+ font-size:11px;
+ color:#aebed2;
+ letter-spacing:1px;
+ margin:2px 0 12px;
+ font-weight:bold;
+}
+.green {color:var(--green)}
+.red {color:var(--red)}
+.yellow {color:var(--yellow)}
+.blue {color:var(--blue)}
+.signal-grid {
+ display:grid;
+ grid-template-columns:repeat(3,1fr);
+ gap:8px;
+}
+.signal {
+ padding:13px 5px;
+ text-align:center;
+ border-radius:9px;
+ background:#182438;
+ font-size:12px;
+ font-weight:bold;
+ border:1px solid #344963;
+}
+.active-up {
+ background:#103d34;
+ border-color:var(--green);
+ color:var(--green);
+}
+.active-down {
+ background:#3b202b;
+ border-color:var(--red);
+ color:var(--red);
+}
+.active-wait {
+ background:#40351e;
+ border-color:var(--yellow);
+ color:var(--yellow);
+}
+.chart {width:100%;height:360px}
+.small-chart {height:150px}
+.legend {
+ display:flex;
+ flex-wrap:wrap;
+ gap:12px;
+ font-size:10px;
+ color:#aabbd0;
+ margin-bottom:10px;
+}
+.legend span {display:flex;align-items:center;gap:5px}
+.dot {width:8px;height:8px;border-radius:50%}
+.two {
+ display:grid;
+ grid-template-columns:repeat(2,minmax(0,1fr));
+ gap:9px;
+}
+.quote {
+ background:var(--panel2);
+ border-radius:10px;
+ padding:12px;
+}
+.quote b {font-size:10px;color:var(--muted)}
+.quote strong {
+ display:block;
+ font-size:25px;
+ margin-top:6px;
+}
+.formgrid {
+ display:grid;
+ grid-template-columns:repeat(2,minmax(0,1fr));
+ gap:9px;
+}
+label {
+ display:block;
+ font-size:10px;
+ color:var(--muted);
+ margin-bottom:5px;
+}
+input,select {
+ width:100%;
+ background:#0b1422;
+ color:var(--white);
+ border:1px solid #344963;
+ border-radius:8px;
+ padding:11px;
+ font-size:14px;
+}
+.actionrow {
+ display:flex;
+ gap:8px;
+ flex-wrap:wrap;
+ margin-top:10px;
+}
+.actionrow button {flex:1}
+.note {
+ font-size:10px;
+ line-height:1.5;
+ color:#8293a9;
+}
+table {
+ width:100%;
+ border-collapse:collapse;
+ font-size:12px;
+}
+td {
+ padding:8px 3px;
+ border-bottom:1px solid #24344b;
+}
+td:last-child {
+ text-align:right;
+ font-weight:bold;
+}
+.alertrow {
+ display:flex;
+ gap:9px;
+ align-items:center;
+ padding:8px 0;
+ border-bottom:1px solid #24344b;
+ font-size:12px;
+}
+.pill {
+ font-size:10px;
+ border-radius:20px;
+ padding:4px 7px;
+ background:#263750;
+ color:#b9cbe0;
+}
+footer {
+ text-align:center;
+ color:#71839b;
+ font-size:10px;
+ padding:12px;
+}
+@media(min-width:700px) {
+ body {padding:22px}
+ .metrics {grid-template-columns:repeat(4,1fr)}
+ .chart {height:490px}
+ .small-chart {height:170px}
+ .layout {
+  display:grid;
+  grid-template-columns:1.4fr 1fr;
+  gap:12px;
+ }
+ .layout .panel {height:fit-content}
+}
+</style>
+</head>
 
-start_background()
+<body>
+<main>
+
+<header>
+ <div>
+  <h1>BITCOIN RADAR PRO</h1>
+  <div class="sub" id="connection">● CONECTANDO DATOS...</div>
+ </div>
+ <button onclick="updateAll()">ACTUALIZAR</button>
+</header>
+
+<div class="metrics">
+ <div class="metric">
+  <small>BITCOIN / USD</small>
+  <strong id="btcPrice">--</strong>
+ </div>
+ <div class="metric">
+  <small>SEÑAL TÉCNICA</small>
+  <strong id="mainSignal" class="yellow">ESPERAR</strong>
+ </div>
+ <div class="metric">
+  <small>RSI 14</small>
+  <strong id="rsiValue">--</strong>
+ </div>
+ <div class="metric">
+  <small>CONTRATO CIERRA EN</small>
+  <strong id="timer">--:--</strong>
+ </div>
+</div>
+
+<div class="layout">
+<div>
+
+<section class="panel">
+ <div class="section">RADAR DE DIRECCIÓN</div>
+ <div class="signal-grid">
+  <div class="signal" id="upSignal">▲ SUBE</div>
+  <div class="signal" id="downSignal">▼ BAJA</div>
+  <div class="signal active-wait" id="waitSignal">Ⅱ ESPERAR</div>
+ </div>
+ <p class="note" id="explanation">
+  Esperando confirmación de indicadores.
+ </p>
+</section>
+
+<section class="panel">
+ <div class="section">BTC · VELAS JAPONESAS · 1 MINUTO</div>
+ <div class="legend">
+  <span><i class="dot" style="background:#ffc857"></i>EMA 9</span>
+  <span><i class="dot" style="background:#36a3ff"></i>EMA 21</span>
+  <span><i class="dot" style="background:#c58cff"></i>VWAP</span>
+ </div>
+ <div id="priceChart" class="chart"></div>
+</section>
+
+<section class="panel">
+ <div class="section">VOLUMEN</div>
+ <div id="volumeChart" class="chart small-chart"></div>
+</section>
+
+<section class="panel">
+ <div class="section">RSI 14</div>
+ <div id="rsiChart" class="chart small-chart"></div>
+</section>
+
+<section class="panel">
+ <div class="section">MACD</div>
+ <div id="macdChart" class="chart small-chart"></div>
+</section>
+
+</div>
+
+<div>
+
+<section class="panel">
+ <div class="section">MERCADO KALSHI · BTC 15 MINUTOS</div>
+ <div id="marketTitle" style="font-size:13px;font-weight:bold;margin-bottom:8px">
+  Buscando contrato...
+ </div>
+ <div class="muted" id="marketTicker">Ticker: --</div>
+
+ <div class="two" style="margin-top:10px">
+  <div class="quote">
+   <b>YES · COMPRA</b>
+   <strong class="green" id="yesAsk">--¢</strong>
+   <span class="muted" id="yesBid">Bid: --</span>
+  </div>
+  <div class="quote">
+   <b>NO · COMPRA</b>
+   <strong class="red" id="noAsk">--¢</strong>
+   <span class="muted" id="noBid">Bid: --</span>
+  </div>
+ </div>
+
+ <p class="note" id="marketMessage">
+  Consultando la API pública de Kalshi.
+ </p>
+ <div class="muted" id="strikeInfo"></div>
+</section>
+
+<section class="panel">
+ <div class="section">MI OPERACIÓN · SEGUIMIENTO MANUAL</div>
+
+ <div class="formgrid">
+  <div>
+   <label>LADO COMPRADO</label>
+   <select id="side">
+    <option value="yes">YES</option>
+    <option value="no">NO</option>
+   </select>
+  </div>
+
+  <div>
+   <label>CONTRATOS</label>
+   <input id="quantity" type="number" min="1" step="1" value="1">
+  </div>
+
+  <div>
+   <label>PRECIO DE ENTRADA (¢)</label>
+   <input id="entry" type="number" min="1" max="99" placeholder="Ej. 52">
+  </div>
+
+  <div>
+   <label>OBJETIVO DE SALIDA (¢)</label>
+   <input id="target" type="number" min="1" max="99" placeholder="Ej. 70">
+  </div>
+
+  <div>
+   <label>LÍMITE DE PÉRDIDA (¢)</label>
+   <input id="stop" type="number" min="1" max="99" placeholder="Ej. 40">
+  </div>
+
+  <div>
+   <label>ALERTA SONORA</label>
+   <select id="sound">
+    <option value="on">Activada</option>
+    <option value="off">Desactivada</option>
+   </select>
+  </div>
+ </div>
+
+ <div class="actionrow">
+  <button onclick="saveTrade()">GUARDAR OPERACIÓN</button>
+  <button onclick="clearTrade()">CERRAR / BORRAR</button>
+ </div>
+
+ <table style="margin-top:10px">
+  <tr>
+   <td>Precio actual de salida estimado</td>
+   <td id="currentExit">--</td>
+  </tr>
+  <tr>
+   <td>Ganancia / pérdida estimada</td>
+   <td id="pnl">--</td>
+  </tr>
+  <tr>
+   <td>Estado</td>
+   <td id="tradeStatus">Sin operación guardada</td>
+  </tr>
+ </table>
+
+ <p class="note">
+  Estimación antes de comisiones y deslizamiento. El panel no compra
+  ni vende por ti.
+ </p>
+</section>
+
+<section class="panel">
+ <div class="section">ALERTAS INTELIGENTES</div>
+
+ <div class="alertrow">
+  <span class="pill">SEÑAL</span>
+  Aviso cuando cambia SUBE / BAJA / ESPERAR
+ </div>
+ <div class="alertrow">
+  <span class="pill">OBJETIVO</span>
+  Aviso al alcanzar el precio objetivo
+ </div>
+ <div class="alertrow">
+  <span class="pill">STOP</span>
+  Aviso al alcanzar el límite de pérdida
+ </div>
+ <div class="alertrow">
+  <span class="pill">SALIDA</span>
+  Aviso si se debilita la señal técnica
+ </div>
+
+ <div class="actionrow">
+  <button onclick="enableSound()">ACTIVAR SONIDO</button>
+ </div>
+
+ <p class="note" id="alertStatus">
+  Las alertas iguales no se repiten en cada actualización.
+ </p>
+</section>
+
+</div>
+</div>
+
+<footer>
+ Datos informativos. Las señales técnicas no garantizan resultados.
+ Los contratos YES/NO dependen de las reglas del mercado seleccionado.
+</footer>
+
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+
+const fmtUSD = v => v != null ? '$' + Number(v).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2}) : '--';
+const fmtPct = v => v != null ? (v > 0 ? '+' : '') + Number(v).toFixed(2) + '%' : '--';
+
+let chart, priceSeries, volumeSeries, rsiSeries, macdSeries, macdSignalSeries, macdHistSeries;
+let ema9Series, ema21Series, vwapSeries;
+
+function initCharts() {
+    const chartOptions = {
+        layout: {
+            background: { type: 'solid', color: '#111a2a' },
+            textColor: '#91a4bd',
+        },
+        grid: {
+            vertLines: { color: '#182438' },
+            horzLines: { color: '#182438' },
+        },
+        rightPriceScale: { borderColor: '#263750' },
+        timeScale: { borderColor: '#263750', timeVisible: true, secondsVisible: false },
+        crosshair: { mode: LightweightCharts.CrosshairMode.Normal }
+    };
+
+    const createChartInstance = (containerId) => {
+        const container = $(containerId);
+        if (!container) return null;
+        const c = LightweightCharts.createChart(container, {
+            ...chartOptions,
+            width: container.clientWidth,
+            height: container.clientHeight
+        });
+        window.addEventListener('resize', () => {
+            if (container) c.resize(container.clientWidth, container.clientHeight);
+        });
+        return c;
+    };
+
+    const priceChart = createChartInstance('priceChart');
+    if (priceChart) {
+        priceSeries = priceChart.addCandlestickSeries({
+            upColor: '#00d69a', downColor: '#ff5268',
+            borderUpColor: '#00d69a', borderDownColor: '#ff5268',
+            wickUpColor: '#00d69a', wickDownColor: '#ff5268'
+        });
+        ema9Series = priceChart.addLineSeries({ color: '#ffc857', lineWidth: 2 });
+        ema21Series = priceChart.addLineSeries({ color: '#36a3ff', lineWidth: 2 });
+        vwapSeries = priceChart.addLineSeries({ color: '#c58cff', lineWidth: 2 });
+    }
+
+    const volChart = createChartInstance('volumeChart');
+    if (volChart) {
+        volumeSeries = volChart.addHistogramSeries({
+            priceFormat: { type: 'volume' },
+            priceScaleId: ''
+        });
+        volChart.priceScale('').applyOptions({ scaleMargins: { top: 0.1, bottom: 0 } });
+    }
+
+    const rsiChart = createChartInstance('rsiChart');
+    if (rsiChart) {
+        rsiSeries = rsiChart.addLineSeries({ color: '#36a3ff', lineWidth: 2 });
+    }
+
+    const macdChart = createChartInstance('macdChart');
+    if (macdChart) {
+        macdSeries = macdChart.addLineSeries({ color: '#36a3ff', lineWidth: 1.5 });
+        macdSignalSeries = macdChart.addLineSeries({ color: '#ffc857', lineWidth: 1.5 });
+        macdHistSeries = macdChart.addHistogramSeries();
+    }
+}
+
+function updateUI(data) {
+    $('connection').textContent = `● CONECTADO (${data.source})`;
+    $('btcPrice').textContent = fmtUSD(data.price);
+    $('rsiValue').textContent = data.rsi != null ? data.rsi.toFixed(1) : '--';
+
+    const signal = data.signal;
+    $('mainSignal').textContent = signal;
+    $('mainSignal').className = signal === 'SUBE' ? 'green' : signal === 'BAJA' ? 'red' : 'yellow';
+
+    $('upSignal').className = 'signal' + (signal === 'SUBE' ? ' active-up' : '');
+    $('downSignal').className = 'signal' + (signal === 'BAJA' ? ' active-down' : '');
+    $('waitSignal').className = 'signal' + (signal === 'ESPERAR' ? ' active-wait' : '');
+
+    $('explanation').textContent = signal === 'SUBE' 
+        ? 'Tendencia alcista confirmada por EMA9, RSI, MACD y VWAP.'
+        : signal === 'BAJA'
+        ? 'Tendencia bajista confirmada por los indicadores técnicos.'
+        : 'Mercado sin dirección clara o en zona de consolidación.';
+
+    if (priceSeries) priceSeries.setData(data.candles);
+    if (volumeSeries) volumeSeries.setData(data.volume);
+    if (ema9Series) ema9Series.setData(data.ema9);
+    if (ema21Series) ema21Series.setData(data.ema21);
+    if (vwapSeries) vwapSeries.setData(data.vwap);
+    if (rsiSeries) rsiSeries.setData(data.rsi_series);
+    if (macdSeries) macdSeries.setData(data.macd);
+    if (macdSignalSeries) macdSignalSeries.setData(data.macd_signal);
+    if (macdHistSeries) macdHistSeries.setData(data.macd_hist);
+
+    const m = data.market;
+    if (m && m.available) {
+        $('marketTitle').textContent = m.title;
+        $('marketTicker').textContent = `Ticker: ${m.ticker}`;
+        $('yesAsk').textContent = m.yes_ask != null ? Math.round(m.yes_ask * 100) + '¢' : '--¢';
+        $('yesBid').textContent = 'Bid: ' + (m.yes_bid != null ? Math.round(m.yes_bid * 100) + '¢' : '--');
+        $('noAsk').textContent = m.no_ask != null ? Math.round(m.no_ask * 100) + '¢' : '--¢';
+        $('noBid').textContent = 'Bid: ' + (m.no_bid != null ? Math.round(m.no_bid * 100) + '¢' : '--');
+        $('marketMessage').textContent = m.rules || 'Contrato activo de 15 minutos en Kalshi.';
+        $('strikeInfo').textContent = m.floor_strike ? `Strike base: $${m.floor_strike}` : '';
+
+        if (m.close_ts) {
+            startCountdown(m.close_ts);
+        }
+    } else {
+        $('marketTitle').textContent = 'Sin contrato activo';
+        $('marketMessage').textContent = m ? m.message : 'No se encontró información de mercado.';
+    }
+
+    calculateTrade(data.price);
+}
+
+let countdownInterval = null;
+function startCountdown(targetTimestamp) {
+    if (countdownInterval) clearInterval(countdownInterval);
+    
+    const updateTimer = () => {
+        const now = Math.floor(Date.now() / 1000);
+        const diff = targetTimestamp - now;
+        if (diff <= 0) {
+            $('timer').textContent = '00:00';
+            return;
+        }
+        const m = Math.floor(diff / 60);
+        const s = diff % 60;
+        $('timer').textContent = `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+    };
+    updateTimer();
+    countdownInterval = setInterval(updateTimer, 1000);
+}
+
+function updateAll() {
+    fetch('/api/data')
+        .then(res => res.json())
+        .then(data => {
+            if (data.error) {
+                $('connection').textContent = '● ERROR: ' + data.error;
+                return;
+            }
+            updateUI(data);
+        })
+        .catch(err => {
+            $('connection').textContent = '● ERROR DE CONEXIÓN';
+            console.error(err);
+        });
+}
+
+function saveTrade() {
+    const trade = {
+        side: $('side').value,
+        quantity: parseFloat($('quantity').value) || 1,
+        entry: parseFloat($('entry').value) || 0,
+        target: parseFloat($('target').value) || 0,
+        stop: parseFloat($('stop').value) || 0
+    };
+    localStorage.setItem('btc_radar_trade', JSON.stringify(trade));
+    alert('Operación guardada para seguimiento.');
+    updateAll();
+}
+
+function clearTrade() {
+    localStorage.removeItem('btc_radar_trade');
+    $('entry').value = '';
+    $('target').value = '';
+    $('stop').value = '';
+    $('currentExit').textContent = '--';
+    $('pnl').textContent = '--';
+    $('tradeStatus').textContent = 'Sin operación guardada';
+}
+
+function calculateTrade(currentPrice) {
+    const saved = localStorage.getItem('btc_radar_trade');
+    if (!saved) return;
+    const t = JSON.parse(saved);
+    $('side').value = t.side;
+    $('quantity').value = t.quantity;
+    $('entry').value = t.entry;
+    $('target').value = t.target;
+    $('stop').value = t.stop;
+
+    const currentValInput = t.entry; 
+    $('currentExit').textContent = currentValInput + '¢ (Ref)';
+    
+    const diff = (t.target - t.entry) * t.quantity;
+    $('pnl').textContent = (diff >= 0 ? '+' : '') + diff + '¢ USD aprox';
+    $('tradeStatus').textContent = `Activa (${t.side.toUpperCase()} x ${t.quantity})`;
+}
+
+function enableSound() {
+    alert('Alertas sonoras habilitadas en este navegador.');
+    $('alertStatus').textContent = 'Alertas activas y sonando al cumplirse condiciones.';
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    initCharts();
+    updateAll();
+    setInterval(updateAll, 15000);
+});
+</script>
+</body>
+</html>
+"""
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", "5000")), threaded=True)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", "5000")), debug=False)
+    
