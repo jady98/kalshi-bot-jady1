@@ -11,7 +11,7 @@ from flask import Flask, jsonify, render_template_string
 app = Flask(__name__)
 
 # ==================================================
-# BITCOIN RADAR LIVE - COINBASE
+# CONFIGURACION
 # ==================================================
 
 PRODUCT_ID = "BTC-USD"
@@ -33,7 +33,7 @@ services_started = False
 
 session = requests.Session()
 session.headers.update({
-    "User-Agent": "BitcoinRadar/2.0",
+    "User-Agent": "BitcoinRadar/3.0",
     "Accept": "application/json"
 })
 
@@ -46,7 +46,6 @@ def update_price(price, source="COINBASE"):
     global current_price, last_update, last_source
 
     price = float(price)
-
     if price <= 0:
         return
 
@@ -60,11 +59,9 @@ def update_price(price, source="COINBASE"):
 
         if candles and candles[-1]["time"] == minute:
             candle = candles[-1]
-
             candle["high"] = max(candle["high"], price)
             candle["low"] = min(candle["low"], price)
             candle["close"] = price
-
         else:
             candles.append({
                 "time": minute,
@@ -77,7 +74,7 @@ def update_price(price, source="COINBASE"):
 
 
 # ==================================================
-# CARGAR HISTORIAL SIN BORRAR DATOS EN VIVO
+# HISTORIAL DE COINBASE
 # ==================================================
 
 def load_history():
@@ -89,10 +86,9 @@ def load_history():
             params={"granularity": 60},
             timeout=15
         )
-
         response.raise_for_status()
-        raw = response.json()
 
+        raw = response.json()
         history = []
 
         for item in raw:
@@ -127,16 +123,42 @@ def load_history():
 
             candles.clear()
             candles.extend(merged[-MAX_CANDLES:])
-
-            # No reemplazar el precio en vivo
-            if current_price is None and candles:
-                current = candles[-1]["close"]
-
             last_error = ""
 
     except Exception as exc:
         with lock:
             last_error = "Historial: " + str(exc)
+
+
+# ==================================================
+# ACTUALIZACION MANUAL REAL
+# ==================================================
+
+def force_coinbase_update():
+    global last_error
+
+    try:
+        response = session.get(
+            f"{REST_URL}/products/{PRODUCT_ID}/ticker",
+            timeout=10
+        )
+        response.raise_for_status()
+
+        data = response.json()
+        price = float(data["price"])
+
+        update_price(price, "ACTUALIZACION MANUAL")
+
+        with lock:
+            last_error = ""
+
+        return True
+
+    except Exception as exc:
+        with lock:
+            last_error = "Actualización manual: " + str(exc)
+
+        return False
 
 
 # ==================================================
@@ -236,7 +258,7 @@ def websocket_worker():
 
 
 # ==================================================
-# RESPALDO REST SI FALLA WEBSOCKET
+# RESPALDO REST
 # ==================================================
 
 def rest_fallback_worker():
@@ -247,20 +269,15 @@ def rest_fallback_worker():
             with lock:
                 updated = last_update
 
-            # Si WebSocket está actualizando, no interferir
             if time.time() - updated > 8:
-
                 response = session.get(
                     f"{REST_URL}/products/{PRODUCT_ID}/ticker",
                     timeout=10
                 )
-
                 response.raise_for_status()
 
                 data = response.json()
-                price = float(data["price"])
-
-                update_price(price, "REST")
+                update_price(float(data["price"]), "REST")
 
         except Exception as exc:
             with lock:
@@ -312,7 +329,7 @@ def calculate_signal(price, history):
 
     if len(closes) < 22:
         return {
-            "direction": "ESPERAR",
+            "direction": "ESPERANDO DATOS",
             "signal": "ESPERAR",
             "prediction": round(price, 2),
             "confidence": 0
@@ -332,7 +349,6 @@ def calculate_signal(price, history):
 
     momentum = (closes[-1] / closes[-6]) - 1
 
-    # Proyección experimental para los próximos 15 minutos
     projected_change = max(
         -0.003,
         min(0.003, momentum * 2.5)
@@ -340,23 +356,25 @@ def calculate_signal(price, history):
 
     prediction = price * (1 + projected_change)
 
-    if ema9 > ema21 and momentum > 0:
+    # Direccion predominante sin señal NEUTRAL
+    if ema9 > ema21:
         direction = "ALCISTA"
         signal = "SUBE"
-
-    elif ema9 < ema21 and momentum < 0:
+        strength = max(0, momentum * 10000)
+    elif ema9 < ema21:
         direction = "BAJISTA"
         signal = "BAJA"
-
+        strength = max(0, -momentum * 10000)
+    elif momentum >= 0:
+        direction = "ALCISTA"
+        signal = "SUBE"
+        strength = momentum * 10000
     else:
-        direction = "NEUTRAL"
-        signal = "ESPERAR"
+        direction = "BAJISTA"
+        signal = "BAJA"
+        strength = -momentum * 10000
 
-    if direction == "NEUTRAL":
-        confidence = 0
-    else:
-        strength = abs(momentum) * 10000
-        confidence = min(85, 50 + int(strength))
+    confidence = min(85, 50 + int(strength))
 
     return {
         "direction": direction,
@@ -370,15 +388,7 @@ def calculate_signal(price, history):
 # API PRINCIPAL
 # ==================================================
 
-@app.route("/")
-def home():
-    start_background_services()
-    return render_template_string(HTML)
-
-
-@app.route("/api")
-def api():
-    start_background_services()
+def get_api_data():
 
     with lock:
         price = current_price
@@ -399,7 +409,7 @@ def api():
     countdown = 900 - (now % 900)
 
     if price is None:
-        return jsonify({
+        return {
             "ok": False,
             "connected": False,
             "status": "ESPERANDO COINBASE",
@@ -407,11 +417,11 @@ def api():
             "candles": history,
             "countdown": countdown,
             "error": error
-        })
+        }
 
     analysis = calculate_signal(price, history)
 
-    return jsonify({
+    return {
         "ok": True,
         "connected": live,
         "websocket_connected": socket_status,
@@ -424,17 +434,37 @@ def api():
         "countdown": countdown,
         "last_update": updated,
         "source": source,
-        "candles": history[-100:],
+        "candles": history[-MAX_CANDLES:],
         "error": error
-    })
+    }
 
 
-# ==================================================
-# SALUD DEL SERVIDOR
-# ==================================================
+@app.route("/")
+def home():
+    start_background_services()
+    return render_template_string(HTML)
+
+
+@app.route("/api")
+def api():
+    start_background_services()
+    return jsonify(get_api_data())
+
+
+@app.route("/refresh")
+def refresh():
+    start_background_services()
+
+    success = force_coinbase_update()
+    data = get_api_data()
+    data["manual_refresh"] = success
+
+    return jsonify(data)
+
 
 @app.route("/health")
 def health():
+
     with lock:
         price = current_price
         updated = last_update
@@ -459,9 +489,10 @@ def health():
         "candles": count,
         "error": error
     })
-    
+
+
 # ==================================================
-# PRUEBA DE MERCADOS POLYMARKET
+# PRUEBA DE POLYMARKET
 # ==================================================
 
 @app.route("/polymarket-test")
@@ -535,16 +566,12 @@ def polymarket_test():
 HTML = r"""
 <!DOCTYPE html>
 <html lang="es">
-
 <head>
 <meta charset="UTF-8">
-<meta name="viewport"
-content="width=device-width, initial-scale=1">
-
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Bitcoin Radar Live</title>
 
 <style>
-
 * {
     box-sizing: border-box;
 }
@@ -616,10 +643,6 @@ h1 {
     color: #ff6475;
 }
 
-.neutral {
-    color: #ffbd59;
-}
-
 .prediction {
     font-size: 27px;
     font-weight: bold;
@@ -635,8 +658,9 @@ h1 {
 
 canvas {
     width: 100%;
-    height: 260px;
+    height: 300px;
     display: block;
+    touch-action: none;
 }
 
 .small {
@@ -648,6 +672,7 @@ canvas {
 .row {
     display: flex;
     justify-content: space-between;
+    align-items: center;
     gap: 12px;
 }
 
@@ -663,140 +688,107 @@ button {
     color: white;
     background: #294a83;
     font-weight: bold;
+    cursor: pointer;
 }
 
+button:disabled {
+    opacity: 0.5;
+}
+
+.chart-controls {
+    display: flex;
+    gap: 8px;
+    margin: 12px 0;
+}
+
+.chart-controls button {
+    min-width: 45px;
+}
 </style>
 </head>
 
 <body>
-
 <main>
+"""
+<section class="card">
 
-    <div class="header">
-        <h1>BITCOIN RADAR</h1>
-        <div id="status" class="status">
-            CONECTANDO...
+    <div class="label">BITCOIN / USD · COINBASE</div>
+    <div id="price" class="price">Cargando...</div>
+    <div class="small">Precio real recibido de Coinbase</div>
+
+</section>
+
+<section class="card">
+
+    <div class="label">RADAR DE DIRECCIÓN</div>
+
+    <div id="direction" class="signal">
+        ESPERANDO DATOS
+    </div>
+
+    <div class="row">
+        <div>
+            <div class="label">SEÑAL</div>
+            <div id="signal" class="value">ESPERAR</div>
+        </div>
+
+        <div>
+            <div class="label">CONFIANZA TÉCNICA</div>
+            <div id="confidence" class="value">--</div>
         </div>
     </div>
 
-    <section class="card">
-        <div class="label">
-            BITCOIN / USD · COINBASE
-        </div>
+</section>
 
-        <div id="price" class="price">
-            Cargando...
-        </div>
+<section class="card">
+    <div class="label">PRECIO ESTIMADO AL CIERRE</div>
+    <div id="prediction" class="prediction">--</div>
+    <div class="small">
+        Proyección experimental. No garantiza el precio futuro.
+    </div>
+</section>
 
-        <div class="small">
-            Precio real recibido de Coinbase
-        </div>
-    </section>
+<section class="card">
+    <div class="label">TIEMPO RESTANTE · 15 MINUTOS</div>
+    <div id="countdown" class="countdown">15:00</div>
+</section>
 
-    <section class="card">
+<section class="card">
 
-        <div class="label">
-            RADAR DE DIRECCIÓN
-        </div>
+    <div class="row">
+        <div class="label">VELAS DE 1 MINUTO</div>
 
-        <div id="direction" class="signal neutral">
-            ESPERAR
-        </div>
+        <button id="refreshButton" onclick="manualRefresh()">
+            ACTUALIZAR
+        </button>
+    </div>
 
-        <div class="row">
+    <div class="chart-controls">
+        <button onclick="zoomIn()">+</button>
+        <button onclick="zoomOut()">−</button>
+        <button onclick="resetZoom()">AJUSTAR</button>
+        <button onclick="goLive()">EN VIVO</button>
+    </div>
 
-            <div>
-                <div class="label">SEÑAL</div>
-                <div id="signal" class="value">
-                    ESPERAR
-                </div>
-            </div>
+    <canvas id="chart" width="900" height="360"></canvas>
 
-            <div>
-                <div class="label">
-                    CONFIANZA TÉCNICA
-                </div>
-                <div id="confidence" class="value">
-                    --
-                </div>
-            </div>
+    <div class="small">
+        Usa dos dedos para acercar o alejar.
+        Desliza para revisar velas anteriores.
+    </div>
 
-        </div>
+</section>
 
-    </section>
+<section class="card">
 
-    <section class="card">
+    <div class="label">ESTADO DE DATOS</div>
 
-        <div class="label">
-            PRECIO ESTIMADO AL CIERRE
-        </div>
+    <div id="source" class="value">Esperando...</div>
+    <div id="socket" class="small">WebSocket: comprobando</div>
+    <div id="updated" class="small">Esperando actualización...</div>
+    <div id="error" class="small"></div>
 
-        <div id="prediction" class="prediction">
-            --
-        </div>
-
-        <div class="small">
-            Proyección experimental basada en momentum y EMA.
-            No garantiza el precio futuro.
-        </div>
-
-    </section>
-
-    <section class="card">
-
-        <div class="label">
-            TIEMPO RESTANTE · 15 MINUTOS UTC
-        </div>
-
-        <div id="countdown" class="countdown">
-            15:00
-        </div>
-
-    </section>
-
-    <section class="card">
-
-        <div class="row">
-            <div class="label">
-                VELAS DE 1 MINUTO
-            </div>
-
-            <button onclick="refreshData()">
-                ACTUALIZAR
-            </button>
-        </div>
-
-        <canvas id="chart"
-        width="900" height="360"></canvas>
-
-        <div class="small">
-            Últimas velas recibidas de Coinbase.
-        </div>
-
-    </section>
-
-    <section class="card">
-
-        <div class="label">
-            ESTADO DE DATOS
-        </div>
-
-        <div id="source" class="value">
-            Esperando...
-        </div>
-
-        <div id="socket" class="small">
-            WebSocket: comprobando
-        </div>
-
-        <div id="updated" class="small">
-            Esperando primera actualización...
-        </div>
-
-        <div id="error" class="small">
-        </div>
-
-    </section>
+</section>
 
 </main>
 
@@ -809,20 +801,46 @@ const money = value =>
         maximumFractionDigits: 2
     });
 
-
 function setText(id, value) {
     document.getElementById(id).textContent = value;
 }
 
-
 function formatTime(seconds) {
-
     const m = Math.floor(seconds / 60);
     const s = seconds % 60;
 
-    return String(m).padStart(2, "0")
-        + ":"
-        + String(s).padStart(2, "0");
+    return String(m).padStart(2, "0") +
+        ":" + String(s).padStart(2, "0");
+}
+
+
+// ==================================================
+// CONTROL DEL ZOOM
+// ==================================================
+
+let chartData = [];
+let zoomLevel = 1;
+let chartOffset = 0;
+
+function zoomIn() {
+    zoomLevel = Math.min(8, zoomLevel * 1.3);
+    drawChart(chartData);
+}
+
+function zoomOut() {
+    zoomLevel = Math.max(0.5, zoomLevel / 1.3);
+    drawChart(chartData);
+}
+
+function resetZoom() {
+    zoomLevel = 1;
+    chartOffset = 0;
+    drawChart(chartData);
+}
+
+function goLive() {
+    chartOffset = 0;
+    drawChart(chartData);
 }
 
 
@@ -832,6 +850,8 @@ function formatTime(seconds) {
 
 function drawChart(data) {
 
+    chartData = data || [];
+
     const canvas = document.getElementById("chart");
     const ctx = canvas.getContext("2d");
 
@@ -840,30 +860,58 @@ function drawChart(data) {
 
     ctx.clearRect(0, 0, width, height);
 
-    if (!data || data.length < 2) {
+    if (!chartData.length) {
         ctx.fillStyle = "#93a1bd";
         ctx.fillText("Esperando velas...", 25, 40);
         return;
     }
 
-    const values = data.flatMap(c => [
+    const visibleCount = Math.max(
+        10,
+        Math.min(
+            chartData.length,
+            Math.floor(100 / zoomLevel)
+        )
+    );
+
+    const maxOffset = Math.max(
+        0,
+        chartData.length - visibleCount
+    );
+
+    chartOffset = Math.max(
+        0,
+        Math.min(chartOffset, maxOffset)
+    );
+
+    const end = chartData.length - chartOffset;
+    const start = Math.max(0, end - visibleCount);
+
+    const visible = chartData.slice(start, end);
+
+    const values = visible.flatMap(c => [
         Number(c.high),
         Number(c.low)
     ]);
 
-    const min = Math.min(...values);
-    const max = Math.max(...values);
-    const range = Math.max(max - min, 1);
+    let min = Math.min(...values);
+    let max = Math.max(...values);
+
+    const padding = Math.max((max - min) * 0.12, 1);
+
+    min -= padding;
+    max += padding;
 
     const top = 20;
     const bottom = height - 25;
     const usableHeight = bottom - top;
 
     const y = price =>
-        bottom - ((price - min) / range) * usableHeight;
+        bottom - ((price - min) / (max - min)) * usableHeight;
 
     ctx.strokeStyle = "#26334e";
     ctx.lineWidth = 1;
+    ctx.font = "13px Arial";
 
     for (let i = 0; i < 5; i++) {
 
@@ -873,14 +921,30 @@ function drawChart(data) {
         ctx.moveTo(0, yy);
         ctx.lineTo(width, yy);
         ctx.stroke();
+
+        const priceLabel =
+            max - ((max - min) / 4) * i;
+
+        ctx.fillStyle = "#93a1bd";
+        ctx.fillText(
+            money(priceLabel),
+            8,
+            yy - 4
+        );
     }
 
-    const step = width / data.length;
-    const candleWidth = Math.max(3, step * 0.55);
+    const chartLeft = 100;
+    const chartWidth = width - chartLeft - 10;
+    const step = chartWidth / visible.length;
 
-    data.forEach((c, i) => {
+    const candleWidth = Math.max(
+        3,
+        Math.min(24, step * 0.65)
+    );
 
-        const x = i * step + step / 2;
+    visible.forEach((c, i) => {
+
+        const x = chartLeft + i * step + step / 2;
 
         const rising = c.close >= c.open;
 
@@ -900,18 +964,11 @@ function drawChart(data) {
         const openY = y(c.open);
         const closeY = y(c.close);
 
-        const bodyTop = Math.min(openY, closeY);
-
-        const bodyHeight = Math.max(
-            2,
-            Math.abs(closeY - openY)
-        );
-
         ctx.fillRect(
             x - candleWidth / 2,
-            bodyTop,
+            Math.min(openY, closeY),
             candleWidth,
-            bodyHeight
+            Math.max(2, Math.abs(closeY - openY))
         );
 
     });
@@ -920,21 +977,140 @@ function drawChart(data) {
 
 
 // ==================================================
-// RECIBIR INFORMACION
+// ZOOM CON DOS DEDOS Y DESPLAZAMIENTO
+// ==================================================
+
+let pointers = new Map();
+let initialDistance = 0;
+let initialZoom = 1;
+let previousX = 0;
+
+const canvas = document.getElementById("chart");
+
+function distance(a, b) {
+    return Math.hypot(
+        a.x - b.x,
+        a.y - b.y
+    );
+}
+
+canvas.addEventListener("pointerdown", event => {
+
+    canvas.setPointerCapture(event.pointerId);
+
+    pointers.set(event.pointerId, {
+        x: event.clientX,
+        y: event.clientY
+    });
+
+    if (pointers.size === 1) {
+        previousX = event.clientX;
+    }
+
+    if (pointers.size === 2) {
+        const points = Array.from(pointers.values());
+
+        initialDistance = distance(
+            points[0],
+            points[1]
+        );
+
+        initialZoom = zoomLevel;
+    }
+
+});
+
+canvas.addEventListener("pointermove", event => {
+
+    if (!pointers.has(event.pointerId)) return;
+
+    pointers.set(event.pointerId, {
+        x: event.clientX,
+        y: event.clientY
+    });
+
+    if (pointers.size === 2) {
+
+        const points = Array.from(pointers.values());
+
+        const currentDistance = distance(
+            points[0],
+            points[1]
+        );
+
+        if (initialDistance > 0) {
+
+            zoomLevel = Math.max(
+                0.5,
+                Math.min(
+                    8,
+                    initialZoom *
+                    currentDistance / initialDistance
+                )
+            );
+
+            drawChart(chartData);
+        }
+
+    } else if (pointers.size === 1) {
+
+        const delta = event.clientX - previousX;
+        previousX = event.clientX;
+
+        const visibleCount = Math.max(
+            10,
+            Math.floor(100 / zoomLevel)
+        );
+
+        const pixelsPerCandle =
+            canvas.clientWidth / visibleCount;
+
+        chartOffset += Math.round(
+            -delta / Math.max(1, pixelsPerCandle)
+        );
+
+        drawChart(chartData);
+    }
+
+});
+
+function releasePointer(event) {
+    pointers.delete(event.pointerId);
+
+    if (pointers.size < 2) {
+        initialDistance = 0;
+    }
+}
+
+canvas.addEventListener("pointerup", releasePointer);
+canvas.addEventListener("pointercancel", releasePointer);
+
+
+// ==================================================
+// RECIBIR DATOS AUTOMATICAMENTE
 // ==================================================
 
 let requestInProgress = false;
 
-async function refreshData() {
+async function refreshData(manual = false) {
 
     if (requestInProgress) return;
 
     requestInProgress = true;
 
+    const button = document.getElementById("refreshButton");
+
+    if (manual) {
+        button.disabled = true;
+        button.textContent = "ACTUALIZANDO...";
+    }
+
     try {
 
+        const endpoint = manual ? "/refresh" : "/api";
+
         const response = await fetch(
-            "/api?_=" + Date.now(),
+            endpoint + "?_=" + Date.now(),
             { cache: "no-store" }
         );
 
@@ -947,14 +1123,8 @@ async function refreshData() {
         if (data.price !== undefined && data.price !== null) {
 
             setText("price", money(data.price));
-
-            setText(
-                "prediction",
-                money(data.prediction)
-            );
-
+            setText("prediction", money(data.prediction));
             setText("direction", data.direction);
-
             setText("signal", data.signal);
 
             setText(
@@ -965,14 +1135,13 @@ async function refreshData() {
             const direction =
                 document.getElementById("direction");
 
-            direction.className = "signal " +
-                (
-                    data.direction === "ALCISTA"
+            direction.className =
+                "signal " +
+                (data.direction === "ALCISTA"
                     ? "up"
                     : data.direction === "BAJISTA"
                     ? "down"
-                    : "neutral"
-                );
+                    : "");
 
             drawChart(data.candles);
         }
@@ -982,8 +1151,7 @@ async function refreshData() {
             formatTime(data.countdown || 0)
         );
 
-        const status =
-            document.getElementById("status");
+        const status = document.getElementById("status");
 
         status.textContent = data.connected
             ? "● EN VIVO"
@@ -1015,16 +1183,18 @@ async function refreshData() {
                     data.last_update * 1000
                 ).toLocaleTimeString()
             );
-
-        } else {
-
-            setText(
-                "updated",
-                "Esperando primera actualización..."
-            );
         }
 
-        setText("error", data.error || "");
+        if (manual) {
+            setText(
+                "error",
+                data.manual_refresh
+                    ? "Actualización manual completada."
+                    : (data.error || "No se pudo actualizar Coinbase.")
+            );
+        } else {
+            setText("error", data.error || "");
+        }
 
     } catch (error) {
 
@@ -1034,7 +1204,16 @@ async function refreshData() {
     } finally {
 
         requestInProgress = false;
+
+        if (manual) {
+            button.disabled = false;
+            button.textContent = "ACTUALIZAR";
+        }
     }
+}
+
+function manualRefresh() {
+    refreshData(true);
 }
 
 
@@ -1044,7 +1223,9 @@ async function refreshData() {
 
 refreshData();
 
-setInterval(refreshData, 1000);
+setInterval(() => {
+    refreshData(false);
+}, 1000);
 
 </script>
 
@@ -1066,3 +1247,4 @@ if __name__ == "__main__":
         port=10000,
         threaded=True
     )
+    
