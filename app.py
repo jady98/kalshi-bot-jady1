@@ -11,6 +11,7 @@ import websocket
 from flask import Flask, jsonify, render_template_string
 
 app = Flask(__name__)
+
 logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "INFO"),
     format="%(asctime)s %(levelname)s %(name)s: %(message)s"
@@ -25,11 +26,14 @@ WS_URL = "wss://advanced-trade-ws.coinbase.com"
 
 lock = threading.RLock()
 candles = deque(maxlen=1200)
+
 current_price = 0.0
 last_update = 0.0
 connection_status = False
 ws_connected = False
 last_error = ""
+last_source = "sin datos"
+last_rest_attempt = 0.0
 
 _started = False
 _start_lock = threading.Lock()
@@ -53,61 +57,9 @@ def set_error(message):
         last_error = str(message)[:1000]
 
 
-def load_historical_candles():
-    global current_price, last_update
-
-    end = datetime.now(timezone.utc)
-    start = end - timedelta(minutes=300)
-    params = {
-        "granularity": 60,
-        "start": start.isoformat(),
-        "end": end.isoformat()
-    }
-
-    try:
-        response = requests.get(
-            REST_URL,
-            params=params,
-            headers={"User-Agent": "BTC-Radar-PRO/3.0"},
-            timeout=15
-        )
-        response.raise_for_status()
-        rows = response.json()
-
-        parsed = []
-        for row in rows:
-            if len(row) < 6:
-                continue
-            parsed.append({
-                "time": int(row[0]),
-                "low": safe_float(row[1]),
-                "high": safe_float(row[2]),
-                "open": safe_float(row[3]),
-                "close": safe_float(row[4]),
-                "volume": safe_float(row[5])
-            })
-
-        parsed.sort(key=lambda item: item["time"])
-
-        with lock:
-            candles.clear()
-            candles.extend(parsed)
-
-            if candles:
-                current_price = candles[-1]["close"]
-                last_update = time.time()
-
-        log.info("Loaded %s Coinbase historical candles", len(parsed))
-        return True
-
-    except Exception as exc:
-        log.exception("Historical candle load failed")
-        set_error(f"Historical candles: {exc}")
-        return False
-
-
 def update_live_candle(price, size=0.0, trade_time=None, source="Coinbase"):
-    global current_price, last_update, connection_status, last_error
+    global current_price, last_update
+    global connection_status, last_error, last_source
 
     if price <= 0:
         return False
@@ -115,10 +67,15 @@ def update_live_candle(price, size=0.0, trade_time=None, source="Coinbase"):
     ts = minute_timestamp(trade_time)
 
     with lock:
+        # No permitir que una operación antigua sobrescriba datos recientes.
+        if candles and ts < candles[-1]["time"]:
+            return False
+
         current_price = price
         last_update = time.time()
         connection_status = True
         last_error = ""
+        last_source = source
 
         if not candles:
             candles.append({
@@ -140,7 +97,7 @@ def update_live_candle(price, size=0.0, trade_time=None, source="Coinbase"):
             last["close"] = price
             last["volume"] += max(0.0, size)
 
-        elif ts > last["time"]:
+        else:
             next_ts = last["time"] + 60
 
             while next_ts < ts:
@@ -164,11 +121,131 @@ def update_live_candle(price, size=0.0, trade_time=None, source="Coinbase"):
                 "volume": max(0.0, size)
             })
 
-        else:
-            # Un trade antiguo no debe sobrescribir el precio actual.
-            return False
-
     return True
+
+
+def load_historical_candles():
+    global current_price, last_update
+
+    end = datetime.now(timezone.utc)
+    start = end - timedelta(minutes=300)
+
+    params = {
+        "granularity": 60,
+        "start": start.isoformat(),
+        "end": end.isoformat()
+    }
+
+    try:
+        response = requests.get(
+            REST_URL,
+            params=params,
+            headers={"User-Agent": "BTC-Radar-PRO/3.1"},
+            timeout=15
+        )
+        response.raise_for_status()
+
+        rows = response.json()
+        parsed = []
+
+        for row in rows:
+            if len(row) < 6:
+                continue
+
+            parsed.append({
+                "time": int(row[0]),
+                "low": safe_float(row[1]),
+                "high": safe_float(row[2]),
+                "open": safe_float(row[3]),
+                "close": safe_float(row[4]),
+                "volume": safe_float(row[5])
+            })
+
+        parsed.sort(key=lambda item: item["time"])
+
+        with lock:
+            candles.clear()
+            candles.extend(parsed)
+
+            if candles:
+                current_price = candles[-1]["close"]
+                # El histórico no cuenta como conexión en vivo.
+                last_update = 0.0
+
+        log.info("Loaded %s Coinbase historical candles", len(parsed))
+        return True
+
+    except Exception as exc:
+        log.exception("Historical candle load failed")
+        set_error(f"Historical candles: {exc}")
+        return False
+
+
+def coinbase_rest_price(session=None, timeout=5):
+    headers = {
+        "User-Agent": "BTC-Radar-PRO/3.1",
+        "Accept": "application/json"
+    }
+
+    getter = session.get if session else requests.get
+
+    try:
+        response = getter(TICKER_URL, headers=headers, timeout=timeout)
+        response.raise_for_status()
+
+        price = safe_float(response.json().get("price"))
+        if price > 0:
+            return price, "Coinbase Exchange REST"
+
+        raise ValueError("Ticker returned invalid price")
+
+    except Exception as primary_error:
+        log.warning("Coinbase Exchange ticker failed: %s", primary_error)
+
+    try:
+        response = getter(BACKUP_URL, headers=headers, timeout=timeout)
+        response.raise_for_status()
+
+        payload = response.json()
+        price = safe_float((payload.get("data") or {}).get("amount"))
+
+        if price > 0:
+            return price, "Coinbase Spot REST backup"
+
+        raise ValueError("Spot endpoint returned invalid price")
+
+    except Exception as backup_error:
+        raise RuntimeError(
+            f"Primary and backup REST failed: {backup_error}"
+        )
+
+
+def refresh_price_if_stale():
+    global last_rest_attempt
+
+    now = time.time()
+
+    with lock:
+        age = now - last_update if last_update else 999999
+
+        # Si ya hay datos recientes, no repetir solicitudes.
+        if age < 6:
+            return
+
+        # Evitar que cada petición del navegador dispare otra consulta.
+        if now - last_rest_attempt < 2.5:
+            return
+
+        last_rest_attempt = now
+
+    try:
+        price, source = coinbase_rest_price(timeout=3)
+        update_live_candle(price, source=source)
+        log.warning("Recovered live price through API: %.2f", price)
+
+    except Exception as exc:
+        log.error("Coinbase API recovery failed: %s", exc)
+        set_error(str(exc))
 
 
 def websocket_message(ws, message):
@@ -180,48 +257,72 @@ def websocket_message(ws, message):
         message_type = payload.get("type")
 
         if message_type == "error":
-            error_message = str(payload)
-            log.error("Coinbase WebSocket error message: %s", error_message)
-            set_error(error_message)
+            set_error(f"Coinbase WebSocket: {payload}")
+            log.error("Coinbase WebSocket error: %s", payload)
             return
 
         if channel == "subscriptions":
             with lock:
                 ws_connected = True
-            log.info("Coinbase subscription confirmed")
+            log.info("Coinbase WebSocket subscriptions confirmed")
             return
 
         if channel == "heartbeats":
             return
 
-        if channel != "market_trades":
-            return
-
         received = 0
 
-        for event in payload.get("events", []):
-            for trade in event.get("trades", []):
-                price = safe_float(trade.get("price"))
-                size = safe_float(trade.get("size"))
-                trade_time = None
+        # Canal ticker: precio actualizado en cada operación.
+        if channel == "ticker":
+            for event in payload.get("events", []):
+                for ticker in event.get("tickers", []):
+                    product_id = ticker.get("product_id")
 
-                stamp = trade.get("time")
-                if stamp:
-                    try:
-                        trade_time = datetime.fromisoformat(
-                            stamp.replace("Z", "+00:00")
-                        ).timestamp()
-                    except (TypeError, ValueError):
-                        trade_time = None
+                    if product_id and product_id != PRODUCT:
+                        continue
 
-                if price > 0:
-                    if update_live_candle(
-                        price, size, trade_time, source="WebSocket"
-                    ):
-                        received += 1
+                    price = safe_float(ticker.get("price"))
+
+                    if price > 0:
+                        if update_live_candle(
+                            price,
+                            source="Coinbase WebSocket ticker"
+                        ):
+                            received += 1
+
+        # Canal de operaciones individuales, como segunda fuente.
+        elif channel == "market_trades":
+            for event in payload.get("events", []):
+                for trade in event.get("trades", []):
+                    price = safe_float(trade.get("price"))
+                    size = safe_float(trade.get("size"))
+                    trade_time = None
+
+                    stamp = trade.get("time")
+
+                    if stamp:
+                        try:
+                            trade_time = datetime.fromisoformat(
+                                stamp.replace("Z", "+00:00")
+                            ).timestamp()
+                        except (TypeError, ValueError):
+                            trade_time = None
+
+                    if price > 0:
+                        if update_live_candle(
+                            price,
+                            size,
+                            trade_time,
+                            source="Coinbase WebSocket trade"
+                        ):
+                            received += 1
 
         if received:
-            log.debug("Processed %s Coinbase trades", received)
+            log.debug(
+                "Processed %s Coinbase %s updates",
+                received,
+                channel
+            )
 
     except Exception as exc:
         log.exception("WebSocket message processing failed")
@@ -235,16 +336,22 @@ def websocket_open(ws):
         ws_connected = False
 
     try:
-        subscribe_message = {
-            "type": "subscribe",
-            "channel": "market_trades",
-            "product_ids": [PRODUCT]
-        }
-        ws.send(json.dumps(subscribe_message))
-        log.info("Coinbase WebSocket opened; subscription sent for %s", PRODUCT)
+        # Suscribir cada canal por separado.
+        for channel in ("ticker", "market_trades", "heartbeats"):
+            message = {
+                "type": "subscribe",
+                "channel": channel,
+                "product_ids": [PRODUCT]
+            }
+            ws.send(json.dumps(message))
+
+        log.info(
+            "Coinbase WebSocket subscriptions sent for %s",
+            PRODUCT
+        )
 
     except Exception as exc:
-        log.exception("Could not send Coinbase subscription")
+        log.exception("Coinbase subscription failed")
         set_error(f"WebSocket subscription: {exc}")
 
 
@@ -254,7 +361,11 @@ def websocket_close(ws, code, message):
     with lock:
         ws_connected = False
 
-    log.warning("Coinbase WebSocket closed (%s): %s", code, message)
+    log.warning(
+        "Coinbase WebSocket closed (%s): %s",
+        code,
+        message
+    )
 
 
 def websocket_error(ws, error):
@@ -296,59 +407,24 @@ def websocket_worker():
 
 
 def rest_price_worker():
-    global connection_status
-
     session = requests.Session()
     session.headers.update({
-        "User-Agent": "BTC-Radar-PRO/3.0",
+        "User-Agent": "BTC-Radar-PRO/3.1",
         "Accept": "application/json"
     })
 
     while True:
         try:
-            response = session.get(TICKER_URL, timeout=8)
-            response.raise_for_status()
+            price, source = coinbase_rest_price(
+                session=session,
+                timeout=8
+            )
+            update_live_candle(price, source=source)
+            log.debug("Coinbase REST price: %.2f", price)
 
-            payload = response.json()
-            price = safe_float(payload.get("price"))
-
-            if price <= 0:
-                raise ValueError("Coinbase ticker returned an invalid price")
-
-            update_live_candle(price, 0.0, source="REST")
-            log.debug("Coinbase REST ticker: %.2f", price)
-
-        except Exception as primary_exc:
-            log.warning("Coinbase ticker request failed: %s", primary_exc)
-
-            try:
-                response = session.get(BACKUP_URL, timeout=8)
-                response.raise_for_status()
-
-                payload = response.json()
-                price = safe_float(
-                    (payload.get("data") or {}).get("amount")
-                )
-
-                if price <= 0:
-                    raise ValueError("Coinbase spot returned an invalid price")
-
-                update_live_candle(price, 0.0, source="REST backup")
-                log.info("Coinbase backup price received: %.2f", price)
-
-            except Exception as backup_exc:
-                with lock:
-                    age = (
-                        time.time() - last_update
-                        if last_update else 999999
-                    )
-                    connection_status = age < 20
-
-                error_message = (
-                    f"Ticker: {primary_exc}; backup: {backup_exc}"
-                )
-                log.error("Both Coinbase REST requests failed: %s", error_message)
-                set_error(error_message)
+        except Exception as exc:
+            log.error("Coinbase REST worker failed: %s", exc)
+            set_error(str(exc))
 
         time.sleep(3)
 
@@ -396,6 +472,7 @@ def analyze(data):
     score += 1.5 if closes[-1] > e21[-1] else -1.5
 
     recent = valid[-5:]
+
     bullish = sum(
         1 for candle in recent
         if candle["close"] > candle["open"]
@@ -489,6 +566,7 @@ def forecast_15m(data, price, prediction):
         }
 
     recent = closes[-30:]
+
     returns = [
         recent[i] / recent[i - 1] - 1.0
         for i in range(1, len(recent))
@@ -520,7 +598,7 @@ def forecast_15m(data, price, prediction):
         "range_pct": 0.80,
         "method": "candles_ema9_ema21_estimate"
     }
-PAGE = r'''<!doctype html>
+    PAGE = r'''<!doctype html>
 <html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>BTC Radar PRO</title>
 <script src="https://unpkg.com/lightweight-charts@4.2.2/dist/lightweight-charts.standalone.production.js"></script>
@@ -563,20 +641,28 @@ def home():
 
 @app.route("/health")
 def health():
+    refresh_price_if_stale()
+
     with lock:
         count = len(candles)
         age = time.time() - last_update if last_update else None
         connected = bool(
             connection_status and age is not None and age < 20
         )
+
         websocket_status = ws_connected
         error = last_error
+        price = current_price
+        source = last_source
 
     return jsonify({
-        "ok": True,
+        "ok": connected,
+        "server_ok": True,
         "candles": count,
         "connected": connected,
         "websocket_connected": websocket_status,
+        "price": round(price, 2) if price > 0 else None,
+        "price_source": source,
         "price_age": round(age, 1) if age is not None else None,
         "last_error": error
     })
@@ -584,11 +670,14 @@ def health():
 
 @app.route("/api/state")
 def api_state():
+    refresh_price_if_stale()
+
     with lock:
         raw = list(candles)
         price = current_price
         updated = last_update
         error = last_error
+        source = last_source
 
         age = time.time() - updated if updated else 999999
         connected = bool(connection_status and age < 20)
@@ -598,7 +687,8 @@ def api_state():
             "error": "Esperando datos de Coinbase",
             "connected": False,
             "last_error": error,
-            "update_age": round(age, 1)
+            "update_age": round(age, 1),
+            "price_source": source
         }), 503
 
     frames = {
@@ -621,6 +711,7 @@ def api_state():
         "connected": connected,
         "update_age": round(age, 1),
         "last_error": error,
+        "price_source": source,
         "prediction": prediction,
         "forecast": forecast,
         "timeframes": frames
