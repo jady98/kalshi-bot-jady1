@@ -39,7 +39,11 @@ retry = Retry(
     allowed_methods=frozenset(["GET"]),
     respect_retry_after_header=False
 )
-adapter = HTTPAdapter(max_retries=retry, pool_connections=4, pool_maxsize=4)
+adapter = HTTPAdapter(
+    max_retries=retry,
+    pool_connections=4,
+    pool_maxsize=4
+)
 session.mount("https://", adapter)
 session.mount("http://", adapter)
 session.headers.update({
@@ -155,8 +159,12 @@ def update_candle(price):
 
         if not candles:
             candles.append({
-                "time": now, "open": price, "high": price,
-                "low": price, "close": price, "volume": 0
+                "time": now,
+                "open": price,
+                "high": price,
+                "low": price,
+                "close": price,
+                "volume": 0
             })
             return
 
@@ -173,16 +181,22 @@ def update_candle(price):
 
             while t < now:
                 candles.append({
-                    "time": t, "open": previous,
-                    "high": previous, "low": previous,
-                    "close": previous, "volume": 0
+                    "time": t,
+                    "open": previous,
+                    "high": previous,
+                    "low": previous,
+                    "close": previous,
+                    "volume": 0
                 })
                 t += 60
 
             candles.append({
-                "time": now, "open": price,
-                "high": price, "low": price,
-                "close": price, "volume": 0
+                "time": now,
+                "open": price,
+                "high": price,
+                "low": price,
+                "close": price,
+                "volume": 0
             })
 
         if len(candles) > MAX_CANDLES:
@@ -268,10 +282,10 @@ def background_worker():
 
         next_tick += POLL_SECONDS
         delay = next_tick - time.monotonic()
+
         if delay > 0:
             time.sleep(delay)
         else:
-            # Evita acumular ciclos si un proveedor tarda demasiado.
             next_tick = time.monotonic()
 
 
@@ -495,9 +509,7 @@ def forecast_15m(data):
             min(85, 50 + abs(a["score"]) * 4), 1
         )
     }
-
-
-@app.route("/")
+    @app.route("/")
 def home():
     return render_template_string(PAGE)
 
@@ -537,7 +549,7 @@ def coinbase_test():
 @app.route("/api/data")
 def api_data():
     start_worker()
-        with lock:
+    with lock:
         data = [c.copy() for c in candles]
         price = current_price
         updated = last_update
@@ -767,7 +779,7 @@ const fmt = n =>
  : "$" + Number(n).toLocaleString("en-US",{
  minimumFractionDigits:2,
  maximumFractionDigits:2
- });
+});
 
 let timeframe = 1;
 let latestData = null;
@@ -1076,4 +1088,4 @@ if __name__ == "__main__":
         host="0.0.0.0",
         port=int(os.environ.get("PORT",10000)),
         debug=False
-)
+    )
