@@ -132,10 +132,9 @@ def seed_candles():
         print("Error cargando velas Coinbase:", exc)
 
 
+
 def on_coinbase_open(ws):
-    with lock:
-        ws_status["connected"] = True
-        ws_status["error"] = ""
+    print("Coinbase: intentando suscribirse a BTC-USD")
 
     subscribe = {
         "type": "subscribe",
@@ -143,13 +142,41 @@ def on_coinbase_open(ws):
         "channels": ["ticker"]
     }
 
-    ws.send(json.dumps(subscribe))
-    print("Coinbase WebSocket conectado")
+    try:
+        ws.send(json.dumps(subscribe))
+
+        with lock:
+            ws_status["connected"] = True
+            ws_status["error"] = ""
+
+        print("Coinbase WebSocket conectado y suscripcion enviada")
+
+    except Exception as exc:
+        with lock:
+            ws_status["connected"] = False
+            ws_status["error"] = str(exc)
+
+        print("Error enviando suscripcion Coinbase:", exc)
+        ws.close()
 
 
 def on_coinbase_message(ws, message):
     try:
         data = json.loads(message)
+
+        # Coinbase puede responder con confirmaciones o errores.
+        if data.get("type") == "subscriptions":
+            print("Coinbase: suscripcion confirmada")
+            return
+
+        if data.get("type") == "error":
+            error = data.get("message", str(data))
+
+            with lock:
+                ws_status["error"] = str(error)
+
+            print("Coinbase rechazo la suscripcion:", error)
+            return
 
         if data.get("type") != "ticker":
             return
@@ -174,7 +201,9 @@ def on_coinbase_message(ws, message):
         )
 
         with lock:
+            ws_status["connected"] = True
             ws_status["last_message"] = utc_now().isoformat()
+            ws_status["error"] = ""
 
     except Exception as exc:
         print("Error leyendo Coinbase:", exc)
@@ -189,15 +218,23 @@ def on_coinbase_error(ws, error):
 
 
 def on_coinbase_close(ws, code, message):
+    detalle = f"Cierre: codigo={code}, mensaje={message}"
+
     with lock:
         ws_status["connected"] = False
+        ws_status["error"] = detalle
 
-    print("Coinbase WebSocket desconectado:", code, message)
+    print("Coinbase WebSocket desconectado:", detalle)
 
 
 def coinbase_worker():
     while True:
         try:
+            with lock:
+                ws_status["connected"] = False
+
+            print("Coinbase: intentando abrir WebSocket...")
+
             ws = websocket.WebSocketApp(
                 COINBASE_WS,
                 on_open=on_coinbase_open,
@@ -211,6 +248,8 @@ def coinbase_worker():
                 ping_timeout=10
             )
 
+            print("Coinbase: intento de conexion terminado")
+
         except Exception as exc:
             with lock:
                 ws_status["connected"] = False
@@ -218,7 +257,10 @@ def coinbase_worker():
 
             print("Error en worker Coinbase:", exc)
 
+        print("Coinbase: nuevo intento en 3 segundos")
         time.sleep(3)
+
+
 
 
 def start_coinbase_stream():
