@@ -319,6 +319,7 @@ def start_background_services():
 # ANALISIS TECNICO
 # ==================================================
 
+
 def calculate_signal(price, history):
 
     closes = [
@@ -347,34 +348,66 @@ def calculate_signal(price, history):
     ema9 = ema(closes[-40:], 9)
     ema21 = ema(closes[-80:], 21)
 
-    momentum = (closes[-1] / closes[-6]) - 1
+    # Movimiento reciente
+    momentum3 = (price / closes[-4]) - 1
+    momentum7 = (price / closes[-8]) - 1
 
+    # Dirección de las últimas cinco velas
+    recent = history[-5:]
+
+    bullish = sum(
+        1 for c in recent
+        if float(c["close"]) > float(c["open"])
+    )
+
+    bearish = sum(
+        1 for c in recent
+        if float(c["close"]) < float(c["open"])
+    )
+
+    # Puntuación combinada
+    score = 0
+
+    if ema9 > ema21:
+        score += 1
+    else:
+        score -= 1
+
+    if momentum3 > 0:
+        score += 2
+    elif momentum3 < 0:
+        score -= 2
+
+    if momentum7 > 0:
+        score += 2
+    elif momentum7 < 0:
+        score -= 2
+
+    if bullish > bearish:
+        score += 1
+    elif bearish > bullish:
+        score -= 1
+
+    # Decisión final
+    if score > 0:
+        direction = "ALCISTA"
+        signal = "SUBE"
+    else:
+        direction = "BAJISTA"
+        signal = "BAJA"
+
+    # Predicción basada en el movimiento reciente
     projected_change = max(
         -0.003,
-        min(0.003, momentum * 2.5)
+        min(0.003, momentum3 * 2)
     )
 
     prediction = price * (1 + projected_change)
 
-    # Direccion predominante sin señal NEUTRAL
-    if ema9 > ema21:
-        direction = "ALCISTA"
-        signal = "SUBE"
-        strength = max(0, momentum * 10000)
-    elif ema9 < ema21:
-        direction = "BAJISTA"
-        signal = "BAJA"
-        strength = max(0, -momentum * 10000)
-    elif momentum >= 0:
-        direction = "ALCISTA"
-        signal = "SUBE"
-        strength = momentum * 10000
-    else:
-        direction = "BAJISTA"
-        signal = "BAJA"
-        strength = -momentum * 10000
-
-    confidence = min(85, 50 + int(strength))
+    confidence = min(
+        90,
+        50 + abs(score) * 7
+    )
 
     return {
         "direction": direction,
@@ -382,6 +415,7 @@ def calculate_signal(price, history):
         "prediction": round(prediction, 2),
         "confidence": confidence
     }
+    
 
 
 # ==================================================
