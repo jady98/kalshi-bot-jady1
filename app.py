@@ -520,7 +520,7 @@ def forecast_15m(data, price, prediction):
         "range_pct": 0.80,
         "method": "candles_ema9_ema21_estimate"
     }
-    PAGE = r'''<!doctype html>
+PAGE = r'''<!doctype html>
 <html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>BTC Radar PRO</title>
 <script src="https://unpkg.com/lightweight-charts@4.2.2/dist/lightweight-charts.standalone.production.js"></script>
