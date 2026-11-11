@@ -24,6 +24,7 @@ STALE_SECONDS = 20
 lock = threading.RLock()
 
 candles = deque(maxlen=MAX_CANDLES)
+tick_history = deque(maxlen=180)
 current_price = None
 last_update = 0
 last_error = ""
@@ -49,14 +50,28 @@ def update_price(price, source="COINBASE"):
     if price <= 0:
         return
 
-    now = int(time.time())
-    minute = now - (now % 60)
+    now = time.time()
+    now_int = int(now)
+    minute = now_int - (now_int % 60)
 
     with lock:
         current_price = price
-        last_update = now
+        last_update = now_int
         last_source = source
 
+        # Guardar el último precio recibido de cada segundo.
+        if tick_history and int(tick_history[-1]["time"]) == now_int:
+            tick_history[-1] = {
+                "time": now,
+                "price": price
+            }
+        else:
+            tick_history.append({
+                "time": now,
+                "price": price
+            })
+
+        # Mantener las velas originales de un minuto.
         if candles and candles[-1]["time"] == minute:
             candle = candles[-1]
             candle["high"] = max(candle["high"], price)
@@ -71,7 +86,7 @@ def update_price(price, source="COINBASE"):
                 "close": price,
                 "volume": 0.0
             })
-
+            
 
 # ==================================================
 # HISTORIAL DE COINBASE
