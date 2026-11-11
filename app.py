@@ -709,7 +709,10 @@ button:disabled {
 
 <body>
 <main>
-
+<div class="header">
+    <h1>BITCOIN RADAR LIVE</h1>
+    <div id="status" class="status">CONECTANDO...</div>
+</div>
 <section class="card">
 
     <div class="label">BITCOIN / USD · COINBASE</div>
