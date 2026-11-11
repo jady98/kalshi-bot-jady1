@@ -349,6 +349,40 @@ def health():
         "error": error,
     })
 
+POLYMARKET_EVENT = "btc-updown-15m-2026-11-11-1915z"
+
+
+@app.route("/polymarket-test")
+def polymarket_test():
+    url = (
+        "https://gateway.polymarket.us"
+        f"/v1/events/slug/{POLYMARKET_EVENT}"
+    )
+
+    try:
+        response = requests.get(
+            url,
+            headers={"Accept": "application/json"},
+            timeout=15
+        )
+
+        try:
+            data = response.json()
+        except ValueError:
+            data = response.text
+
+        return jsonify({
+            "ok": response.ok,
+            "http_status": response.status_code,
+            "data": data
+        })
+
+    except Exception as exc:
+        return jsonify({
+            "ok": False,
+            "error": str(exc)
+        }), 500
+        
 HTML = r"""
 <!DOCTYPE html>
 <html lang="es">
