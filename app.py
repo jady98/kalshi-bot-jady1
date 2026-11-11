@@ -1,6 +1,3 @@
-﻿El error se debe a que la variable HTML (la interfaz visual de la Parte 2) no se cargó o se cortó al guardar el archivo app.py. Python arroja un NameError: name 'HTML' is not defined porque la ruta principal intenta renderizar HTML pero el código del frontend no está presente debajo del backend.
-Para solucionarlo de inmediato, reemplaza todo el contenido de tu archivo app.py en GitHub con el código unificado completo que contiene tanto las funciones como la variable HTML.
-Código Completo Definitivo para app.py
 import os
 import time
 from datetime import datetime, timezone
