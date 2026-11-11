@@ -1,5 +1,5 @@
+
 Flask
-requests
-pandas
-numpy
 gunicorn
+requests
+websocket-client
