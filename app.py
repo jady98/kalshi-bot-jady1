@@ -709,7 +709,7 @@ button:disabled {
 
 <body>
 <main>
-"""
+
 <section class="card">
 
     <div class="label">BITCOIN / USD · COINBASE</div>
