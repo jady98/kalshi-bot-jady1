@@ -1,4 +1,3 @@
-
 import json
 import threading
 import time
@@ -86,7 +85,7 @@ def update_price(price, source="COINBASE"):
                 "close": price,
                 "volume": 0.0
             })
-            
+
 
 # ==================================================
 # HISTORIAL DE COINBASE
@@ -335,7 +334,7 @@ def start_background_services():
 # ==================================================
 
 
-def calculate_signal(price, history):
+def calculate_signal(price, history, tick_data):
 
     closes = [
         float(c["close"])
@@ -343,13 +342,47 @@ def calculate_signal(price, history):
         if c.get("close") is not None
     ]
 
-    if len(closes) < 22:
+    now = time.time()
+
+    def tick_momentum(seconds):
+        if not tick_data:
+            return None
+
+        target = now - seconds
+        sample = None
+
+        for tick in reversed(tick_data):
+            if float(tick["time"]) <= target:
+                sample = tick
+                break
+
+        if sample is None or target - float(sample["time"]) > 3:
+            return None
+
+        old_price = float(sample["price"])
+
+        if old_price <= 0:
+            return None
+
+        return ((price / old_price) - 1) * 100
+
+    m5 = tick_momentum(5)
+    m15 = tick_momentum(15)
+    m30 = tick_momentum(30)
+
+    def empty_result():
         return {
             "direction": "ESPERANDO DATOS",
             "signal": "ESPERAR",
             "prediction": round(price, 2),
-            "confidence": 0
+            "confidence": 0,
+            "momentum_5s_pct": round(m5, 5) if m5 is not None else None,
+            "momentum_15s_pct": round(m15, 5) if m15 is not None else None,
+            "momentum_30s_pct": round(m30, 5) if m30 is not None else None
         }
+
+    if len(closes) < 22:
+        return empty_result()
 
     def ema(values, period):
         alpha = 2 / (period + 1)
@@ -363,29 +396,26 @@ def calculate_signal(price, history):
     ema9 = ema(closes[-40:], 9)
     ema21 = ema(closes[-80:], 21)
 
-    # Movimiento reciente
     momentum3 = (price / closes[-4]) - 1
     momentum7 = (price / closes[-8]) - 1
 
-    # Dirección de las últimas cinco velas
     recent = history[-5:]
 
     bullish = sum(
-        1 for c in recent
-        if float(c["close"]) > float(c["open"])
+        1 for candle in recent
+        if float(candle["close"]) > float(candle["open"])
     )
 
     bearish = sum(
-        1 for c in recent
-        if float(c["close"]) < float(c["open"])
+        1 for candle in recent
+        if float(candle["close"]) < float(candle["open"])
     )
 
-    # Puntuación combinada
     score = 0
 
     if ema9 > ema21:
         score += 1
-    else:
+    elif ema9 < ema21:
         score -= 1
 
     if momentum3 > 0:
@@ -403,34 +433,50 @@ def calculate_signal(price, history):
     elif bearish > bullish:
         score -= 1
 
-    # Decisión final
-    if score > 0:
-        direction = "ALCISTA"
-        signal = "SUBE"
-    else:
-        direction = "BAJISTA"
-        signal = "BAJA"
+    # Impulso de corto plazo.
+    for momentum, weight in ((m5, 2), (m15, 2), (m30, 1)):
+        if momentum is not None:
+            if momentum > 0:
+                score += weight
+            elif momentum < 0:
+                score -= weight
 
-    # Predicción basada en el movimiento reciente
+    if score > 0:
+        direction, signal = "ALCISTA", "SUBE"
+    elif score < 0:
+        direction, signal = "BAJISTA", "BAJA"
+    else:
+        direction, signal = "NEUTRAL", "ESPERAR"
+
+    short_values = [
+        value for value in (m5, m15, m30)
+        if value is not None
+    ]
+
+    if short_values:
+        projected_change = (
+            sum(short_values) / len(short_values)
+        ) / 100
+    else:
+        projected_change = momentum3 * 0.5
+
     projected_change = max(
         -0.003,
-        min(0.003, momentum3 * 2)
+        min(0.003, projected_change)
     )
 
     prediction = price * (1 + projected_change)
-
-    confidence = min(
-        90,
-        50 + abs(score) * 7
-    )
+    confidence = min(90, 50 + abs(score) * 5)
 
     return {
         "direction": direction,
         "signal": signal,
         "prediction": round(prediction, 2),
-        "confidence": confidence
+        "confidence": confidence,
+        "momentum_5s_pct": round(m5, 5) if m5 is not None else None,
+        "momentum_15s_pct": round(m15, 5) if m15 is not None else None,
+        "momentum_30s_pct": round(m30, 5) if m30 is not None else None
     }
-    
 
 
 # ==================================================
@@ -442,6 +488,7 @@ def get_api_data():
     with lock:
         price = current_price
         history = [dict(c) for c in candles]
+        tick_data = [dict(t) for t in tick_history]
         updated = last_update
         error = last_error
         source = last_source
@@ -468,7 +515,7 @@ def get_api_data():
             "error": error
         }
 
-    analysis = calculate_signal(price, history)
+    analysis = calculate_signal(price, history, tick_data)
 
     return {
         "ok": True,
@@ -480,6 +527,9 @@ def get_api_data():
         "signal": analysis["signal"],
         "prediction": analysis["prediction"],
         "confidence": analysis["confidence"],
+        "momentum_5s_pct": analysis["momentum_5s_pct"],
+        "momentum_15s_pct": analysis["momentum_15s_pct"],
+        "momentum_30s_pct": analysis["momentum_30s_pct"],
         "countdown": countdown,
         "last_update": updated,
         "source": source,
@@ -649,6 +699,9 @@ main {
 h1 {
     font-size: 21px;
     margin: 0;
+    }
+        font-size: 21px;
+    margin: 0;
 }
 
 .status {
@@ -762,11 +815,15 @@ button:disabled {
     <h1>BITCOIN RADAR LIVE</h1>
     <div id="status" class="status">CONECTANDO...</div>
 </div>
+
 <section class="card">
 
     <div class="label">BITCOIN / USD · COINBASE</div>
     <div id="price" class="price">Cargando...</div>
     <div class="small">Precio real recibido de Coinbase</div>
+    <div id="tickMomentum" class="small">
+        Impulso 5s / 15s / 30s: esperando datos
+    </div>
 
 </section>
 
@@ -1184,6 +1241,22 @@ async function refreshData(manual = false) {
                 data.confidence + "%"
             );
 
+            const fmtMomentum = value => {
+                if (value === null || value === undefined) return "--";
+
+                const number = Number(value);
+
+                return (number > 0 ? "+" : "") +
+                    number.toFixed(5) + "%";
+            };
+
+            setText(
+                "tickMomentum",
+                "Impulso 5s: " + fmtMomentum(data.momentum_5s_pct) +
+                " | 15s: " + fmtMomentum(data.momentum_15s_pct) +
+                " | 30s: " + fmtMomentum(data.momentum_30s_pct)
+            );
+
             const direction =
                 document.getElementById("direction");
 
@@ -1299,4 +1372,3 @@ if __name__ == "__main__":
         port=10000,
         threaded=True
     )
-    
