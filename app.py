@@ -67,7 +67,6 @@ def update_live_candle(price, size=0.0, trade_time=None, source="Coinbase"):
     ts = minute_timestamp(trade_time)
 
     with lock:
-        # No permitir que una operación antigua sobrescriba datos recientes.
         if candles and ts < candles[-1]["time"]:
             return False
 
@@ -169,7 +168,6 @@ def load_historical_candles():
 
             if candles:
                 current_price = candles[-1]["close"]
-                # El histórico no cuenta como conexión en vivo.
                 last_update = 0.0
 
         log.info("Loaded %s Coinbase historical candles", len(parsed))
@@ -228,11 +226,9 @@ def refresh_price_if_stale():
     with lock:
         age = now - last_update if last_update else 999999
 
-        # Si ya hay datos recientes, no repetir solicitudes.
         if age < 6:
             return
 
-        # Evitar que cada petición del navegador dispare otra consulta.
         if now - last_rest_attempt < 2.5:
             return
 
@@ -272,7 +268,6 @@ def websocket_message(ws, message):
 
         received = 0
 
-        # Canal ticker: precio actualizado en cada operación.
         if channel == "ticker":
             for event in payload.get("events", []):
                 for ticker in event.get("tickers", []):
@@ -290,7 +285,6 @@ def websocket_message(ws, message):
                         ):
                             received += 1
 
-        # Canal de operaciones individuales, como segunda fuente.
         elif channel == "market_trades":
             for event in payload.get("events", []):
                 for trade in event.get("trades", []):
@@ -336,7 +330,6 @@ def websocket_open(ws):
         ws_connected = False
 
     try:
-        # Suscribir cada canal por separado.
         for channel in ("ticker", "market_trades", "heartbeats"):
             message = {
                 "type": "subscribe",
@@ -633,64 +626,11 @@ document.querySelectorAll('.tf').forEach(b=>b.addEventListener('click',()=>{docu
 initChart();window.addEventListener('resize',()=>{if(chart)chart.applyOptions({width:$('chart').clientWidth,height:$('chart').clientHeight})});refresh();countdown();setInterval(refresh,2000);setInterval(countdown,250);
 </script></body></html>'''
 
-# --- DEFINICIÓN DE LA PÁGINA WEB ---
-PAGE = """
-<!DOCTYPE html>
-<html lang="es">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Kalshi Bot & BTC Radar</title>
-    <style>
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            background-color: #0f172a;
-            color: #f8fafc;
-            margin: 0;
-            padding: 40px;
-        }
-        .container {
-            max-width: 800px;
-            margin: 0 auto;
-            background-color: #1e293b;
-            padding: 30px;
-            border-radius: 12px;
-            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.3);
-        }
-        h1 {
-            color: #38bdf8;
-            margin-top: 0;
-        }
-        .badge {
-            display: inline-block;
-            background-color: #065f46;
-            color: #34d399;
-            padding: 6px 12px;
-            border-radius: 6px;
-            font-weight: bold;
-            font-size: 14px;
-            margin-top: 15px;
-        }
-        p {
-            color: #94a3b8;
-            line-height: 1.5;
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>🤖 Kalshi Bot & BTC Radar</h1>
-        <p>Los servicios en segundo plano y el servidor Flask están funcionando correctamente.</p>
-        <div class="badge">● Estado: En línea</div>
-    </div>
-</body>
-</html>
-"""
 
 @app.route("/")
 def home():
     return render_template_string(PAGE)
-    
+
 
 @app.route("/health")
 def health():
@@ -805,3 +745,4 @@ if __name__ == "__main__":
         port=int(os.environ.get("PORT", "5000")),
         threaded=True
     )
+    
