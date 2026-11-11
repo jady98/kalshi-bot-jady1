@@ -1,4 +1,4 @@
-Flask==3.1.0
-requests==2.32.3
-websocket-client==1.8.0
-gunicorn==22.0.0
+Flask
+requests
+websocket-client
+gunicorn
