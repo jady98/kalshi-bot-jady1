@@ -1,466 +1,353 @@
 import json
 import threading
 import time
-from collections import deque
-from datetime import datetime, timezone
 
 import requests
 import websocket
-import pandas as pd
-import numpy as np
 from flask import Flask, jsonify, render_template_string
 
 app = Flask(__name__)
 
 # ==========================================
-# BITCOIN RADAR PRO - SOLO COINBASE
+# BITCOIN RADAR LIVE - COINBASE
+# Solo lectura. No envia ordenes.
 # ==========================================
 
-SYMBOL = "BTC-USD"
-CANDLE_LIMIT = 300
-
-COINBASE_WS = "wss://advanced-trade-ws.coinbase.com"
-COINBASE_REST = "https://api.exchange.coinbase.com"
-
-session = requests.Session()
-session.headers.update({"User-Agent": "BitcoinRadarPRO/6.0"})
+PRODUCT_ID = "BTC-USD"
+REST_URL = "https://api.exchange.coinbase.com"
+WS_URL = "wss://advanced-trade-ws.coinbase.com"
 
 lock = threading.RLock()
-bars = deque(maxlen=CANDLE_LIMIT)
 
-ws_status = {
-    "connected": False,
-    "socket_open": False,
-    "error": "",
-    "last_message": None,
-    "last_price": None
-}
-
-worker_started = False
+candles = []
+current_price = None
+last_update = 0
+connected = False
+last_error = ""
+ws_thread_started = False
 
 
-def utc_now():
-    return datetime.now(timezone.utc)
+def load_history():
+    global candles, current_price, last_error
 
-
-def add_trade(timestamp, price, size=0):
     try:
-        if isinstance(timestamp, str):
-            dt = datetime.fromisoformat(
-                timestamp.replace("Z", "+00:00")
-            )
-            ts = int(dt.timestamp())
-        else:
-            ts = int(float(timestamp))
-
-        price = float(price)
-        size = float(size or 0)
-
-        if not np.isfinite(price) or price <= 0:
-            return
-
-        minute = ts - ts % 60
-
-        with lock:
-            if not bars:
-                bars.append({
-                    "time": minute,
-                    "open": price,
-                    "high": price,
-                    "low": price,
-                    "close": price,
-                    "volume": size
-                })
-                return
-
-            last = bars[-1]
-
-            if minute < last["time"]:
-                return
-
-            if minute == last["time"]:
-                last["high"] = max(last["high"], price)
-                last["low"] = min(last["low"], price)
-                last["close"] = price
-                last["volume"] += size
-            else:
-                bars.append({
-                    "time": minute,
-                    "open": price,
-                    "high": price,
-                    "low": price,
-                    "close": price,
-                    "volume": size
-                })
-
-    except Exception as exc:
-        print("Error agregando precio:", repr(exc), flush=True)
-
-
-def seed_candles():
-    try:
-        response = session.get(
-            f"{COINBASE_REST}/products/{SYMBOL}/candles",
+        response = requests.get(
+            f"{REST_URL}/products/{PRODUCT_ID}/candles",
             params={"granularity": 60},
-            timeout=15
+            headers={"User-Agent": "BitcoinRadar/1.0"},
+            timeout=15,
         )
-
         response.raise_for_status()
-        data = response.json()
 
-        loaded = []
+        raw = response.json()
+        history = []
 
-        for item in reversed(data):
+        for item in raw:
             if len(item) < 6:
                 continue
 
-            ts, low, high, open_, close, volume = item[:6]
-
-            loaded.append({
-                "time": int(ts),
-                "open": float(open_),
-                "high": float(high),
-                "low": float(low),
-                "close": float(close),
-                "volume": float(volume)
+            history.append({
+                "time": int(item[0]),
+                "low": float(item[1]),
+                "high": float(item[2]),
+                "open": float(item[3]),
+                "close": float(item[4]),
+                "volume": float(item[5]),
             })
 
+        history.sort(key=lambda x: x["time"])
+
         with lock:
-            if not bars:
-                for candle in loaded[-CANDLE_LIMIT:]:
-                    bars.append(candle)
-
-        print(
-            f"Coinbase: {len(loaded)} velas cargadas",
-            flush=True
-        )
+            candles = history[-300:]
+            if candles:
+                current_price = candles[-1]["close"]
 
     except Exception as exc:
-        print("Error cargando velas:", repr(exc), flush=True)
+        with lock:
+            last_error = f"Error cargando historial: {exc}"
 
 
-def set_error(message):
-    with lock:
-        ws_status["connected"] = False
-        ws_status["error"] = str(message)
+def update_price(price):
+    global current_price, last_update
 
-    print("Coinbase ERROR:", message, flush=True)
-
-
-def on_coinbase_open(ws):
-    print("Coinbase: WebSocket abierto", flush=True)
+    now = int(time.time())
+    minute = now - (now % 60)
 
     with lock:
-        ws_status["socket_open"] = True
-        ws_status["connected"] = False
-        ws_status["error"] = ""
+        current_price = price
+        last_update = now
 
-    subscriptions = [
-        {
-            "type": "subscribe",
-            "channel": "market_trades",
-            "product_ids": [SYMBOL]
-        },
-        {
-            "type": "subscribe",
-            "channel": "ticker",
-            "product_ids": [SYMBOL]
-        },
-        {
-            "type": "subscribe",
-            "channel": "heartbeats"
-        }
-    ]
+        if not candles or candles[-1]["time"] != minute:
+            candles.append({
+                "time": minute,
+                "open": price,
+                "high": price,
+                "low": price,
+                "close": price,
+                "volume": 0.0,
+            })
+        else:
+            candle = candles[-1]
+            candle["high"] = max(candle["high"], price)
+            candle["low"] = min(candle["low"], price)
+            candle["close"] = price
+
+        if len(candles) > 300:
+            del candles[:-300]
+
+
+def on_message(ws, message):
+    global last_error
 
     try:
-        for item in subscriptions:
-            ws.send(json.dumps(item))
-            time.sleep(0.2)
+        data = json.loads(message)
 
-        print("Coinbase: suscripciones enviadas", flush=True)
-
-    except Exception as exc:
-        set_error(exc)
-        ws.close()
-
-
-def on_coinbase_message(ws, raw_message):
-    try:
-        data = json.loads(raw_message)
-
-        if data.get("type") == "error":
-            set_error(data.get("message", str(data)))
+        if data.get("channel") != "ticker":
             return
 
-        channel = data.get("channel")
+        for event in data.get("events", []):
+            for ticker in event.get("tickers", []):
+                if ticker.get("product_id") != PRODUCT_ID:
+                    continue
 
-        if channel == "market_trades":
-            for event in data.get("events", []):
-                for trade in event.get("trades", []):
+                price = float(ticker["price"])
 
-                    if trade.get("product_id") != SYMBOL:
-                        continue
-
-                    price = trade.get("price")
-                    stamp = trade.get("time")
-
-                    if price is not None and stamp:
-                        add_trade(
-                            stamp,
-                            price,
-                            trade.get("size", 0)
-                        )
-
-                        with lock:
-                            ws_status["connected"] = True
-                            ws_status["last_price"] = float(price)
-                            ws_status["last_message"] = utc_now().isoformat()
-                            ws_status["error"] = ""
-
-        elif channel == "ticker":
-            for event in data.get("events", []):
-                for ticker in event.get("tickers", []):
-
-                    if ticker.get("product_id") != SYMBOL:
-                        continue
-
-                    price = ticker.get("price")
-                    stamp = data.get("timestamp")
-
-                    if price is not None and stamp:
-                        add_trade(stamp, price, 0)
-
-                        with lock:
-                            ws_status["connected"] = True
-                            ws_status["last_price"] = float(price)
-                            ws_status["last_message"] = utc_now().isoformat()
-                            ws_status["error"] = ""
+                if price > 0:
+                    update_price(price)
+                    with lock:
+                        last_error = ""
 
     except Exception as exc:
-        print("Error leyendo Coinbase:", repr(exc), flush=True)
+        with lock:
+            last_error = f"Error procesando datos: {exc}"
 
 
-def on_coinbase_error(ws, error):
-    set_error(error)
+def on_open(ws):
+    global last_error
+
+    try:
+        subscription = {
+            "type": "subscribe",
+            "product_ids": [PRODUCT_ID],
+            "channel": "ticker",
+        }
+
+        ws.send(json.dumps(subscription))
+
+        with lock:
+            last_error = ""
+
+    except Exception as exc:
+        with lock:
+            last_error = f"Error de suscripcion: {exc}"
 
 
-def on_coinbase_close(ws, code, message):
-    detail = f"Socket cerrado: codigo={code}, mensaje={message}"
+def on_error(ws, error):
+    global last_error, connected
 
     with lock:
-        ws_status["socket_open"] = False
-        ws_status["connected"] = False
-        ws_status["error"] = detail
-
-    print("Coinbase:", detail, flush=True)
+        connected = False
+        last_error = str(error)
 
 
-def coinbase_worker():
+def on_close(ws, close_status_code, close_msg):
+    global connected
+
+    with lock:
+        connected = False
+
+
+def websocket_worker():
+    global connected, last_error
+
     while True:
         try:
-            print("Coinbase: intentando conectar...", flush=True)
-
-            with lock:
-                ws_status["socket_open"] = False
-                ws_status["connected"] = False
-
             ws = websocket.WebSocketApp(
-                COINBASE_WS,
-                on_open=on_coinbase_open,
-                on_message=on_coinbase_message,
-                on_error=on_coinbase_error,
-                on_close=on_coinbase_close
+                WS_URL,
+                on_open=on_open,
+                on_message=on_message,
+                on_error=on_error,
+                on_close=on_close,
             )
 
             ws.run_forever(
                 ping_interval=20,
-                ping_timeout=10
+                ping_timeout=10,
             )
 
         except Exception as exc:
-            set_error(repr(exc))
+            with lock:
+                connected = False
+                last_error = f"Conexion interrumpida: {exc}"
 
         with lock:
-            ws_status["socket_open"] = False
-            ws_status["connected"] = False
+            connected = False
 
-        print("Coinbase: reconectando en 5 segundos", flush=True)
         time.sleep(5)
 
 
-def start_coinbase_stream():
-    global worker_started
+def start_background_services():
+    global ws_thread_started
 
-    with lock:
-        if worker_started:
-            return
-        worker_started = True
+    if ws_thread_started:
+        return
 
-    seed_candles()
+    ws_thread_started = True
 
     threading.Thread(
-        target=coinbase_worker,
+        target=load_history,
         daemon=True,
-        name="coinbase-worker"
+    ).start()
+
+    threading.Thread(
+        target=websocket_worker,
+        daemon=True,
     ).start()
 
 
-def get_market_data():
-    with lock:
-        snapshot = [dict(item) for item in bars]
+def calculate_signal(price, history):
+    closes = [
+        float(c["close"])
+        for c in history
+        if c.get("close")
+    ]
 
-    if not snapshot:
-        raise RuntimeError("Esperando datos de Coinbase")
+    if len(closes) < 22:
+        return {
+            "direction": "ESPERAR",
+            "signal": "ESPERAR",
+            "prediction": price,
+            "confidence": 0,
+        }
 
-    df = pd.DataFrame(snapshot)
+    def ema(values, period):
+        alpha = 2 / (period + 1)
+        result = values[0]
 
-    df["time"] = pd.to_datetime(
-        df["time"],
-        unit="s",
-        utc=True
+        for value in values[1:]:
+            result = alpha * value + (1 - alpha) * result
+
+        return result
+
+    ema9 = ema(closes[-40:], 9)
+    ema21 = ema(closes[-80:], 21)
+
+    momentum = (closes[-1] / closes[-6]) - 1
+
+    projected_change = max(
+        -0.005,
+        min(0.005, momentum * 3 * 0.45)
     )
 
-    return (
-        df.sort_values("time")
-        .drop_duplicates("time", keep="last")
-        .tail(CANDLE_LIMIT)
-        .reset_index(drop=True)
-    )
+    prediction = price * (1 + projected_change)
 
+    if ema9 > ema21 and momentum > 0:
+        direction = "ALCISTA"
+        signal = "SUBE"
+        confidence = min(
+            95,
+            50 + int(abs(momentum) * 10000)
+        )
 
-def calculate_indicators(df):
-    df = df.copy()
+    elif ema9 < ema21 and momentum < 0:
+        direction = "BAJISTA"
+        signal = "BAJA"
+        confidence = min(
+            95,
+            50 + int(abs(momentum) * 10000)
+        )
 
-    close = df["close"]
-    high = df["high"]
-    low = df["low"]
-    volume = df["volume"]
-
-    df["EMA9"] = close.ewm(
-        span=9,
-        adjust=False
-    ).mean()
-
-    df["EMA21"] = close.ewm(
-        span=21,
-        adjust=False
-    ).mean()
-
-    typical = (high + low + close) / 3
-    cumulative_volume = volume.cumsum()
-
-    df["VWAP"] = (
-        (typical * volume).cumsum()
-        / cumulative_volume.replace(0, np.nan)
-    ).fillna(close)
-
-    delta = close.diff()
-
-    gain = delta.clip(lower=0).ewm(
-        alpha=1 / 14,
-        adjust=False,
-        min_periods=14
-    ).mean()
-
-    loss = (-delta.clip(upper=0)).ewm(
-        alpha=1 / 14,
-        adjust=False,
-        min_periods=14
-    ).mean()
-
-    rs = gain / loss.replace(0, np.nan)
-
-    df["RSI"] = (
-        100 - (100 / (1 + rs))
-    ).fillna(50)
-
-    ema12 = close.ewm(
-        span=12,
-        adjust=False
-    ).mean()
-
-    ema26 = close.ewm(
-        span=26,
-        adjust=False
-    ).mean()
-
-    df["MACD"] = ema12 - ema26
-
-    df["MACD_SIGNAL"] = df["MACD"].ewm(
-        span=9,
-        adjust=False
-    ).mean()
-
-    df["SUPPORT"] = low.rolling(
-        20,
-        min_periods=1
-    ).min()
-
-    df["RESISTANCE"] = high.rolling(
-        20,
-        min_periods=1
-    ).max()
-
-    return df
-
-
-def generate_signal(df):
-    last = df.iloc[-1]
-    score = 0
-
-    if last["EMA9"] > last["EMA21"]:
-        score += 1
-    elif last["EMA9"] < last["EMA21"]:
-        score -= 1
-
-    if last["MACD"] > last["MACD_SIGNAL"]:
-        score += 1
-    elif last["MACD"] < last["MACD_SIGNAL"]:
-        score -= 1
-
-    if last["close"] > last["VWAP"]:
-        score += 1
-    elif last["close"] < last["VWAP"]:
-        score -= 1
-
-    if last["RSI"] > 55:
-        score += 1
-    elif last["RSI"] < 45:
-        score -= 1
-
-    if score >= 3:
-        direction = "SUBE"
-        description = "Confluencia tecnica alcista"
-    elif score <= -3:
-        direction = "BAJA"
-        description = "Confluencia tecnica bajista"
     else:
         direction = "NEUTRAL"
-        description = "Sin confirmacion suficiente"
+        signal = "ESPERAR"
+        confidence = 0
 
     return {
         "direction": direction,
-        "strength": abs(score),
-        "description": description
+        "signal": signal,
+        "prediction": round(prediction, 2),
+        "confidence": confidence,
     }
 
 
-def build_line(df, column):
-    result = []
+@app.route("/")
+def home():
+    start_background_services()
+    return render_template_string(HTML)
 
-    for timestamp, value in zip(df["time"], df[column]):
-        if pd.isna(value):
-            continue
 
-        result.append({
-            "time": int(timestamp.timestamp()),
-            "value": float(value)
+@app.route("/api")
+def api():
+    global connected
+
+    with lock:
+        price = current_price
+        history = [dict(c) for c in candles]
+        updated = last_update
+        error = last_error
+
+    now = int(time.time())
+
+    is_connected = bool(
+        price is not None
+        and updated > 0
+        and now - updated <= 30
+    )
+
+    with lock:
+        connected = is_connected
+
+    seconds_left = 900 - (now % 900)
+
+    if price is None:
+        return jsonify({
+            "ok": False,
+            "connected": False,
+            "status": "Esperando datos de Coinbase",
+            "error": error,
+            "candles": history,
+            "countdown": seconds_left,
         })
 
-    return result
-    # ==========================================
-# INTERFAZ Y RUTAS
-# ==========================================
+    analysis = calculate_signal(price, history)
+
+    return jsonify({
+        "ok": True,
+        "connected": is_connected,
+        "status": "EN VIVO" if is_connected else "SIN DATOS RECIENTES",
+        "price": round(price, 2),
+        "direction": analysis["direction"],
+        "signal": analysis["signal"],
+        "prediction": analysis["prediction"],
+        "confidence": analysis["confidence"],
+        "countdown": seconds_left,
+        "last_update": updated,
+        "candles": history[-100:],
+        "error": error,
+    })
+
+
+@app.route("/health")
+def health():
+    with lock:
+        updated = last_update
+        price = current_price
+        error = last_error
+
+    live = bool(
+        price is not None
+        and updated > 0
+        and time.time() - updated <= 30
+    )
+
+    return jsonify({
+        "ok": True,
+        "coinbase_live": live,
+        "price": price,
+        "last_update": updated,
+        "candles": len(candles),
+        "error": error,
+    })
 
 HTML = r"""
 <!DOCTYPE html>
@@ -468,259 +355,375 @@ HTML = r"""
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="theme-color" content="#080d18">
-<title>Bitcoin Radar PRO</title>
-
-<script src="https://unpkg.com/lightweight-charts@4.2.2/dist/lightweight-charts.standalone.production.js"></script>
+<title>Bitcoin Radar Live</title>
 
 <style>
-*{box-sizing:border-box}
-body{margin:0;padding:12px;background:#080d18;color:#e8edf7;font-family:Arial,sans-serif}
-header{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px}
-h1{font-size:21px;margin:0}
-.subtitle,.label,.status{color:#91a0b8;font-size:12px}
-.subtitle{margin-top:5px}
-.panel{background:#111a2a;border:1px solid #26344c;border-radius:12px;padding:13px;margin-bottom:11px}
-.price{font-size:29px;font-weight:bold;margin:7px 0}
-.cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}
-.value{font-size:19px;font-weight:bold;margin-top:7px}
-.green{color:#00d69a}
-.red{color:#ff5268}
-.yellow{color:#ffc857}
-#chart{height:350px;width:100%}
-.chart-title{font-size:14px;font-weight:bold;margin-bottom:10px}
-.footer{text-align:center;color:#718098;font-size:11px;margin:16px 0}
-@media(max-width:420px){body{padding:8px}#chart{height:320px}.price{font-size:25px}}
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    padding: 18px;
+    background: #0b1020;
+    color: #f4f6ff;
+    font-family: Arial, sans-serif;
+}
+
+main {
+    max-width: 650px;
+    margin: auto;
+}
+
+.header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 18px;
+}
+
+h1 {
+    font-size: 21px;
+    margin: 0;
+}
+
+.status {
+    font-size: 12px;
+    color: #ffb84d;
+}
+
+.card {
+    background: #151d32;
+    border: 1px solid #26334e;
+    border-radius: 15px;
+    padding: 18px;
+    margin-bottom: 14px;
+}
+
+.label {
+    color: #9eacc7;
+    font-size: 12px;
+    letter-spacing: 1px;
+}
+
+.price {
+    font-size: 34px;
+    font-weight: bold;
+    margin-top: 8px;
+}
+
+.signal {
+    text-align: center;
+    font-size: 30px;
+    font-weight: bold;
+    padding: 12px;
+    margin-top: 8px;
+}
+
+.up {
+    color: #25d695;
+}
+
+.down {
+    color: #ff6475;
+}
+
+.neutral {
+    color: #ffbd59;
+}
+
+.prediction {
+    font-size: 27px;
+    font-weight: bold;
+    margin-top: 8px;
+}
+
+.countdown {
+    font-size: 32px;
+    font-weight: bold;
+    margin-top: 8px;
+    font-variant-numeric: tabular-nums;
+}
+
+canvas {
+    width: 100%;
+    height: 260px;
+    display: block;
+}
+
+.small {
+    color: #93a1bd;
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+.row {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.value {
+    font-weight: bold;
+    margin-top: 6px;
+}
+
+button {
+    border: 0;
+    border-radius: 9px;
+    padding: 10px 14px;
+    color: white;
+    background: #294a83;
+    font-weight: bold;
+}
 </style>
 </head>
 
 <body>
+<main>
 
-<header>
-    <div>
-        <h1>BITCOIN RADAR PRO</h1>
-        <div class="subtitle">BTC-USD · Coinbase · Velas de 1 minuto</div>
-    </div>
-    <div id="connection" class="status yellow">
-        Conectando Coinbase...
-    </div>
-</header>
-
-<div class="panel">
-    <div class="label">PRECIO BITCOIN</div>
-    <div id="price" class="price">Cargando...</div>
-    <div id="source" class="status">Esperando datos...</div>
-</div>
-
-<div class="cards">
-    <div class="panel">
-        <div class="label">SEÑAL DEL RADAR</div>
-        <div id="signal" class="value yellow">NEUTRAL</div>
-        <div id="signalDescription" class="status">Esperando indicadores</div>
+    <div class="header">
+        <h1>BITCOIN RADAR</h1>
+        <div id="status" class="status">CONECTANDO...</div>
     </div>
 
-    <div class="panel">
-        <div class="label">RSI 14</div>
-        <div id="rsi" class="value">--</div>
+    <section class="card">
+        <div class="label">BITCOIN / USD · COINBASE</div>
+        <div id="price" class="price">Cargando...</div>
+        <div class="small">Precio recibido de Coinbase</div>
+    </section>
+
+    <section class="card">
+        <div class="label">RADAR DE DIRECCIÓN</div>
+
+        <div id="direction" class="signal neutral">
+            ESPERAR
+        </div>
+
+        <div class="row">
+            <div>
+                <div class="label">SEÑAL</div>
+                <div id="signal" class="value">ESPERAR</div>
+            </div>
+
+            <div>
+                <div class="label">CONFIANZA TÉCNICA</div>
+                <div id="confidence" class="value">--</div>
+            </div>
+        </div>
+    </section>
+
+    <section class="card">
+        <div class="label">
+            PRECIO ESTIMADO AL CIERRE DEL PERIODO
+        </div>
+
+        <div id="prediction" class="prediction">--</div>
+
+        <div class="small">
+            Estimación técnica, no garantiza el precio futuro.
+        </div>
+    </section>
+
+    <section class="card">
+        <div class="label">
+            TIEMPO RESTANTE · PERIODO DE 15 MINUTOS UTC
+        </div>
+
+        <div id="countdown" class="countdown">15:00</div>
+    </section>
+
+    <section class="card">
+        <div class="row">
+            <div class="label">VELAS DE 1 MINUTO</div>
+
+            <button onclick="refreshData()">
+                ACTUALIZAR
+            </button>
+        </div>
+
+        <canvas id="chart" width="900" height="360"></canvas>
+
+        <div class="small">
+            Las velas cambian cuando llegan nuevos datos de mercado.
+        </div>
+    </section>
+
+    <div id="updated" class="small">
+        Esperando primera actualización...
     </div>
 
-    <div class="panel">
-        <div class="label">EMA 9</div>
-        <div id="ema9" class="value">--</div>
-    </div>
-
-    <div class="panel">
-        <div class="label">EMA 21</div>
-        <div id="ema21" class="value">--</div>
-    </div>
-</div>
-
-<div class="panel">
-    <div class="chart-title">GRÁFICO BTC-USD · 1 MINUTO</div>
-    <div id="chart"></div>
-</div>
-
-<div class="cards">
-    <div class="panel">
-        <div class="label">VWAP</div>
-        <div id="vwap" class="value">--</div>
-    </div>
-
-    <div class="panel">
-        <div class="label">MACD</div>
-        <div id="macd" class="value">--</div>
-    </div>
-
-    <div class="panel">
-        <div class="label">SOPORTE</div>
-        <div id="support" class="value">--</div>
-    </div>
-
-    <div class="panel">
-        <div class="label">RESISTENCIA</div>
-        <div id="resistance" class="value">--</div>
-    </div>
-</div>
-
-<div class="footer">
-    Datos de Coinbase · Actualización de pantalla cada segundo.
-    Las señales no garantizan resultados.
-</div>
+</main>
 
 <script>
-const $ = id => document.getElementById(id);
-
-const chart = LightweightCharts.createChart(
-    $("chart"),
-    {
-        width: $("chart").clientWidth,
-        height: 350,
-        layout: {
-            background: {color: "#111a2a"},
-            textColor: "#aab7ca"
-        },
-        grid: {
-            vertLines: {color: "#202c40"},
-            horzLines: {color: "#202c40"}
-        },
-        rightPriceScale: {
-            borderColor: "#34435a"
-        },
-        timeScale: {
-            borderColor: "#34435a",
-            timeVisible: true,
-            secondsVisible: false
-        },
-        crosshair: {mode: 1}
-    }
-);
-
-const candleSeries = chart.addCandlestickSeries({
-    upColor: "#00d69a",
-    downColor: "#ff5268",
-    borderUpColor: "#00d69a",
-    borderDownColor: "#ff5268",
-    wickUpColor: "#00d69a",
-    wickDownColor: "#ff5268"
-});
-
-const ema9Series = chart.addLineSeries({
-    color: "#ffc857",
-    lineWidth: 2,
-    title: "EMA 9"
-});
-
-const ema21Series = chart.addLineSeries({
-    color: "#4c9aff",
-    lineWidth: 2,
-    title: "EMA 21"
-});
-
-const vwapSeries = chart.addLineSeries({
-    color: "#c084fc",
-    lineWidth: 2,
-    title: "VWAP"
-});
-
-function money(value) {
-    if (value === null || value === undefined) return "--";
-
-    const n = Number(value);
-    if (!Number.isFinite(n)) return "--";
-
-    return "$" + n.toLocaleString("en-US", {
-        minimumFractionDigits: 2,
+const money = value =>
+    Number(value).toLocaleString("en-US", {
+        style: "currency",
+        currency: "USD",
         maximumFractionDigits: 2
+    });
+
+function setText(id, value) {
+    document.getElementById(id).textContent = value;
+}
+
+function formatTime(seconds) {
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+
+    return String(m).padStart(2, "0") + ":" +
+           String(s).padStart(2, "0");
+}
+
+function drawChart(data) {
+    const canvas = document.getElementById("chart");
+    const ctx = canvas.getContext("2d");
+
+    const width = canvas.width;
+    const height = canvas.height;
+
+    ctx.clearRect(0, 0, width, height);
+
+    if (!data || data.length < 2) {
+        ctx.fillStyle = "#93a1bd";
+        ctx.fillText("Esperando velas...", 25, 40);
+        return;
+    }
+
+    const values = data.flatMap(c => [
+        Number(c.high),
+        Number(c.low)
+    ]);
+
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    const range = Math.max(max - min, 1);
+
+    const top = 20;
+    const bottom = height - 25;
+    const usableHeight = bottom - top;
+
+    const y = price =>
+        bottom - ((price - min) / range) * usableHeight;
+
+    ctx.strokeStyle = "#26334e";
+    ctx.lineWidth = 1;
+
+    for (let i = 0; i < 5; i++) {
+        const yy = top + (usableHeight / 4) * i;
+
+        ctx.beginPath();
+        ctx.moveTo(0, yy);
+        ctx.lineTo(width, yy);
+        ctx.stroke();
+    }
+
+    const step = width / data.length;
+    const candleWidth = Math.max(3, step * 0.55);
+
+    data.forEach((c, i) => {
+        const x = i * step + step / 2;
+
+        const rising = c.close >= c.open;
+        const color = rising ? "#25d695" : "#ff6475";
+
+        ctx.strokeStyle = color;
+        ctx.fillStyle = color;
+        ctx.lineWidth = 2;
+
+        ctx.beginPath();
+        ctx.moveTo(x, y(c.high));
+        ctx.lineTo(x, y(c.low));
+        ctx.stroke();
+
+        const openY = y(c.open);
+        const closeY = y(c.close);
+
+        const bodyTop = Math.min(openY, closeY);
+        const bodyHeight = Math.max(
+            2,
+            Math.abs(closeY - openY)
+        );
+
+        ctx.fillRect(
+            x - candleWidth / 2,
+            bodyTop,
+            candleWidth,
+            bodyHeight
+        );
     });
 }
 
-function number(value) {
-    if (value === null || value === undefined) return "--";
-
-    const n = Number(value);
-    if (!Number.isFinite(n)) return "--";
-
-    return n.toFixed(2);
-}
-
-function updateConnection(connection) {
-    if (connection && connection.connected) {
-        $("connection").textContent = "Coinbase conectado";
-        $("connection").className = "status green";
-    } else {
-        $("connection").textContent = "Coinbase reconectando";
-        $("connection").className = "status yellow";
-    }
-}
-
-async function updateAll() {
+async function refreshData() {
     try {
         const response = await fetch(
-            "/api/data?_=" + Date.now(),
-            {cache: "no-store"}
+            "/api",
+            { cache: "no-store" }
         );
-
-        if (!response.ok) {
-            throw new Error("Error del servidor: " + response.status);
-        }
 
         const data = await response.json();
 
-        if (data.error) {
-            throw new Error(data.error);
+        if (data.price !== undefined && data.price !== null) {
+            setText("price", money(data.price));
+            setText("prediction", money(data.prediction));
+            setText("direction", data.direction);
+            setText("signal", data.signal);
+            setText("confidence", data.confidence + "%");
+
+            const direction =
+                document.getElementById("direction");
+
+            direction.className = "signal " +
+                (
+                    data.direction === "ALCISTA"
+                    ? "up"
+                    : data.direction === "BAJISTA"
+                    ? "down"
+                    : "neutral"
+                );
+
+            drawChart(data.candles);
         }
 
-        $("price").textContent = money(data.price);
-        $("source").textContent = "Fuente: Coinbase BTC-USD";
+        setText(
+            "countdown",
+            formatTime(data.countdown || 0)
+        );
 
-        updateConnection(data.connection);
+        const status = document.getElementById("status");
 
-        const signal = data.signal || {};
+        status.textContent = data.connected
+            ? "● EN VIVO"
+            : "● SIN CONEXIÓN";
 
-        $("signal").textContent = signal.direction || "NEUTRAL";
-        $("signalDescription").textContent = signal.description || "";
+        status.style.color = data.connected
+            ? "#25d695"
+            : "#ff6475";
 
-        $("signal").className = "value";
-
-        if (signal.direction === "SUBE") {
-            $("signal").classList.add("green");
-        } else if (signal.direction === "BAJA") {
-            $("signal").classList.add("red");
+        if (data.last_update) {
+            setText(
+                "updated",
+                "Último dato recibido: " +
+                new Date(
+                    data.last_update * 1000
+                ).toLocaleTimeString()
+            );
         } else {
-            $("signal").classList.add("yellow");
+            setText(
+                "updated",
+                data.error || "Esperando datos de Coinbase..."
+            );
         }
-
-        $("rsi").textContent = number(data.rsi);
-        $("ema9").textContent = money(data.ema9_value);
-        $("ema21").textContent = money(data.ema21_value);
-        $("vwap").textContent = money(data.vwap_value);
-        $("macd").textContent = number(data.macd_value);
-        $("support").textContent = money(data.support);
-        $("resistance").textContent = money(data.resistance);
-
-        candleSeries.setData(data.candles || []);
-        ema9Series.setData(data.ema9 || []);
-        ema21Series.setData(data.ema21 || []);
-        vwapSeries.setData(data.vwap || []);
 
     } catch (error) {
-        $("source").textContent = error.message;
-        $("connection").textContent = "Error de conexión";
-        $("connection").className = "status red";
-        console.error(error);
+        setText("status", "ERROR DE CONEXIÓN");
+        setText("updated", String(error));
     }
 }
 
-function fitCharts() {
-    chart.applyOptions({
-        width: $("chart").clientWidth
-    });
-}
-
-window.addEventListener("resize", fitCharts);
-
-updateAll();
-setInterval(updateAll, 1000);
+refreshData();
+setInterval(refreshData, 1000);
 </script>
 
 </body>
@@ -728,80 +731,10 @@ setInterval(updateAll, 1000);
 """
 
 
-@app.route("/")
-def index():
-    return render_template_string(HTML)
-
-
-@app.route("/health")
-def health():
-    with lock:
-        status = dict(ws_status)
-        candle_count = len(bars)
-
-    return jsonify({
-        "ok": True,
-        "coinbase_connected": status["connected"],
-        "socket_open": status["socket_open"],
-        "error": status["error"],
-        "candles": candle_count,
-        "last_message": status["last_message"],
-        "last_price": status["last_price"]
-    })
-
-
-@app.route("/api/data")
-def api_data():
-    try:
-        df = get_market_data()
-        df = calculate_indicators(df)
-
-        last = df.iloc[-1]
-
-        candles = []
-
-        for _, row in df.iterrows():
-            candles.append({
-                "time": int(row["time"].timestamp()),
-                "open": float(row["open"]),
-                "high": float(row["high"]),
-                "low": float(row["low"]),
-                "close": float(row["close"])
-            })
-
-        with lock:
-            connection = dict(ws_status)
-
-        return jsonify({
-            "price": float(last["close"]),
-            "signal": generate_signal(df),
-            "rsi": float(last["RSI"]),
-            "ema9_value": float(last["EMA9"]),
-            "ema21_value": float(last["EMA21"]),
-            "vwap_value": float(last["VWAP"]),
-            "macd_value": float(last["MACD"]),
-            "support": float(last["SUPPORT"]),
-            "resistance": float(last["RESISTANCE"]),
-            "candles": candles,
-            "ema9": build_line(df, "EMA9"),
-            "ema21": build_line(df, "EMA21"),
-            "vwap": build_line(df, "VWAP"),
-            "connection": connection
-        })
-
-    except Exception as exc:
-        return jsonify({"error": str(exc)}), 502
-
-
-# ==========================================
-# INICIO
-# ==========================================
-
-start_coinbase_stream()
-
 if __name__ == "__main__":
+    start_background_services()
+
     app.run(
         host="0.0.0.0",
-        port=5000,
-        debug=False
+        port=10000
     )
