@@ -14,77 +14,140 @@ app = Flask(__name__)
 
 # ============================================================
 # BITCOIN RADAR PRO + KALSHI BTC 15M
-# Coinbase WebSocket · Velas de 1 segundo
-# Solo lectura. NO envia ordenes a Kalshi.
+# Coinbase WebSocket | Velas de 1 minuto
+# Solo lectura: NO envia ordenes a Kalshi
 # ============================================================
 
 SYMBOL = "BTC-USD"
 CANDLE_LIMIT = 300
+
+COINBASE_WS = "wss://ws-feed.exchange.coinbase.com"
+COINBASE_REST = "https://api.exchange.coinbase.com"
+
 KALSHI_API = "https://external-api.kalshi.com/trade-api/v2"
 KALSHI_SERIES = "KXBTC15M"
 
 session = requests.Session()
-session.headers.update({"User-Agent": "BitcoinRadarPRO/4.0"})
+session.headers.update({
+    "User-Agent": "BitcoinRadarPRO/5.0"
+})
 
-# Datos compartidos del flujo de Coinbase
-_ws_lock = threading.Lock()
-_ws_bars = deque(maxlen=CANDLE_LIMIT)
-_ws_status = {"connected": False, "error": ""}
-_ws_started = False
+lock = threading.Lock()
+bars = deque(maxlen=CANDLE_LIMIT)
+
+ws_status = {
+    "connected": False,
+    "error": "",
+    "last_message": None
+}
+
+ws_started = False
+
+
+def utc_now():
+    return datetime.now(timezone.utc)
 
 
 def add_trade(timestamp, price, size):
-    second = int(timestamp)
-    price = float(price)
-    size = float(size or 0)
+    """Agrega una operacion a su vela de un minuto."""
+    try:
+        ts = int(float(timestamp))
+        price = float(price)
+        size = float(size or 0)
 
-    with _ws_lock:
-        if _ws_bars and second < _ws_bars[-1]["time"]:
-            return
+        minute = ts - (ts % 60)
 
-        if not _ws_bars:
-            _ws_bars.append({
-                "time": second,
-                "open": price,
-                "high": price,
-                "low": price,
-                "close": price,
-                "volume": size
-            })
-            return
+        with lock:
+            if not bars:
+                bars.append({
+                    "time": minute,
+                    "open": price,
+                    "high": price,
+                    "low": price,
+                    "close": price,
+                    "volume": size
+                })
+                return
 
-        last = _ws_bars[-1]
+            last = bars[-1]
 
-        if second == last["time"]:
-            last["high"] = max(last["high"], price)
-            last["low"] = min(last["low"], price)
-            last["close"] = price
-            last["volume"] += size
-            return
+            if minute < last["time"]:
+                return
 
-        # Completa segundos sin operaciones con el último precio
-        for missing in range(last["time"] + 1, second):
-            _ws_bars.append({
-                "time": missing,
-                "open": last["close"],
-                "high": last["close"],
-                "low": last["close"],
-                "close": last["close"],
-                "volume": 0.0
-            })
-            last = _ws_bars[-1]
+            if minute == last["time"]:
+                last["high"] = max(last["high"], price)
+                last["low"] = min(last["low"], price)
+                last["close"] = price
+                last["volume"] += size
+            else:
+                bars.append({
+                    "time": minute,
+                    "open": price,
+                    "high": price,
+                    "low": price,
+                    "close": price,
+                    "volume": size
+                })
 
-        _ws_bars.append({
-            "time": second,
-            "open": price,
-            "high": price,
-            "low": price,
-            "close": price,
-            "volume": size
-        })
+    except Exception as exc:
+        print("Error agregando operacion:", exc)
 
 
-def coinbase_message(ws, message):
+def seed_candles():
+    """Carga velas historicas iniciales desde Coinbase."""
+    try:
+        url = f"{COINBASE_REST}/products/{SYMBOL}/candles"
+
+        response = session.get(
+            url,
+            params={"granularity": 60},
+            timeout=12
+        )
+        response.raise_for_status()
+
+        data = response.json()
+
+        with lock:
+            if bars:
+                return
+
+            for item in reversed(data):
+                if len(item) < 6:
+                    continue
+
+                ts, low, high, open_, close, volume = item
+
+                bars.append({
+                    "time": int(ts),
+                    "open": float(open_),
+                    "high": float(high),
+                    "low": float(low),
+                    "close": float(close),
+                    "volume": float(volume)
+                })
+
+        print("Coinbase: velas historicas cargadas")
+
+    except Exception as exc:
+        print("Error cargando velas Coinbase:", exc)
+
+
+def on_coinbase_open(ws):
+    with lock:
+        ws_status["connected"] = True
+        ws_status["error"] = ""
+
+    subscribe = {
+        "type": "subscribe",
+        "product_ids": [SYMBOL],
+        "channels": ["ticker"]
+    }
+
+    ws.send(json.dumps(subscribe))
+    print("Coinbase WebSocket conectado")
+
+
+def on_coinbase_message(ws, message):
     try:
         data = json.loads(message)
 
@@ -95,88 +158,52 @@ def coinbase_message(ws, message):
             return
 
         price = data.get("price")
-        event_time = data.get("time")
+        timestamp = data.get("time")
 
-        if price is None or event_time is None:
+        if price is None or timestamp is None:
             return
 
         dt = datetime.fromisoformat(
-            event_time.replace("Z", "+00:00")
+            timestamp.replace("Z", "+00:00")
         )
 
         add_trade(
             dt.timestamp(),
-            price,
+            float(price),
             data.get("last_size", 0)
         )
 
-    except Exception as exc:
-        with _ws_lock:
-            _ws_status["error"] = str(exc)
-
-
-def coinbase_open(ws):
-    with _ws_lock:
-        _ws_status["connected"] = True
-        _ws_status["error"] = ""
-
-    ws.send(json.dumps({
-        "type": "subscribe",
-        "product_ids": [SYMBOL],
-        "channels": ["ticker"]
-    }))
-
-
-def coinbase_close(ws, status_code, message):
-    with _ws_lock:
-        _ws_status["connected"] = False
-        _ws_status["error"] = str(message or "Conexión cerrada")
-
-
-def coinbase_error(ws, error):
-    with _ws_lock:
-        _ws_status["connected"] = False
-        _ws_status["error"] = str(error)
-
-
-def seed_recent_trades():
-    try:
-        response = session.get(
-            "https://api.exchange.coinbase.com/products/BTC-USD/trades",
-            params={"limit": 1000},
-            timeout=10
-        )
-        response.raise_for_status()
-
-        trades = response.json()
-
-        for trade in reversed(trades):
-            dt = datetime.fromisoformat(
-                trade["time"].replace("Z", "+00:00")
-            )
-
-            add_trade(
-                dt.timestamp(),
-                trade["price"],
-                trade.get("size", 0)
-            )
+        with lock:
+            ws_status["last_message"] = utc_now().isoformat()
 
     except Exception as exc:
-        with _ws_lock:
-            _ws_status["error"] = "Histórico inicial: " + str(exc)
+        print("Error leyendo Coinbase:", exc)
 
 
-def coinbase_ws_loop():
-    seed_recent_trades()
+def on_coinbase_error(ws, error):
+    with lock:
+        ws_status["error"] = str(error)
+        ws_status["connected"] = False
 
+    print("Coinbase WebSocket error:", error)
+
+
+def on_coinbase_close(ws, code, message):
+    with lock:
+        ws_status["connected"] = False
+
+    print("Coinbase WebSocket desconectado:", code, message)
+
+
+def coinbase_worker():
     while True:
         try:
             ws = websocket.WebSocketApp(
-                "wss://ws-feed.exchange.coinbase.com",
-                on_open=coinbase_open,
-                on_message=coinbase_message,
-                on_close=coinbase_close,
-                on_error=coinbase_error
+                COINBASE_WS,
+                on_open=on_coinbase_open,
+                on_message=on_coinbase_message,
+                on_error=on_coinbase_error,
+                on_close=on_coinbase_close
             )
 
             ws.run_forever(
@@ -185,48 +212,43 @@ def coinbase_ws_loop():
             )
 
         except Exception as exc:
-            with _ws_lock:
-                _ws_status["connected"] = False
-                _ws_status["error"] = str(exc)
+            with lock:
+                ws_status["connected"] = False
+                ws_status["error"] = str(exc)
+
+            print("Error en worker Coinbase:", exc)
 
         time.sleep(3)
 
 
 def start_coinbase_stream():
-    global _ws_started
+    global ws_started
 
-    if _ws_started:
+    if ws_started:
         return
 
-    _ws_started = True
+    ws_started = True
+
+    seed_candles()
 
     thread = threading.Thread(
-        target=coinbase_ws_loop,
-        name="coinbase-btc-stream",
+        target=coinbase_worker,
         daemon=True
     )
-
     thread.start()
 
 
 def get_market_data():
-    with _ws_lock:
-        rows = [dict(row) for row in _ws_bars]
-        connected = _ws_status["connected"]
-        error = _ws_status["error"]
+    """Devuelve las velas disponibles."""
+    with lock:
+        data = [dict(item) for item in bars]
 
-    if len(rows) < 30:
-        detail = error or (
-            "Conectando a Coinbase..."
-            if not connected
-            else "Recibiendo operaciones..."
-        )
-
+    if not data:
         raise RuntimeError(
-            "Aún no hay suficientes velas de 1 segundo. " + detail
+            "Esperando datos de Coinbase..."
         )
 
-    df = pd.DataFrame(rows)
+    df = pd.DataFrame(data)
 
     df["time"] = pd.to_datetime(
         df["time"],
@@ -234,21 +256,22 @@ def get_market_data():
         utc=True
     )
 
-    for col in ["open", "high", "low", "close", "volume"]:
-        df[col] = pd.to_numeric(df[col], errors="coerce")
+    df = df.sort_values("time")
+    df = df.drop_duplicates("time", keep="last")
+    df = df.tail(CANDLE_LIMIT).reset_index(drop=True)
 
-    return (
-        df.dropna()
-        .tail(CANDLE_LIMIT)
-        .reset_index(drop=True),
-        "Coinbase WebSocket · 1s"
-    )
+    return df
 
 
 def calculate_indicators(df):
     df = df.copy()
-    close = df["close"]
 
+    close = df["close"]
+    high = df["high"]
+    low = df["low"]
+    volume = df["volume"]
+
+    # Medias exponenciales
     df["EMA9"] = close.ewm(
         span=9,
         adjust=False
@@ -259,18 +282,20 @@ def calculate_indicators(df):
         adjust=False
     ).mean()
 
-    typical = (df["high"] + df["low"] + close) / 3
-
-    cumulative_volume = (
-        df["volume"].cumsum().replace(0, np.nan)
-    )
+    # VWAP
+    typical = (high + low + close) / 3
+    cumulative_volume = volume.cumsum()
 
     df["VWAP"] = (
-        (typical * df["volume"]).cumsum()
-        / cumulative_volume
+        (typical * volume).cumsum()
+        / cumulative_volume.replace(0, np.nan)
     )
 
+    df["VWAP"] = df["VWAP"].fillna(close)
+
+    # RSI 14
     delta = close.diff()
+
     gain = delta.clip(lower=0)
     loss = -delta.clip(upper=0)
 
@@ -289,22 +314,9 @@ def calculate_indicators(df):
     rs = avg_gain / avg_loss.replace(0, np.nan)
 
     df["RSI"] = 100 - (100 / (1 + rs))
+    df["RSI"] = df["RSI"].fillna(50)
 
-    df.loc[
-        (avg_loss == 0) & (avg_gain > 0),
-        "RSI"
-    ] = 100
-
-    df.loc[
-        (avg_gain == 0) & (avg_loss > 0),
-        "RSI"
-    ] = 0
-
-    df.loc[
-        (avg_gain == 0) & (avg_loss == 0),
-        "RSI"
-    ] = 50
-
+    # MACD
     ema12 = close.ewm(
         span=12,
         adjust=False
@@ -326,13 +338,14 @@ def calculate_indicators(df):
         df["MACD"] - df["MACD_SIGNAL"]
     )
 
-    df["SUPPORT"] = df["low"].rolling(
-        50,
+    # Soporte y resistencia aproximados
+    df["SUPPORT"] = low.rolling(
+        20,
         min_periods=1
     ).min()
 
-    df["RESISTANCE"] = df["high"].rolling(
-        50,
+    df["RESISTANCE"] = high.rolling(
+        20,
         min_periods=1
     ).max()
 
@@ -342,1247 +355,663 @@ def calculate_indicators(df):
 def generate_signal(df):
     last = df.iloc[-1]
 
-    if pd.isna(last["RSI"]) or pd.isna(last["VWAP"]):
-        return "ESPERAR"
+    score = 0
 
-    bullish = (
-        last["EMA9"] > last["EMA21"]
-        and last["RSI"] > 50
-        and last["MACD"] > last["MACD_SIGNAL"]
-        and last["close"] > last["VWAP"]
-    )
+    if last["EMA9"] > last["EMA21"]:
+        score += 1
+    elif last["EMA9"] < last["EMA21"]:
+        score -= 1
 
-    bearish = (
-        last["EMA9"] < last["EMA21"]
-        and last["RSI"] < 50
-        and last["MACD"] < last["MACD_SIGNAL"]
-        and last["close"] < last["VWAP"]
-    )
+    if last["MACD"] > last["MACD_SIGNAL"]:
+        score += 1
+    elif last["MACD"] < last["MACD_SIGNAL"]:
+        score -= 1
 
-    if bullish:
-        return "SUBE"
+    if last["close"] > last["VWAP"]:
+        score += 1
+    elif last["close"] < last["VWAP"]:
+        score -= 1
 
-    if bearish:
-        return "BAJA"
+    if last["RSI"] > 55:
+        score += 1
+    elif last["RSI"] < 45:
+        score -= 1
 
-    return "ESPERAR"
+    if score >= 3:
+        return {
+            "direction": "SUBE",
+            "strength": score,
+            "description": "Tendencia alcista"
+        }
+
+    if score <= -3:
+        return {
+            "direction": "BAJA",
+            "strength": abs(score),
+            "description": "Tendencia bajista"
+        }
+
+    return {
+        "direction": "NEUTRAL",
+        "strength": abs(score),
+        "description": "Sin confirmacion suficiente"
+    }
 
 
 def as_float(value):
     try:
-        if value is None or value == "":
+        if value is None:
             return None
-
         return float(value)
-
-    except (TypeError, ValueError):
+    except (ValueError, TypeError):
         return None
 
 
 def kalshi_market_data():
+    """Consulta mercados de Kalshi. No envia ordenes."""
     try:
         response = session.get(
             f"{KALSHI_API}/markets",
             params={
                 "series_ticker": KALSHI_SERIES,
-                "status": "open",
-                "limit": 100
+                "limit": 5,
+                "status": "open"
             },
-            timeout=12
+            timeout=10
         )
 
         response.raise_for_status()
-
         payload = response.json()
-        markets = payload.get("markets", []) or []
 
-        now = datetime.now(timezone.utc)
-        candidates = []
+        markets = payload.get("markets", [])
 
-        for market in markets:
-            close_text = (
-                market.get("close_time")
-                or market.get("expected_expiration_time")
-            )
-
-            close_dt = None
-
-            if close_text:
-                try:
-                    close_dt = datetime.fromisoformat(
-                        close_text.replace("Z", "+00:00")
-                    )
-
-                    if close_dt.tzinfo is None:
-                        close_dt = close_dt.replace(
-                            tzinfo=timezone.utc
-                        )
-
-                except ValueError:
-                    close_dt = None
-
-            if close_dt is None or close_dt > now:
-                candidates.append((
-                    close_dt or datetime.max.replace(
-                        tzinfo=timezone.utc
-                    ),
-                    market
-                ))
-
-        if not candidates:
+        if not markets:
             return {
                 "available": False,
-                "message": "No se encontró un contrato BTC 15M abierto.",
+                "message": "No se encontraron mercados abiertos",
                 "series": KALSHI_SERIES
             }
 
-        candidates.sort(key=lambda item: item[0])
-        market = candidates[0][1]
-
-        yes_bid = as_float(market.get("yes_bid_dollars"))
-        yes_ask = as_float(market.get("yes_ask_dollars"))
-        no_bid = as_float(market.get("no_bid_dollars"))
-        no_ask = as_float(market.get("no_ask_dollars"))
-
-        yes_estimated = False
-        no_estimated = False
-
-        if yes_ask is None and no_bid is not None:
-            yes_ask = 1.0 - no_bid
-            yes_estimated = True
-
-        if no_ask is None and yes_bid is not None:
-            no_ask = 1.0 - yes_bid
-            no_estimated = True
-
-        close_ts = None
-
-        close_text = (
-            market.get("close_time")
-            or market.get("expected_expiration_time")
-        )
-
-        if close_text:
-            try:
-                close_dt = datetime.fromisoformat(
-                    close_text.replace("Z", "+00:00")
-                )
-
-                if close_dt.tzinfo is None:
-                    close_dt = close_dt.replace(
-                        tzinfo=timezone.utc
-                    )
-
-                close_ts = int(close_dt.timestamp())
-
-            except ValueError:
-                pass
+        market = markets[0]
 
         return {
             "available": True,
-            "series": KALSHI_SERIES,
             "ticker": market.get("ticker"),
-            "title": (
-                market.get("title")
-                or market.get("subtitle")
-                or "Bitcoin 15 minutos"
-            ),
+            "title": market.get("title"),
             "status": market.get("status"),
-            "close_ts": close_ts,
-            "yes_bid": yes_bid,
-            "yes_ask": yes_ask,
-            "no_bid": no_bid,
-            "no_ask": no_ask,
+            "yes_bid": as_float(
+                market.get("yes_bid_dollars")
+            ),
+            "yes_ask": as_float(
+                market.get("yes_ask_dollars")
+            ),
+            "no_bid": as_float(
+                market.get("no_bid_dollars")
+            ),
+            "no_ask": as_float(
+                market.get("no_ask_dollars")
+            ),
             "last_price": as_float(
                 market.get("last_price_dollars")
             ),
-            "yes_ask_estimated": yes_estimated,
-            "no_ask_estimated": no_estimated,
-            "floor_strike": as_float(
-                market.get("floor_strike")
-            ),
-            "cap_strike": as_float(
-                market.get("cap_strike")
-            ),
-            "rules": market.get("rules_primary") or ""
+            "close_time": market.get("close_time"),
+            "series": KALSHI_SERIES
         }
 
     except Exception as exc:
         return {
             "available": False,
-            "message": f"Error conectando a Kalshi: {str(exc)}",
+            "message": f"Error conectando a Kalshi: {exc}",
             "series": KALSHI_SERIES
         }
 
 
-# Inicia Coinbase cuando Render carga la aplicación
+# Inicia el flujo de Coinbase al cargar la aplicacion
 start_coinbase_stream()
+# ============================================================
+# INTERFAZ WEB
+# ============================================================
 
-
-@app.route("/")
-def index():
-    return render_template_string(HTML)
-
-
-@app.route("/api/data")
-def api_data():
-    try:
-        df_raw, source = get_market_data()
-
-    except Exception as exc:
-        return jsonify({"error": str(exc)}), 502
-
-    df = calculate_indicators(df_raw)
-    signal = generate_signal(df)
-    last = df.iloc[-1]
-
-    def line(col):
-        out = []
-
-        for t, v in zip(df["time"], df[col]):
-            if pd.isna(v):
-                continue
-
-            out.append({
-                "time": int(pd.Timestamp(t).timestamp()),
-                "value": round(float(v), 4)
-            })
-
-        return out
-
-    candles = []
-    volume = []
-
-    for t, o, h, l, c, v in zip(
-        df["time"],
-        df["open"],
-        df["high"],
-        df["low"],
-        df["close"],
-        df["volume"]
-    ):
-        ts = int(pd.Timestamp(t).timestamp())
-
-        candles.append({
-            "time": ts,
-            "open": float(o),
-            "high": float(h),
-            "low": float(l),
-            "close": float(c)
-        })
-
-        volume.append({
-            "time": ts,
-            "value": float(v),
-            "color": "#00d69a" if c >= o else "#ff5268"
-        })
-
-    macd_hist = []
-
-    for t, v in zip(df["time"], df["MACD_HIST"]):
-        if pd.isna(v):
-            continue
-
-        macd_hist.append({
-            "time": int(pd.Timestamp(t).timestamp()),
-            "value": round(float(v), 2),
-            "color": "#00d69a" if v >= 0 else "#ff5268"
-        })
-
-    return jsonify({
-        "price": float(last["close"]),
-        "signal": signal,
-        "rsi": None if pd.isna(last["RSI"]) else float(last["RSI"]),
-        "source": source,
-        "candles": candles,
-        "ema9": line("EMA9"),
-        "ema21": line("EMA21"),
-        "vwap": line("VWAP"),
-        "volume": volume,
-        "rsi_series": line("RSI"),
-        "macd": line("MACD"),
-        "macd_signal": line("MACD_SIGNAL"),
-        "macd_hist": macd_hist,
-        "support": None if pd.isna(last["SUPPORT"]) else float(last["SUPPORT"]),
-        "resistance": None if pd.isna(last["RESISTANCE"]) else float(last["RESISTANCE"]),
-        "market": kalshi_market_data()
-    })
-    HTML = r"""
+HTML = r"""
 <!DOCTYPE html>
 <html lang="es">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#080d18">
+
 <title>Bitcoin Radar PRO</title>
 
 <script src="https://unpkg.com/lightweight-charts@4.2.2/dist/lightweight-charts.standalone.production.js"></script>
 
 <style>
-:root {
- --bg:#080d18;
- --panel:#111a2a;
- --panel2:#182438;
- --line:#263750;
- --muted:#91a4bd;
- --white:#edf4ff;
- --green:#00d69a;
- --red:#ff5268;
- --yellow:#ffc857;
- --blue:#36a3ff;
- --purple:#c58cff;
+* {
+    box-sizing: border-box;
 }
-* {box-sizing:border-box}
+
 body {
- margin:0;
- padding:12px;
- background:var(--bg);
- color:var(--white);
- font-family:Arial,sans-serif;
+    margin: 0;
+    padding: 14px;
+    background: #080d18;
+    color: #e8edf7;
+    font-family: Arial, sans-serif;
 }
-main {max-width:1180px;margin:auto}
+
 header {
- display:flex;
- justify-content:space-between;
- align-items:center;
- gap:10px;
- margin:5px 0 14px;
- flex-wrap:wrap;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 15px;
 }
-h1 {font-size:19px;letter-spacing:1.4px;margin:0 0 5px}
-.sub {font-size:10px;color:var(--green)}
-button {
- border:1px solid #3b526e;
- background:#1b2b42;
- color:white;
- border-radius:8px;
- padding:10px 13px;
- font-weight:bold;
- cursor:pointer;
+
+h1 {
+    font-size: 21px;
+    margin: 0;
 }
+
+.subtitle {
+    color: #8795ad;
+    font-size: 12px;
+    margin-top: 5px;
+}
+
 .panel {
- background:var(--panel);
- border:1px solid var(--line);
- border-radius:13px;
- padding:13px;
- margin-bottom:12px;
+    background: #111a2a;
+    border: 1px solid #233149;
+    border-radius: 12px;
+    padding: 14px;
+    margin-bottom: 12px;
 }
-.metrics {
- display:grid;
- grid-template-columns:repeat(2,minmax(0,1fr));
- gap:9px;
- margin-bottom:12px;
+
+.label {
+    color: #8795ad;
+    font-size: 12px;
 }
-.metric {
- background:var(--panel2);
- padding:12px;
- border-radius:9px;
- min-width:0;
+
+.price {
+    font-size: 30px;
+    font-weight: bold;
+    margin-top: 7px;
 }
-.metric small,.muted {
- font-size:10px;
- color:var(--muted);
+
+.green {
+    color: #00d69a;
 }
-.metric strong {
- display:block;
- font-size:19px;
- margin-top:7px;
- overflow-wrap:anywhere;
+
+.red {
+    color: #ff5268;
 }
-.section {
- font-size:11px;
- color:#aebed2;
- letter-spacing:1px;
- margin:2px 0 12px;
- font-weight:bold;
+
+.yellow {
+    color: #ffc857;
 }
-.green {color:var(--green)}
-.red {color:var(--red)}
-.yellow {color:var(--yellow)}
-.blue {color:var(--blue)}
-.signal-grid {
- display:grid;
- grid-template-columns:repeat(3,1fr);
- gap:8px;
+
+.status {
+    font-size: 12px;
+    color: #8795ad;
 }
-.signal {
- padding:13px 5px;
- text-align:center;
- border-radius:9px;
- background:#182438;
- font-size:12px;
- font-weight:bold;
- border:1px solid #344963;
+
+.cards {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
 }
-.active-up {
- background:#103d34;
- border-color:var(--green);
- color:var(--green);
+
+.value {
+    font-size: 19px;
+    font-weight: bold;
+    margin-top: 7px;
 }
-.active-down {
- background:#3b202b;
- border-color:var(--red);
- color:var(--red);
+
+#chart {
+    width: 100%;
+    height: 390px;
 }
-.active-wait {
- background:#40351e;
- border-color:var(--yellow);
- color:var(--yellow);
+
+.chart-title {
+    font-size: 14px;
+    font-weight: bold;
+    margin-bottom: 10px;
 }
-.chart {width:100%;height:360px}
-.small-chart {height:150px}
-.legend {
- display:flex;
- flex-wrap:wrap;
- gap:12px;
- font-size:10px;
- color:#aabbd0;
- margin-bottom:10px;
+
+.market-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 8px 0;
+    border-bottom: 1px solid #263248;
+    font-size: 13px;
 }
-.legend span {display:flex;align-items:center;gap:5px}
-.dot {width:8px;height:8px;border-radius:50%}
-.two {
- display:grid;
- grid-template-columns:repeat(2,minmax(0,1fr));
- gap:9px;
+
+.market-row:last-child {
+    border-bottom: none;
 }
-.quote {
- background:var(--panel2);
- border-radius:10px;
- padding:12px;
+
+.footer {
+    color: #718098;
+    font-size: 11px;
+    text-align: center;
+    margin: 18px 0;
 }
-.quote b {font-size:10px;color:var(--muted)}
-.quote strong {
- display:block;
- font-size:25px;
- margin-top:6px;
-}
-.formgrid {
- display:grid;
- grid-template-columns:repeat(2,minmax(0,1fr));
- gap:9px;
-}
-label {
- display:block;
- font-size:10px;
- color:var(--muted);
- margin-bottom:5px;
-}
-input,select {
- width:100%;
- background:#0b1422;
- color:var(--white);
- border:1px solid #344963;
- border-radius:8px;
- padding:11px;
- font-size:14px;
-}
-.actionrow {
- display:flex;
- gap:8px;
- flex-wrap:wrap;
- margin-top:10px;
-}
-.actionrow button {flex:1}
-.note {
- font-size:10px;
- line-height:1.5;
- color:#8293a9;
-}
-table {
- width:100%;
- border-collapse:collapse;
- font-size:12px;
-}
-td {
- padding:8px 3px;
- border-bottom:1px solid #24344b;
-}
-td:last-child {
- text-align:right;
- font-weight:bold;
-}
-.alertrow {
- display:flex;
- gap:9px;
- align-items:center;
- padding:8px 0;
- border-bottom:1px solid #24344b;
- font-size:12px;
-}
-.pill {
- font-size:10px;
- border-radius:20px;
- padding:4px 7px;
- background:#263750;
- color:#b9cbe0;
-}
-footer {
- text-align:center;
- color:#71839b;
- font-size:10px;
- padding:12px;
-}
-@media(min-width:700px) {
- body {padding:22px}
- .metrics {grid-template-columns:repeat(4,1fr)}
- .chart {height:490px}
- .small-chart {height:170px}
- .layout {
-  display:grid;
-  grid-template-columns:1.4fr 1fr;
-  gap:12px;
- }
- .layout .panel {height:fit-content}
+
+@media (max-width: 420px) {
+    body {
+        padding: 9px;
+    }
+
+    #chart {
+        height: 330px;
+    }
+
+    .price {
+        font-size: 25px;
+    }
 }
 </style>
 </head>
+
 <body>
-<main>
 
 <header>
- <div>
-  <h1>BITCOIN RADAR PRO</h1>
-  <div class="sub" id="connection">● CONECTANDO DATOS...</div>
- </div>
- <button onclick="updateAll()">ACTUALIZAR</button>
+    <div>
+        <h1>BITCOIN RADAR PRO</h1>
+        <div class="subtitle">
+            BTC-USD · Coinbase · Velas de 1 minuto
+        </div>
+    </div>
+
+    <div id="connection" class="status">
+        Conectando Coinbase...
+    </div>
 </header>
 
-<div class="metrics">
- <div class="metric">
-  <small>BITCOIN / USD</small>
-  <strong id="btcPrice">--</strong>
- </div>
- <div class="metric">
-  <small>SEÑAL TÉCNICA</small>
-  <strong id="mainSignal" class="yellow">ESPERAR</strong>
- </div>
- <div class="metric">
-  <small>RSI 14</small>
-  <strong id="rsiValue">--</strong>
- </div>
- <div class="metric">
-  <small>CONTRATO CIERRA EN</small>
-  <strong id="timer">--:--</strong>
- </div>
+<div class="panel">
+    <div class="label">PRECIO BITCOIN</div>
+    <div id="price" class="price">Cargando...</div>
+    <div id="source" class="status">
+        Esperando datos...
+    </div>
 </div>
 
-<div class="layout">
-<div>
+<div class="cards">
 
-<section class="panel">
- <div class="section">RADAR DE DIRECCIÓN</div>
- <div class="signal-grid">
-  <div class="signal" id="upSignal">▲ SUBE</div>
-  <div class="signal" id="downSignal">▼ BAJA</div>
-  <div class="signal active-wait" id="waitSignal">Ⅱ ESPERAR</div>
- </div>
- <p class="note" id="explanation">
-  Esperando confirmación de indicadores.
- </p>
-</section>
+    <div class="panel">
+        <div class="label">SEÑAL DEL RADAR</div>
+        <div id="signal" class="value yellow">
+            NEUTRAL
+        </div>
+        <div id="signalDescription" class="status">
+            Esperando indicadores
+        </div>
+    </div>
 
-<section class="panel">
- <div class="section">BTC · VELAS JAPONESAS · 1 SEGUNDO</div>
- <div class="legend">
-  <span><i class="dot" style="background:#ffc857"></i>EMA 9</span>
-  <span><i class="dot" style="background:#36a3ff"></i>EMA 21</span>
-  <span><i class="dot" style="background:#c58cff"></i>VWAP</span>
- </div>
- <div id="priceChart" class="chart"></div>
-</section>
+    <div class="panel">
+        <div class="label">RSI 14</div>
+        <div id="rsi" class="value">--</div>
+        <div class="status">Periodo 14</div>
+    </div>
 
-<section class="panel">
- <div class="section">VOLUMEN</div>
- <div id="volumeChart" class="chart small-chart"></div>
-</section>
+    <div class="panel">
+        <div class="label">EMA 9</div>
+        <div id="ema9" class="value">--</div>
+    </div>
 
-<section class="panel">
- <div class="section">RSI 14</div>
- <div id="rsiChart" class="chart small-chart"></div>
-</section>
-
-<section class="panel">
- <div class="section">MACD</div>
- <div id="macdChart" class="chart small-chart"></div>
-</section>
+    <div class="panel">
+        <div class="label">EMA 21</div>
+        <div id="ema21" class="value">--</div>
+    </div>
 
 </div>
 
-<div>
-
-<section class="panel">
- <div class="section">MERCADO KALSHI · BTC 15 MINUTOS</div>
- <div id="marketTitle" style="font-size:13px;font-weight:bold;margin-bottom:8px">
-  Buscando contrato...
- </div>
- <div class="muted" id="marketTicker">Ticker: --</div>
-
- <div class="two" style="margin-top:10px">
-  <div class="quote">
-   <b>YES · COMPRA</b>
-   <strong class="green" id="yesAsk">--¢</strong>
-   <span class="muted" id="yesBid">Bid: --</span>
-  </div>
-  <div class="quote">
-   <b>NO · COMPRA</b>
-   <strong class="red" id="noAsk">--¢</strong>
-   <span class="muted" id="noBid">Bid: --</span>
-  </div>
- </div>
-
- <p class="note" id="marketMessage">
-  Consultando la API pública de Kalshi.
- </p>
- <div class="muted" id="strikeInfo"></div>
-</section>
-
-<section class="panel">
- <div class="section">MI OPERACIÓN · SEGUIMIENTO MANUAL</div>
-
- <div class="formgrid">
-  <div>
-   <label>LADO COMPRADO</label>
-   <select id="side">
-    <option value="yes">YES</option>
-    <option value="no">NO</option>
-   </select>
-  </div>
-
-  <div>
-   <label>CONTRATOS</label>
-   <input id="quantity" type="number" min="1" step="1" value="1">
-  </div>
-
-  <div>
-   <label>PRECIO DE ENTRADA (¢)</label>
-   <input id="entry" type="number" min="1" max="99" placeholder="Ej. 52">
-  </div>
-
-  <div>
-   <label>OBJETIVO DE SALIDA (¢)</label>
-   <input id="target" type="number" min="1" max="99" placeholder="Ej. 70">
-  </div>
-
-  <div>
-   <label>LÍMITE DE PÉRDIDA (¢)</label>
-   <input id="stop" type="number" min="1" max="99" placeholder="Ej. 40">
-  </div>
-
-  <div>
-   <label>ALERTA SONORA</label>
-   <select id="sound">
-    <option value="on">Activada</option>
-    <option value="off">Desactivada</option>
-   </select>
-  </div>
- </div>
-
- <div class="actionrow">
-  <button onclick="saveTrade()">GUARDAR OPERACIÓN</button>
-  <button onclick="clearTrade()">CERRAR / BORRAR</button>
- </div>
-
- <table style="margin-top:10px">
-  <tr>
-   <td>Precio actual de salida estimado</td>
-   <td id="currentExit">--</td>
-  </tr>
-  <tr>
-   <td>Ganancia / pérdida estimada</td>
-   <td id="pnl">--</td>
-  </tr>
-  <tr>
-   <td>Estado</td>
-   <td id="tradeStatus">Sin operación guardada</td>
-  </tr>
- </table>
-
- <p class="note">
-  Estimación antes de comisiones y deslizamiento. El panel no compra
-  ni vende por ti.
- </p>
-</section>
-
-<section class="panel">
- <div class="section">ALERTAS INTELIGENTES</div>
-
- <div class="alertrow">
-  <span class="pill">SEÑAL</span>
-  Aviso cuando cambia SUBE / BAJA / ESPERAR
- </div>
- <div class="alertrow">
-  <span class="pill">OBJETIVO</span>
-  Aviso al alcanzar el precio objetivo
- </div>
- <div class="alertrow">
-  <span class="pill">STOP</span>
-  Aviso al alcanzar el límite de pérdida
- </div>
- <div class="alertrow">
-  <span class="pill">SALIDA</span>
-  Aviso si se debilita la señal técnica
- </div>
-
- <div class="actionrow">
-  <button onclick="enableSound()">ACTIVAR SONIDO</button>
- </div>
-
- <p class="note" id="alertStatus">
-  Las alertas iguales no se repiten en cada actualización.
- </p>
-</section>
-
-</div>
+<div class="panel">
+    <div class="chart-title">
+        GRÁFICO BTC-USD · 1 MINUTO
+    </div>
+    <div id="chart"></div>
 </div>
 
-<footer>
- Datos informativos. Las señales técnicas no garantizan resultados.
- Los contratos YES/NO dependen de las reglas del mercado seleccionado.
-</footer>
+<div class="cards">
 
-</main>
+    <div class="panel">
+        <div class="label">VWAP</div>
+        <div id="vwap" class="value">--</div>
+    </div>
+
+    <div class="panel">
+        <div class="label">MACD</div>
+        <div id="macd" class="value">--</div>
+    </div>
+
+    <div class="panel">
+        <div class="label">SOPORTE</div>
+        <div id="support" class="value">--</div>
+    </div>
+
+    <div class="panel">
+        <div class="label">RESISTENCIA</div>
+        <div id="resistance" class="value">--</div>
+    </div>
+
+</div>
+
+<div class="panel">
+    <div class="chart-title">
+        KALSHI BTC 15 MINUTOS
+    </div>
+
+    <div class="market-row">
+        <span>Estado</span>
+        <strong id="kalshiStatus">Consultando...</strong>
+    </div>
+
+    <div class="market-row">
+        <span>Mercado</span>
+        <strong id="kalshiTicker">--</strong>
+    </div>
+
+    <div class="market-row">
+        <span>YES BID</span>
+        <strong id="yesBid">--</strong>
+    </div>
+
+    <div class="market-row">
+        <span>YES ASK</span>
+        <strong id="yesAsk">--</strong>
+    </div>
+
+    <div class="market-row">
+        <span>NO BID</span>
+        <strong id="noBid">--</strong>
+    </div>
+
+    <div class="market-row">
+        <span>NO ASK</span>
+        <strong id="noAsk">--</strong>
+    </div>
+
+    <div id="kalshiMessage" class="status">
+        Solo lectura. No se envian ordenes.
+    </div>
+</div>
+
+<div class="footer">
+    Actualizacion de datos cada segundo ·
+    Señales tecnicas informativas, no garantizan resultados.
+</div>
 
 <script>
 const $ = id => document.getElementById(id);
 
-const fmtUSD = n => n == null
- ? "--"
- : "$" + Number(n).toLocaleString("en-US", {
-     minimumFractionDigits:2,
-     maximumFractionDigits:2
-   });
+const chart = LightweightCharts.createChart(
+    $("chart"),
+    {
+        width: $("chart").clientWidth,
+        height: 390,
 
-const cents = n => n == null
- ? "--¢"
- : (Number(n)*100).toFixed(1)+"¢";
+        layout: {
+            background: {
+                color: "#111a2a"
+            },
+            textColor: "#aab7ca"
+        },
 
-function chartOptions(el, height) {
- return {
-  width:el.clientWidth,
-  height:height,
-  layout:{
-   background:{color:"#111a2a"},
-   textColor:"#aebdd0",
-   fontSize:10
-  },
-  grid:{
-   vertLines:{color:"#1d2b40"},
-   horzLines:{color:"#1d2b40"}
-  },
-  rightPriceScale:{borderColor:"#34445a"},
-  timeScale:{
-   borderColor:"#34445a",
-   timeVisible:true,
-   secondsVisible:true,
-   rightOffset:3,
-   barSpacing:7,
-   minBarSpacing:2
-  },
-  crosshair:{mode:LightweightCharts.CrosshairMode.Normal},
-  handleScroll:true,
-  handleScale:true
- };
-}
+        grid: {
+            vertLines: {
+                color: "#202c40"
+            },
+            horzLines: {
+                color: "#202c40"
+            }
+        },
 
-const pc = LightweightCharts.createChart(
- $("priceChart"), chartOptions($("priceChart"),360)
+        rightPriceScale: {
+            borderColor: "#34435a"
+        },
+
+        timeScale: {
+            borderColor: "#34435a",
+            timeVisible: true,
+            secondsVisible: false
+        },
+
+        crosshair: {
+            mode: 1
+        }
+    }
 );
 
-const candle = pc.addCandlestickSeries({
- upColor:"#00d69a",
- downColor:"#ff5268",
- borderUpColor:"#00d69a",
- borderDownColor:"#ff5268",
- wickUpColor:"#00d69a",
- wickDownColor:"#ff5268"
+const candleSeries = chart.addCandlestickSeries({
+    upColor: "#00d69a",
+    downColor: "#ff5268",
+    borderUpColor: "#00d69a",
+    borderDownColor: "#ff5268",
+    wickUpColor: "#00d69a",
+    wickDownColor: "#ff5268"
 });
 
-const e9 = pc.addLineSeries({
- color:"#ffc857",
- lineWidth:2,
- title:"EMA 9"
+const ema9Series = chart.addLineSeries({
+    color: "#ffc857",
+    lineWidth: 2,
+    title: "EMA 9"
 });
 
-const e21 = pc.addLineSeries({
- color:"#36a3ff",
- lineWidth:2,
- title:"EMA 21"
+const ema21Series = chart.addLineSeries({
+    color: "#4c9aff",
+    lineWidth: 2,
+    title: "EMA 21"
 });
 
-const vw = pc.addLineSeries({
- color:"#c58cff",
- lineWidth:2,
- title:"VWAP"
+const vwapSeries = chart.addLineSeries({
+    color: "#c084fc",
+    lineWidth: 2,
+    title: "VWAP"
 });
 
-const vc = LightweightCharts.createChart(
- $("volumeChart"), chartOptions($("volumeChart"),150)
-);
 
-const vol = vc.addHistogramSeries({
- priceFormat:{type:"volume"},
- priceScaleId:""
-});
+function money(value) {
+    if (value === null || value === undefined) {
+        return "--";
+    }
 
-vc.priceScale("").applyOptions({
- scaleMargins:{top:.1,bottom:0}
-});
+    const n = Number(value);
 
-const rc = LightweightCharts.createChart(
- $("rsiChart"), chartOptions($("rsiChart"),150)
-);
+    if (!Number.isFinite(n)) {
+        return "--";
+    }
 
-const rsi = rc.addLineSeries({
- color:"#bd8aff",
- lineWidth:2,
- title:"RSI"
-});
-
-[70,50,30].forEach((p,i) => {
- rsi.createPriceLine({
-  price:p,
-  color:i===0 ? "#ff5268" : i===1 ? "#71839c" : "#00d69a",
-  lineStyle:LightweightCharts.LineStyle.Dashed,
-  title:String(p)
- });
-});
-
-rc.priceScale("right").applyOptions({
- autoScale:false,
- scaleMargins:{top:.1,bottom:.1}
-});
-
-const mc = LightweightCharts.createChart(
- $("macdChart"), chartOptions($("macdChart"),150)
-);
-
-const ml = mc.addLineSeries({
- color:"#36a3ff",
- lineWidth:2,
- title:"MACD"
-});
-
-const ms = mc.addLineSeries({
- color:"#ffc857",
- lineWidth:2,
- title:"Signal"
-});
-
-const mh = mc.addHistogramSeries({
- lastValueVisible:false
-});
-
-ml.createPriceLine({
- price:0,
- color:"#71839c",
- lineStyle:LightweightCharts.LineStyle.Dashed
-});
-
-let btcData = null;
-let marketData = null;
-let previousSignal = null;
-let savedTrade = null;
-let audioCtx = null;
-let lastAlertKey = "";
-let marketCloseTs = null;
-let firstLoad = true;
-
-try {
-  savedTrade = JSON.parse(localStorage.getItem("radarTrade") || "null");
-} catch (e) {
-  savedTrade = null;
+    return "$" + n.toLocaleString(
+        "en-US",
+        {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2
+        }
+    );
 }
 
-if (savedTrade) {
-  if (savedTrade.side) $("side").value = savedTrade.side;
-  if (savedTrade.quantity) $("quantity").value = savedTrade.quantity;
-  if (savedTrade.entry) $("entry").value = savedTrade.entry;
-  if (savedTrade.target) $("target").value = savedTrade.target;
-  if (savedTrade.stop) $("stop").value = savedTrade.stop;
-  if (savedTrade.sound) $("sound").value = savedTrade.sound;
+
+function number(value) {
+    if (value === null || value === undefined) {
+        return "--";
+    }
+
+    const n = Number(value);
+
+    if (!Number.isFinite(n)) {
+        return "--";
+    }
+
+    return n.toFixed(2);
 }
 
-function soundOn() {
- return $("sound").value === "on";
+
+function percent(value) {
+    if (value === null || value === undefined) {
+        return "--";
+    }
+
+    return Number(value).toFixed(2);
 }
 
-function beep(freq, dur) {
- if (!soundOn()) return;
 
- try {
-  if (!audioCtx) {
-   audioCtx = new (
-    window.AudioContext || window.webkitAudioContext
-   )();
-  }
+function setLine(series, values) {
+    if (!Array.isArray(values)) {
+        series.setData([]);
+        return;
+    }
 
-  if (audioCtx.state === "suspended") {
-   audioCtx.resume();
-  }
-
-  const o = audioCtx.createOscillator();
-  const g = audioCtx.createGain();
-
-  o.connect(g);
-  g.connect(audioCtx.destination);
-
-  o.frequency.value = freq || 880;
-  o.type = "sine";
-
-  g.gain.setValueAtTime(0.12, audioCtx.currentTime);
-
-  o.start();
-  o.stop(audioCtx.currentTime + (dur || 0.15));
-
- } catch (e) {}
+    series.setData(values);
 }
 
-function enableSound() {
- $("sound").value = "on";
 
- beep(660, 0.18);
+function updateKalshi(market) {
+    if (!market) {
+        $("kalshiStatus").textContent = "Sin datos";
+        return;
+    }
 
- setTimeout(() => beep(880, 0.18), 200);
+    if (!market.available) {
+        $("kalshiStatus").textContent = "Desconectado";
+        $("kalshiMessage").textContent =
+            market.message || "No disponible";
+        return;
+    }
 
- $("alertStatus").textContent =
-  "Sonido activado. Sonará cuando cambie la señal o se alcance objetivo/stop.";
+    $("kalshiStatus").textContent = "Disponible";
+    $("kalshiTicker").textContent =
+        market.ticker || "--";
+
+    $("yesBid").textContent =
+        money(market.yes_bid);
+
+    $("yesAsk").textContent =
+        money(market.yes_ask);
+
+    $("noBid").textContent =
+        money(market.no_bid);
+
+    $("noAsk").textContent =
+        money(market.no_ask);
+
+    $("kalshiMessage").textContent =
+        "Solo lectura. No se envian ordenes.";
 }
 
-function setSignal(sig) {
- const map = {
-  SUBE: ["upSignal", "active-up"],
-  BAJA: ["downSignal", "active-down"],
-  ESPERAR: ["waitSignal", "active-wait"]
- };
-
- ["upSignal", "downSignal", "waitSignal"].forEach(id =>
-  $(id).classList.remove(
-   "active-up",
-   "active-down",
-   "active-wait"
-  )
- );
-
- const m = map[sig] || map["ESPERAR"];
-
- $(m[0]).classList.add(m[1]);
-
- const el = $("mainSignal");
-
- el.textContent = sig;
-
- el.className =
-  sig === "SUBE" ? "green" :
-  sig === "BAJA" ? "red" : "yellow";
-
- $("explanation").textContent =
-  sig === "SUBE"
-   ? "EMA9 sobre EMA21, RSI sobre 50, MACD sobre su señal y precio sobre VWAP."
-   : sig === "BAJA"
-   ? "EMA9 bajo EMA21, RSI bajo 50, MACD bajo su señal y precio bajo VWAP."
-   : "Los indicadores no están alineados. La señal usa velas de 1 segundo y puede ser más sensible al ruido.";
-}
-
-function fmtMoney(n) {
- if (n == null || isNaN(n)) return "--";
-
- const sign = n < 0 ? "-" : "";
-
- return sign + "$" + Math.abs(n).toFixed(2);
-}
-
-function updateTradePanel() {
- if (!savedTrade) {
-  $("currentExit").textContent = "--";
-  $("pnl").textContent = "--";
-  $("tradeStatus").textContent = "Sin operación guardada";
-  return;
- }
-
- if (!marketData || !marketData.available) {
-  $("tradeStatus").textContent =
-   "Guardada, esperando cotización de Kalshi";
-  return;
- }
-
- const side = savedTrade.side || "yes";
- const entry = parseFloat(savedTrade.entry);
- const qty = parseFloat(savedTrade.quantity) || 1;
- const target = parseFloat(savedTrade.target);
- const stop = parseFloat(savedTrade.stop);
-
- const exitDollars =
-  side === "yes" ? marketData.yes_ask : marketData.no_ask;
-
- if (exitDollars == null || isNaN(entry)) {
-  $("currentExit").textContent = "--";
-  $("pnl").textContent = "--";
-  $("tradeStatus").textContent =
-   "Falta precio de entrada o cotización";
-  return;
- }
-
- const exitCents = exitDollars * 100;
- const pnl = (exitDollars - entry / 100) * qty;
-
- $("currentExit").textContent =
-  exitCents.toFixed(1) + "¢";
-
- const pnlEl = $("pnl");
-
- pnlEl.textContent = fmtMoney(pnl);
- pnlEl.className = pnl >= 0 ? "green" : "red";
-
- let status = "Abierta";
- let alertKey = "";
-
- if (!isNaN(target) && exitCents >= target) {
-  status = "¡Objetivo alcanzado!";
-  alertKey = "target";
- } else if (!isNaN(stop) && exitCents <= stop) {
-  status = "¡Límite de pérdida alcanzado!";
-  alertKey = "stop";
- } else if (pnl >= 0) {
-  status = "Ganando";
- } else {
-  status = "Perdiendo";
- }
-
- $("tradeStatus").textContent = status;
-
- if (
-  alertKey &&
-  lastAlertKey !== alertKey + ":" + (savedTrade.entry || "")
- ) {
-  lastAlertKey =
-   alertKey + ":" + (savedTrade.entry || "");
-
-  $("alertStatus").textContent = "Alerta: " + status;
-
-  beep(alertKey === "target" ? 990 : 440, 0.25);
- }
-}
-
-function saveTrade() {
- savedTrade = {
-  side: $("side").value,
-  quantity: $("quantity").value,
-  entry: $("entry").value,
-  target: $("target").value,
-  stop: $("stop").value,
-  sound: $("sound").value
- };
-
- try {
-  localStorage.setItem(
-   "radarTrade",
-   JSON.stringify(savedTrade)
-  );
- } catch (e) {}
-
- lastAlertKey = "";
-
- updateTradePanel();
-
- $("tradeStatus").textContent =
-  "Operación guardada (seguimiento manual, no compra ni vende).";
-}
-
-function clearTrade() {
- savedTrade = null;
-
- try {
-  localStorage.removeItem("radarTrade");
- } catch (e) {}
-
- ["entry", "target", "stop"].forEach(id => {
-  $(id).value = "";
- });
-
- $("quantity").value = 1;
-
- updateTradePanel();
-}
-
-function renderMarket(m) {
- marketData = m;
-
- if (!m || !m.available) {
-  $("marketTitle").textContent = "Sin contrato abierto";
-  $("marketTicker").textContent = "Ticker: --";
-  $("yesAsk").textContent = "--¢";
-  $("noAsk").textContent = "--¢";
-  $("yesBid").textContent = "Bid: --";
-  $("noBid").textContent = "Bid: --";
-
-  $("marketMessage").textContent =
-   (m && m.message) || "No hay datos de Kalshi.";
-
-  $("strikeInfo").textContent = "";
-  marketCloseTs = null;
-
-  return;
- }
-
- $("marketTitle").textContent =
-  m.title || "Bitcoin 15 minutos";
-
- $("marketTicker").textContent =
-  "Ticker: " + (m.ticker || "--");
-
- $("yesAsk").textContent = cents(m.yes_ask);
- $("noAsk").textContent = cents(m.no_ask);
-
- $("yesBid").textContent =
-  "Bid: " + cents(m.yes_bid);
-
- $("noBid").textContent =
-  "Bid: " + cents(m.no_bid);
-
- $("marketMessage").textContent =
-  "Precio del mercado Kalshi (API pública). El precio YES/NO es lo que manda, no la flecha de la señal.";
-
- const f = m.floor_strike;
- const c = m.cap_strike;
-
- $("strikeInfo").textContent =
-  (f != null && c != null)
-   ? (
-      "Rango del contrato: $" +
-      Number(f).toLocaleString("en-US") +
-      " – $" +
-      Number(c).toLocaleString("en-US")
-     )
-   : "";
-
- marketCloseTs = m.close_ts || null;
-}
-
-function tickTimer() {
- if (!marketCloseTs) {
-  $("timer").textContent = "--:--";
-  return;
- }
-
- const left =
-  marketCloseTs - Math.floor(Date.now() / 1000);
-
- if (left <= 0) {
-  $("timer").textContent = "CERRADO";
-  return;
- }
-
- const mm = String(
-  Math.floor(left / 60)
- ).padStart(2, "0");
-
- const ss = String(
-  left % 60
- ).padStart(2, "0");
-
- $("timer").textContent = mm + ":" + ss;
-}
 
 async function updateAll() {
- try {
-  const r = await fetch("/api/data");
-  const d = await r.json();
+    try {
+        const response = await fetch(
+            "/api/data?_=" + Date.now(),
+            {
+                cache: "no-store"
+            }
+        );
 
-  if (!r.ok || d.error) {
-   throw new Error(d.error || ("HTTP " + r.status));
-  }
+        if (!response.ok) {
+            throw new Error(
+                "Error del servidor: " + response.status
+            );
+        }
 
-  btcData = d;
+        const data = await response.json();
 
-  $("connection").textContent =
-   "● CONECTADO · " + (d.source || "BTC");
+        if (data.error) {
+            throw new Error(data.error);
+        }
 
-  $("btcPrice").textContent = fmtUSD(d.price);
+        // Precio
+        $("price").textContent = money(data.price);
 
-  $("rsiValue").textContent =
-   d.rsi == null ? "--" : d.rsi.toFixed(1);
+        $("source").textContent =
+            "Fuente: Coinbase · BTC-USD";
 
-  setSignal(d.signal);
+        // Conexion
+        if (data.connection && data.connection.connected) {
+            $("connection").textContent =
+                "Coinbase conectado";
 
-  if (d.candles && d.candles.length) {
-   candle.setData(d.candles);
-   e9.setData(d.ema9);
-   e21.setData(d.ema21);
-   vw.setData(d.vwap);
-   vol.setData(d.volume);
-   rsi.setData(d.rsi_series);
-   ml.setData(d.macd);
-   ms.setData(d.macd_signal);
-   mh.setData(d.macd_hist);
-  }
+            $("connection").className =
+                "status green";
+        } else {
+            $("connection").textContent =
+                "Coinbase reconectando";
 
-  if (
-   firstLoad &&
-   d.candles &&
-   d.candles.length > 60
-  ) {
-   pc.timeScale().setVisibleLogicalRange({
-    from: d.candles.length - 60,
-    to: d.candles.length - 1
-   });
+            $("connection").className =
+                "status yellow";
+        }
 
-   firstLoad = false;
-  }
+        // Señal
+        const signal = data.signal || {};
 
-  renderMarket(d.market);
-  updateTradePanel();
+        $("signal").textContent =
+            signal.direction || "NEUTRAL";
 
-  if (
-   previousSignal !== null &&
-   previousSignal !== d.signal
-  ) {
-   $("alertStatus").textContent =
-    "La señal cambió de " +
-    previousSignal +
-    " a " +
-    d.signal +
-    ".";
+        $("signalDescription").textContent =
+            signal.description || "";
 
-   beep(
-    d.signal === "SUBE" ? 880 :
-    d.signal === "BAJA" ? 520 : 660,
-    0.2
-   );
-  }
+        $("signal").className = "value";
 
-  previousSignal = d.signal;
+        if (signal.direction === "SUBE") {
+            $("signal").classList.add("green");
+        } else if (signal.direction === "BAJA") {
+            $("signal").classList.add("red");
+        } else {
+            $("signal").classList.add("yellow");
+        }
 
- } catch (e) {
-  $("connection").textContent =
-   "● SIN CONEXIÓN · " + e.message;
- }
+        // Indicadores
+        $("rsi").textContent = percent(data.rsi);
+        $("ema9").textContent = money(data.ema9_value);
+        $("ema21").textContent = money(data.ema21_value);
+        $("vwap").textContent = money(data.vwap_value);
+        $("macd").textContent = number(data.macd_value);
+        $("support").textContent = money(data.support);
+        $("resistance").textContent = money(data.resistance);
+
+        // Velas
+        if (Array.isArray(data.candles)) {
+            candleSeries.setData(data.candles);
+        }
+
+        setLine(ema9Series, data.ema9);
+        setLine(ema21Series, data.ema21);
+        setLine(vwapSeries, data.vwap);
+
+        chart.timeScale().fitContent();
+
+        // Kalshi
+        updateKalshi(data.market);
+
+    } catch (error) {
+        $("source").textContent = error.message;
+
+        $("connection").textContent =
+            "Error de conexion";
+
+        $("connection").className =
+            "status red";
+
+        console.error(error);
+    }
 }
+
 
 function fitCharts() {
- pc.applyOptions({
-  width: $("priceChart").clientWidth
- });
-
- vc.applyOptions({
-  width: $("volumeChart").clientWidth
- });
-
- rc.applyOptions({
-  width: $("rsiChart").clientWidth
- });
-
- mc.applyOptions({
-  width: $("macdChart").clientWidth
- });
+    chart.applyOptions({
+        width: $("chart").clientWidth
+    });
 }
+
 
 window.addEventListener("resize", fitCharts);
 
+// Primera actualizacion
 updateAll();
 
+// Actualizacion cada segundo
 setInterval(updateAll, 1000);
-setInterval(tickTimer, 1000);
+
 </script>
 
 </body>
@@ -1590,9 +1019,107 @@ setInterval(tickTimer, 1000);
 """
 
 
-if __name__ == "__main_":
+# ============================================================
+# RUTAS FLASK
+# ============================================================
+
+@app.route("/")
+def index():
+    return render_template_string(HTML)
+
+
+@app.route("/health")
+def health():
+    with lock:
+        connected = ws_status["connected"]
+        error = ws_status["error"]
+
+    return jsonify({
+        "ok": True,
+        "coinbase_connected": connected,
+        "error": error,
+        "candles": len(bars)
+    })
+
+
+@app.route("/api/data")
+def api_data():
+    try:
+        df = get_market_data()
+        df = calculate_indicators(df)
+
+        last = df.iloc[-1]
+
+        def line(column):
+            result = []
+
+            for timestamp, value in zip(
+                df["time"],
+                df[column]
+            ):
+                if pd.isna(value):
+                    continue
+
+                result.append({
+                    "time": int(timestamp.timestamp()),
+                    "value": float(value)
+                })
+
+            return result
+
+        candles = []
+
+        for _, row in df.iterrows():
+            candles.append({
+                "time": int(row["time"].timestamp()),
+                "open": float(row["open"]),
+                "high": float(row["high"]),
+                "low": float(row["low"]),
+                "close": float(row["close"])
+            })
+
+        with lock:
+            connection = dict(ws_status)
+
+        return jsonify({
+            "price": float(last["close"]),
+
+            "signal": generate_signal(df),
+
+            "rsi": float(last["RSI"]),
+
+            "ema9_value": float(last["EMA9"]),
+            "ema21_value": float(last["EMA21"]),
+            "vwap_value": float(last["VWAP"]),
+            "macd_value": float(last["MACD"]),
+
+            "support": float(last["SUPPORT"]),
+            "resistance": float(last["RESISTANCE"]),
+
+            "candles": candles,
+
+            "ema9": line("EMA9"),
+            "ema21": line("EMA21"),
+            "vwap": line("VWAP"),
+
+            "connection": connection,
+
+            "market": kalshi_market_data()
+        })
+
+    except Exception as exc:
+        return jsonify({
+            "error": str(exc)
+        }), 502
+
+
+# ============================================================
+# INICIO
+# ============================================================
+
+if __name__ == "__main__":
     app.run(
         host="0.0.0.0",
         port=5000,
         debug=False
-    )
+        )
