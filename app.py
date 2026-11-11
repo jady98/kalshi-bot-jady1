@@ -633,11 +633,64 @@ document.querySelectorAll('.tf').forEach(b=>b.addEventListener('click',()=>{docu
 initChart();window.addEventListener('resize',()=>{if(chart)chart.applyOptions({width:$('chart').clientWidth,height:$('chart').clientHeight})});refresh();countdown();setInterval(refresh,2000);setInterval(countdown,250);
 </script></body></html>'''
 
+# --- DEFINICIÓN DE LA PÁGINA WEB ---
+PAGE = """
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kalshi Bot & BTC Radar</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: #0f172a;
+            color: #f8fafc;
+            margin: 0;
+            padding: 40px;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background-color: #1e293b;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.3);
+        }
+        h1 {
+            color: #38bdf8;
+            margin-top: 0;
+        }
+        .badge {
+            display: inline-block;
+            background-color: #065f46;
+            color: #34d399;
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-weight: bold;
+            font-size: 14px;
+            margin-top: 15px;
+        }
+        p {
+            color: #94a3b8;
+            line-height: 1.5;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🤖 Kalshi Bot & BTC Radar</h1>
+        <p>Los servicios en segundo plano y el servidor Flask están funcionando correctamente.</p>
+        <div class="badge">● Estado: En línea</div>
+    </div>
+</body>
+</html>
+"""
 
 @app.route("/")
 def home():
     return render_template_string(PAGE)
-
+    
 
 @app.route("/health")
 def health():
