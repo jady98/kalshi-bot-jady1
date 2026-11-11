@@ -349,32 +349,60 @@ def health():
         "error": error,
     })
 
-POLYMARKET_EVENT = "btc-updown-15m-2026-11-11-1915z"
-
-
 @app.route("/polymarket-test")
 def polymarket_test():
-    url = (
-        "https://gateway.polymarket.us"
-        f"/v1/events/slug/{POLYMARKET_EVENT}"
-    )
+    url = "https://gateway.polymarket.us/v1/events"
 
     try:
         response = requests.get(
             url,
+            params={
+                "limit": 100,
+                "offset": 0,
+                "active": "true",
+                "closed": "false",
+            },
             headers={"Accept": "application/json"},
             timeout=15
         )
 
-        try:
-            data = response.json()
-        except ValueError:
-            data = response.text
+        response.raise_for_status()
+        data = response.json()
+
+        if isinstance(data, list):
+            events = data
+        elif isinstance(data, dict):
+            events = data.get("events", [])
+        else:
+            events = []
+
+        matches = []
+
+        for event in events:
+            slug = str(event.get("slug", "")).lower()
+            title = str(event.get("title", "")).lower()
+            search_text = slug + " " + title
+
+            if (
+                ("btc" in search_text or "bitcoin" in search_text)
+                and "15m" in search_text
+                and "updown" in search_text
+                and event.get("active") is not False
+                and event.get("closed") is not True
+            ):
+                matches.append({
+                    "slug": event.get("slug"),
+                    "title": event.get("title"),
+                    "startDate": event.get("startDate"),
+                    "endDate": event.get("endDate"),
+                    "active": event.get("active"),
+                    "closed": event.get("closed"),
+                })
 
         return jsonify({
-            "ok": response.ok,
-            "http_status": response.status_code,
-            "data": data
+            "ok": True,
+            "total_events": len(events),
+            "matches": matches
         })
 
     except Exception as exc:
