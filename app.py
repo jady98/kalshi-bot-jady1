@@ -1190,7 +1190,7 @@ function fitCharts() {
 
 window.addEventListener("resize", fitCharts);
 updateAll();
-setInterval(updateAll, 15000);
+setInterval(updateAll, 1000);
 setInterval(tickTimer, 1000);
 </script>
 
