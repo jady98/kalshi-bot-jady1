@@ -458,11 +458,9 @@ def calculate_indicators(price, history, tick_data, flow_data):
     else:
         direction, signal = "INDECISO", "INDECISO"
 
-    # Porcentajes estimados, siempre suman 100.
     bullish = max(5, min(95, round(50 + score * 5)))
     bearish = 100 - bullish
 
-    # Proyección técnica orientativa a 15 minutos.
     usable = [v for v in (m5, m15, m30) if v is not None]
 
     average = sum(usable) / len(usable) if usable else 0
@@ -697,7 +695,6 @@ button{
     background:#294a83;
     font-weight:bold
 }
-
 .controls{
     display:flex;
     gap:8px;
@@ -941,6 +938,7 @@ function goLive(){
     drawChart(chartData);
 }
 
+
 function drawChart(data){
 
     chartData=data||[];
@@ -960,17 +958,28 @@ function drawChart(data){
         return;
     }
 
+    // Cantidad de espacios horizontales.
     const count=Math.max(
         12,
         Math.min(
-            chartData.length,
+            100,
             Math.floor(100/zoomLevel)
         )
     );
 
+    // La última vela se coloca en el centro.
+    const centerSlot=Math.floor(count/2);
+
+    // Solo mostramos velas a la izquierda
+    // del centro y dejamos espacio a la derecha.
+    const visibleCount=Math.min(
+        chartData.length,
+        centerSlot+1
+    );
+
     const maxOffset=Math.max(
         0,
-        chartData.length-count
+        chartData.length-1
     );
 
     chartOffset=Math.max(
@@ -978,8 +987,13 @@ function drawChart(data){
         Math.min(chartOffset,maxOffset)
     );
 
+    // La última vela visible se mantiene
+    // en la posición central al desplazarse.
     const end=chartData.length-chartOffset;
-    const start=Math.max(0,end-count);
+    const start=Math.max(
+        0,
+        end-visibleCount
+    );
 
     const visible=chartData.slice(start,end);
 
@@ -1029,16 +1043,20 @@ function drawChart(data){
         ctx.fillText(money(value),3,yy-3);
     }
 
-    // Espacio lateral para que la última vela
-    // no quede pegada al borde.
     const step=(right-left)/count;
     const cw=Math.max(3,Math.min(18,step*.62));
 
-    const emptySlots=count-visible.length;
+    // Calcula la posición de cada vela.
+    // La última vela queda exactamente en el centro.
+    function candleX(index){
+        return left+(
+            centerSlot-(visible.length-1-index)+.5
+        )*step;
+    }
 
     visible.forEach((c,i)=>{
 
-        const x=left+(emptySlots+i+.5)*step;
+        const x=candleX(i);
 
         const open=Number(c.open);
         const close=Number(c.close);
@@ -1078,7 +1096,7 @@ function drawChart(data){
 
         series.forEach((value,i)=>{
 
-            const x=left+(emptySlots+i+.5)*step;
+            const x=candleX(i);
 
             if(i===0)ctx.moveTo(x,y(value));
             else ctx.lineTo(x,y(value));
@@ -1096,7 +1114,8 @@ function drawChart(data){
     ctx.fillStyle="#f4a43b";
     ctx.fillText("EMA 21",left+65,15);
 
-    // Línea del precio actual.
+    // Línea del precio actual solo cuando
+    // estamos viendo la última vela real.
     const last=chartData[chartData.length-1];
 
     if(last && chartOffset===0){
@@ -1181,15 +1200,25 @@ canvas.addEventListener("pointermove",e=>{
         const delta=e.clientX-previousX;
         previousX=e.clientX;
 
-        const visible=Math.max(
+        const count=Math.max(
             12,
-            Math.floor(100/zoomLevel)
+            Math.min(
+                100,
+                Math.floor(100/zoomLevel)
+            )
         );
 
+        const step=canvas.clientWidth/count;
+
         chartOffset+=Math.round(
-            -delta/Math.max(
-                1,
-                canvas.clientWidth/visible
+            -delta/Math.max(1,step)
+        );
+
+        chartOffset=Math.max(
+            0,
+            Math.min(
+                chartOffset,
+                Math.max(0,chartData.length-1)
             )
         );
 
@@ -1357,4 +1386,4 @@ if __name__ == "__main__":
         host="0.0.0.0",
         port=10000,
         threaded=True
-    )
+)
