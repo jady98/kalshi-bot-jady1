@@ -391,7 +391,7 @@ def health():
         "ok": True, "coinbase_live": live, "websocket_connected": socket_status,
         "price": price, "last_update": updated, "source": source, "candles": count, "error": error
     })
-          HTML = r"""
+HTML = r"""
 <!DOCTYPE html>
 <html lang="es">
 <head>
