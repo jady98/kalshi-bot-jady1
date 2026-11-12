@@ -460,46 +460,77 @@ def kalshi_open(ws):
 
 
 def find_brti_value(data):
-    """Busca el valor BRTI en los formatos de mensaje de Kalshi."""
+    """Extrae el precio BRTI de los mensajes de Kalshi."""
 
-    if isinstance(data, dict):
-        index_id = (
-            data.get("index_id") or
-            data.get("id") or
-            data.get("ticker")
-        )
+    if isinstance(data, str):
+        try:
+            data = json.loads(data)
+        except (ValueError, TypeError):
+            return None
+
+    if isinstance(data, list):
+        for item in data:
+            found = find_brti_value(item)
+            if found is not None:
+                return found
+        return None
+
+    if not isinstance(data, dict):
+        return None
+
+    index_id = (
+        data.get("index_id")
+        or data.get("ticker")
+    )
+
+    if index_id == INDEX_ID:
+        raw = data.get("data")
+
+        if isinstance(raw, str):
+            try:
+                raw = json.loads(raw)
+            except (ValueError, TypeError):
+                raw = None
+
+        if isinstance(raw, dict):
+            value = raw.get("value")
+            timestamp = (
+                raw.get("ts_ms")
+                or raw.get("time")
+                or data.get("received_at")
+            )
+
+            if value is not None:
+                return value, timestamp
+
+        average = data.get("avg_60s_data")
+
+        if isinstance(average, dict):
+            value = average.get("value")
+            if value is not None:
+                return value, data.get("received_at")
 
         value = data.get("value")
 
-        if index_id == INDEX_ID and value is not None:
+        if value is not None:
             timestamp = (
-                data.get("ts_ms") or
-                data.get("time") or
-                data.get("timestamp")
+                data.get("ts_ms")
+                or data.get("time")
+                or data.get("timestamp")
+                or data.get("received_at")
             )
             return value, timestamp
 
-        for key in ("msg", "data", "value", "payload"):
-            nested = data.get(key)
-            if isinstance(nested, (dict, list)):
-                found = find_brti_value(nested)
-                if found:
-                    return found
+    for key in ("msg", "data", "payload"):
+        nested = data.get(key)
 
-        for nested in data.values():
-            if isinstance(nested, list):
-                found = find_brti_value(nested)
-                if found:
-                    return found
-
-    elif isinstance(data, list):
-        for item in data:
-            found = find_brti_value(item)
-            if found:
+        if isinstance(nested, (dict, list, str)):
+            found = find_brti_value(nested)
+            if found is not None:
                 return found
 
     return None
-
+    
 
 def kalshi_message(ws, message):
     global kalshi_error
