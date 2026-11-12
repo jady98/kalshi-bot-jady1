@@ -532,18 +532,33 @@ def find_brti_value(data):
     return None
     
 
+
 def kalshi_message(ws, message):
     global kalshi_error
 
     try:
         data = json.loads(message)
+
+        # Registrar mensajes recibidos para diagnosticar BRTI.
+        print("KALSHI MENSAJE:", json.dumps(data)[:2000], flush=True)
+
+        # Detectar errores y respuestas de suscripción.
+        if isinstance(data, dict):
+            if data.get("type") == "error":
+                with lock:
+                    kalshi_error = str(data.get("msg", data))
+                print("KALSHI ERROR:", kalshi_error, flush=True)
+
+            if data.get("type") in ("subscribed", "subscription"):
+                print("KALSHI SUSCRIPCIÓN:", data, flush=True)
+
         found = find_brti_value(data)
 
-        if found:
+        if found is not None:
             value, timestamp = found
+
             timestamp = float(timestamp) if timestamp else time.time()
 
-            # Kalshi entrega timestamps en milisegundos.
             if timestamp > 10_000_000_000:
                 timestamp /= 1000
 
@@ -552,15 +567,14 @@ def kalshi_message(ws, message):
             with lock:
                 kalshi_error = ""
 
-        if data.get("type") == "error":
-            with lock:
-                kalshi_error = str(data.get("msg", data))
+            print("BRTI RECIBIDO:", value, flush=True)
 
     except Exception as exc:
         with lock:
             kalshi_error = str(exc)
 
-
+        print("ERROR LEYENDO KALSHI:", str(exc), flush=True)
+        
 def kalshi_worker():
     global kalshi_connected, kalshi_error
 
