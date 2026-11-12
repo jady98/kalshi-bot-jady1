@@ -1,3 +1,4 @@
+
 import json
 import math
 import threading
@@ -48,47 +49,35 @@ def ema(values, period):
 
 
 def rsi(values, period=14):
+    """RSI con suavizado Wilder, estándar en la mayoría de plataformas."""
     if len(values) < period + 1:
         return None
-
-    changes = [
-        float(values[i]) - float(values[i-1])
-        for i in range(len(values)-period, len(values))
-    ]
-
-    gains = [max(x, 0) for x in changes]
-    losses = [max(-x, 0) for x in changes]
-
-    avg_gain = sum(gains) / period
-    avg_loss = sum(losses) / period
-
+    changes = [float(values[i]) - float(values[i - 1]) for i in range(1, len(values))]
+    gains = [max(change, 0.0) for change in changes]
+    losses = [max(-change, 0.0) for change in changes]
+    avg_gain = sum(gains[:period]) / period
+    avg_loss = sum(losses[:period]) / period
+    for i in range(period, len(changes)):
+        avg_gain = ((avg_gain * (period - 1)) + gains[i]) / period
+        avg_loss = ((avg_loss * (period - 1)) + losses[i]) / period
     if avg_loss == 0:
-        return 100.0 if avg_gain else 50.0
-
+        return 100.0 if avg_gain > 0 else 50.0
     rs = avg_gain / avg_loss
-    return 100 - (100 / (1 + rs))
+    return 100.0 - (100.0 / (1.0 + rs))
 
 
 def vwap_from_candles(history):
-    rows = [
-        c for c in history
-        if float(c.get("volume", 0)) > 0
-    ]
-
-    total = sum(float(c["volume"]) for c in rows)
-    if total <= 0:
+    """VWAP calculado con las velas disponibles, en orden cronológico."""
+    rows = [c for c in history if float(c.get("volume", 0) or 0) > 0]
+    total_volume = sum(float(c["volume"]) for c in rows)
+    if total_volume <= 0:
         return None
-
-    weighted = sum(
-        (
-            float(c["high"]) +
-            float(c["low"]) +
-            float(c["close"])
-        ) / 3 * float(c["volume"])
+    weighted_price = sum(
+        (float(c["high"]) + float(c["low"]) + float(c["close"])) / 3.0
+        * float(c["volume"])
         for c in rows
     )
-
-    return weighted / total
+    return weighted_price / total_volume
 
 
 def update_price(price, source="WEBSOCKET"):
@@ -395,86 +384,83 @@ def momentum_pct(price, history, seconds, now):
 
 
 def calculate_indicators(price, history, tick_data, flow_data):
-    closes = [float(c["close"]) for c in history]
-
-    ema9 = ema(closes[-60:], 9) if len(closes) >= 9 else None
-    ema21 = ema(closes[-100:], 21) if len(closes) >= 21 else None
-
-    rsi_value = rsi(closes)
+    closes = [float(c["close"]) for c in history if c.get("close") is not None]
+    ema9 = ema(closes, 9) if len(closes) >= 9 else None
+    ema21 = ema(closes, 21) if len(closes) >= 21 else None
+    rsi_value = rsi(closes, 14)
     vwap_value = vwap_from_candles(history)
 
     now = time.time()
-
     m5 = momentum_pct(price, tick_data, 5, now)
     m15 = momentum_pct(price, tick_data, 15, now)
     m30 = momentum_pct(price, tick_data, 30, now)
 
-    recent = [
-        t for t in flow_data
-        if float(t["time"]) >= now - 60
-    ]
-
-    buy = sum(
-        t["size"] for t in recent
-        if t["side"] == "BUY"
-    )
-
-    sell = sum(
-        t["size"] for t in recent
-        if t["side"] == "SELL"
-    )
-
+    recent = [t for t in flow_data if float(t["time"]) >= now - 60]
+    buy = sum(float(t["size"]) for t in recent if t["side"] == "BUY")
+    sell = sum(float(t["size"]) for t in recent if t["side"] == "SELL")
     total = buy + sell
+    buy_pct = buy / total * 100 if total > 0 else None
+    sell_pct = sell / total * 100 if total > 0 else None
 
-    buy_pct = buy / total * 100 if total else None
-    sell_pct = sell / total * 100 if total else None
-
+    # Los indicadores ausentes no se interpretan como bajistas.
     score = 0.0
-
+    max_score = 0.0
     if ema9 is not None and ema21 is not None:
-        score += 2 if ema9 > ema21 else -2 if ema9 < ema21 else 0
-
+        max_score += 2.0
+        if ema9 > ema21:
+            score += 2.0
+        elif ema9 < ema21:
+            score -= 2.0
     if vwap_value is not None:
-        score += 1 if price > vwap_value else -1 if price < vwap_value else 0
-
+        max_score += 1.0
+        if price > vwap_value:
+            score += 1.0
+        elif price < vwap_value:
+            score -= 1.0
     if rsi_value is not None:
-        score += 1 if rsi_value >= 55 else -1 if rsi_value <= 45 else 0
+        max_score += 1.0
+        if rsi_value >= 55:
+            score += 1.0
+        elif rsi_value <= 45:
+            score -= 1.0
 
-    for value, weight in (
-        (m5, 1.5),
-        (m15, 2.0),
-        (m30, 1.0)
-    ):
+    for value, weight in ((m5, 1.0), (m15, 1.5), (m30, 1.0)):
         if value is not None:
-            score += weight if value > 0 else -weight if value < 0 else 0
-
+            max_score += weight
+            if value > 0:
+                score += weight
+            elif value < 0:
+                score -= weight
     if buy_pct is not None:
-        score += 1 if buy_pct >= 55 else -1 if buy_pct <= 45 else 0
+        max_score += 1.0
+        if buy_pct >= 55:
+            score += 1.0
+        elif buy_pct <= 45:
+            score -= 1.0
 
-    if score >= 1.5:
+    normalized_score = score / max_score if max_score > 0 else 0.0
+    if normalized_score >= 0.20:
         direction, signal = "ALCISTA", "SUBE"
-    elif score <= -1.5:
+    elif normalized_score <= -0.20:
         direction, signal = "BAJISTA", "BAJA"
     else:
         direction, signal = "INDECISO", "INDECISO"
 
-    bullish = max(5, min(95, round(50 + score * 5)))
+    # Índice técnico normalizado; no es una probabilidad estadística.
+    bullish = max(5, min(95, round(50 + normalized_score * 45)))
     bearish = 100 - bullish
+    confidence = max(0, min(95, round(abs(normalized_score) * 100)))
 
-    usable = [v for v in (m5, m15, m30) if v is not None]
-
-    average = sum(usable) / len(usable) if usable else 0
-    projected_change = max(
-        -0.0025,
-        min(0.0025, average / 100 * 3)
-    )
-
+    usable = [value for value in (m5, m15, m30) if value is not None]
+    average = sum(usable) / len(usable) if usable else 0.0
+    projected_change = max(-0.0025, min(0.0025, average / 100 * 3))
     prediction = price * (1 + projected_change)
 
     return {
         "direction": direction,
         "signal": signal,
         "score": round(score, 2),
+        "normalized_score": round(normalized_score, 4),
         "ema9": round(ema9, 2) if ema9 is not None else None,
         "ema21": round(ema21, 2) if ema21 is not None else None,
         "rsi": round(rsi_value, 2) if rsi_value is not None else None,
@@ -489,7 +475,7 @@ def calculate_indicators(price, history, tick_data, flow_data):
         "prediction": round(prediction, 2),
         "bullish_probability": bullish,
         "bearish_probability": bearish,
-        "confidence": min(90, round(50 + abs(score) * 6))
+        "confidence": confidence
     }
 
 
@@ -634,6 +620,7 @@ h1{font-size:20px;margin:0}
     background:#111a2b;
     border:1px solid #263650;
     border-radius:13px;
+    
     padding:14px;
     margin-bottom:10px;
     min-width:0
@@ -1386,4 +1373,5 @@ if __name__ == "__main__":
         host="0.0.0.0",
         port=10000,
         threaded=True
-)
+    )
+    
