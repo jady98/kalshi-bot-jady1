@@ -1237,7 +1237,12 @@ async function refreshData(manual=false){
         $("coinbaseStatus").className=
             d.coinbase_live ? "small green" : "small red";
 
-        $("direction").textContent=d.direction || "INDECISO";
+        const candleCount = (d.brti_candles || []).length;
+
+$("direction").textContent =
+    d.direction === "ESPERANDO DATOS"
+    ? `RECOPILANDO DATOS: ${candleCount}/22 VELAS`
+    : (d.direction || "INDECISO");
 
         const directionClass =
             d.direction==="ALCISTA" ? "green" :
