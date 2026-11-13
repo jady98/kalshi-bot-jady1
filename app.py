@@ -31,6 +31,7 @@ lock = threading.RLock()
 
 brti_candles = deque(maxlen=MAX_CANDLES)
 coinbase_candles = deque(maxlen=MAX_CANDLES)
+brti_ticks = deque(maxlen=120)
 
 brti_price = None
 brti_time = 0
@@ -85,6 +86,7 @@ def update_candle(target, price, timestamp=None, volume=0):
         timestamp = time.time()
 
     price = float(price)
+
     if not math.isfinite(price) or price <= 0:
         return
 
@@ -111,6 +113,7 @@ def set_brti(price, timestamp=None):
     global brti_price, brti_time
 
     price = float(price)
+
     if not math.isfinite(price) or price <= 0:
         return
 
@@ -120,6 +123,7 @@ def set_brti(price, timestamp=None):
     with lock:
         brti_price = price
         brti_time = float(timestamp)
+        brti_ticks.append((float(timestamp), price))
         update_candle(brti_candles, price, timestamp)
 
 
@@ -127,6 +131,7 @@ def set_coinbase(price, timestamp=None):
     global coinbase_price, coinbase_time
 
     price = float(price)
+
     if not math.isfinite(price) or price <= 0:
         return
 
@@ -171,6 +176,7 @@ def calculate_rsi(values, period=14):
         avg_gain = (
             avg_gain * (period - 1) + gains[i]
         ) / period
+
         avg_loss = (
             avg_loss * (period - 1) + losses[i]
         ) / period
@@ -189,6 +195,7 @@ def calculate_vwap(history):
     ]
 
     total = sum(float(c["volume"]) for c in rows)
+
     if total <= 0:
         return None
 
@@ -204,7 +211,7 @@ def calculate_vwap(history):
     return weighted / total
 
 
-def get_indicators(price, history, seconds_to_close=900):
+def get_indicators(price, history, tick_history, seconds_to_close=900):
     closes = [float(c["close"]) for c in history]
 
     ema9 = calculate_ema(closes, 9)
@@ -212,91 +219,143 @@ def get_indicators(price, history, seconds_to_close=900):
     rsi = calculate_rsi(closes)
     vwap = calculate_vwap(history)
 
-    score = 0
-    possible = 0
+    ticks = list(tick_history)
+    tick_momentum = None
+    elapsed_minutes = 0.0
+
+    if len(ticks) >= 2:
+        first_time, first_price = ticks[0]
+        last_time, last_price = ticks[-1]
+
+        elapsed_minutes = max(
+            (last_time - first_time) / 60.0,
+            0.25
+        )
+
+        if first_price > 0:
+            tick_momentum = (
+                (last_price / first_price) - 1
+            ) * 100
+
+    score = 0.0
+    possible = 0.0
     confirmations = []
 
+    if tick_momentum is not None:
+        possible += 3
+
+        if tick_momentum > 0.00001:
+            score += 3
+            confirmations.append("BRTI EN MOVIMIENTO ALCISTA")
+
+        elif tick_momentum < -0.00001:
+            score -= 3
+            confirmations.append("BRTI EN MOVIMIENTO BAJISTA")
+
+        else:
+            confirmations.append("BRTI SIN CAMBIO NETO")
+
+    if len(ticks) >= 3:
+        recent = [float(item[1]) for item in ticks[-3:]]
+        possible += 1
+
+        if recent[-1] > recent[0]:
+            score += 1
+            confirmations.append("ÚLTIMOS TICKS ALCISTAS")
+
+        elif recent[-1] < recent[0]:
+            score -= 1
+            confirmations.append("ÚLTIMOS TICKS BAJISTAS")
+
     if ema9 is not None and ema21 is not None:
-        possible += 2
+        possible += 1
+
         if ema9 > ema21:
-            score += 2
+            score += 1
             confirmations.append("EMA ALCISTA")
+
         elif ema9 < ema21:
-            score -= 2
+            score -= 1
             confirmations.append("EMA BAJISTA")
 
     if rsi is not None:
         possible += 1
+
         if rsi >= 55:
             score += 1
             confirmations.append("RSI ALCISTA")
+
         elif rsi <= 45:
             score -= 1
             confirmations.append("RSI BAJISTA")
 
     if vwap is not None:
         possible += 1
-        if price > vwap:
+
+        if price is not None and price > vwap:
             score += 1
             confirmations.append("SOBRE VWAP")
-        elif price < vwap:
+
+        elif price is not None and price < vwap:
             score -= 1
             confirmations.append("BAJO VWAP")
 
-    if len(closes) >= 6:
-        momentum = ((closes[-1] / closes[-6]) - 1) * 100
-        possible += 1
-        if momentum > 0:
-            score += 1
-            confirmations.append("MOMENTUM POSITIVO")
-        elif momentum < 0:
-            score -= 1
-            confirmations.append("MOMENTUM NEGATIVO")
-    else:
-        momentum = None
-
-    if price and ema9 is not None:
-        possible += 1
-        if price > ema9:
-            score += 1
-            confirmations.append("PRECIO SOBRE EMA 9")
-        elif price < ema9:
-            score -= 1
-            confirmations.append("PRECIO BAJO EMA 9")
-
     normalized = score / possible if possible else 0
-    enough_preliminary = len(closes) >= 6
     enough_data = len(closes) >= 22
 
-    if not enough_preliminary:
-        direction = "RECOPILANDO DATOS"
-    elif normalized >= 0.12:
-        direction = "ALCISTA"
-    elif normalized <= -0.12:
-        direction = "BAJISTA"
-    else:
-        direction = "INDECISO"
+    if price is None or price <= 0:
+        direction = "ESPERANDO BRTI"
+        stage = "ESPERANDO EL PRIMER PRECIO"
 
-    stage = (
-        "SEÑAL COMPLETA" if enough_data else
-        "SEÑAL PRELIMINAR" if enough_preliminary else
-        "RECOPILANDO DATOS"
+    elif len(ticks) < 2:
+        direction = "INDECISO"
+        stage = "LECTURA INICIAL · ESPERANDO MOVIMIENTO"
+
+    else:
+        direction = (
+            "ALCISTA" if normalized > 0.03 else
+            "BAJISTA" if normalized < -0.03 else
+            "INDECISO"
+        )
+
+        stage = (
+            "LECTURA EN VIVO · HISTORIAL AMPLIADO"
+            if enough_data else
+            "LECTURA EN VIVO · ACTUALIZACIÓN POR TICK"
+        )
+
+    bullish_score = max(
+        0,
+        min(100, round(50 + normalized * 50))
     )
 
-    bullish_score = max(0, min(100, round(50 + normalized * 50)))
     bearish_score = 100 - bullish_score
 
-    predicted_price = None
-    if price and momentum is not None and enough_preliminary:
+    predicted_price = (
+        price if price is not None and price > 0 else None
+    )
+
+    if predicted_price is not None and tick_momentum is not None:
         remaining_minutes = max(
-            0, min(15, float(seconds_to_close) / 60)
+            0,
+            min(15, float(seconds_to_close) / 60)
         )
-        five_minute_rate = momentum / 5
+
+        rate_per_minute = (
+            tick_momentum / max(elapsed_minutes, 0.25)
+        )
+
         projected_change = max(
-            -1.5,
-            min(1.5, five_minute_rate * remaining_minutes)
+            -0.5,
+            min(
+                0.5,
+                rate_per_minute * remaining_minutes * 0.15
+            )
         )
-        predicted_price = price * (1 + projected_change / 100)
+
+        predicted_price = price * (
+            1 + projected_change / 100
+        )
 
     return {
         "direction": direction,
@@ -313,10 +372,12 @@ def get_indicators(price, history, seconds_to_close=900):
         "rsi": round(rsi, 2) if rsi is not None else None,
         "vwap": round(vwap, 2) if vwap is not None else None,
         "momentum_pct": (
-            round(momentum, 5) if momentum is not None else None
+            round(tick_momentum, 5)
+            if tick_momentum is not None else None
         ),
         "confirmations": confirmations,
-        "enough_data": enough_data
+        "enough_data": enough_data,
+        "brti_tick_count": len(ticks)
     }
 
 
@@ -329,9 +390,11 @@ def load_coinbase_history():
             params={"granularity": 60},
             timeout=15
         )
+
         response.raise_for_status()
 
         rows = []
+
         for item in response.json():
             if len(item) < 6:
                 continue
@@ -398,6 +461,7 @@ def coinbase_message(ws, message):
 
 def set_coinbase_error(error):
     global coinbase_connected, coinbase_error
+
     with lock:
         coinbase_connected = False
         coinbase_error = str(error)
@@ -405,6 +469,7 @@ def set_coinbase_error(error):
 
 def set_coinbase_status(value):
     global coinbase_connected
+
     with lock:
         coinbase_connected = value
 
@@ -422,7 +487,10 @@ def coinbase_worker():
                 on_close=lambda ws, code, msg: set_coinbase_status(False)
             )
 
-            ws.run_forever(ping_interval=20, ping_timeout=10)
+            ws.run_forever(
+                ping_interval=20,
+                ping_timeout=10
+            )
 
         except Exception as exc:
             with lock:
@@ -459,8 +527,10 @@ def find_brti_value(data):
     if isinstance(data, list):
         for item in data:
             found = find_brti_value(item)
+
             if found is not None:
                 return found
+
         return None
 
     if not isinstance(data, dict):
@@ -479,31 +549,42 @@ def find_brti_value(data):
 
         if isinstance(raw, dict):
             value = raw.get("value")
+
             timestamp = (
-                raw.get("ts_ms") or raw.get("time") or
+                raw.get("ts_ms") or
+                raw.get("time") or
                 data.get("received_at")
             )
+
             if value is not None:
                 return value, timestamp
 
         average = data.get("avg_60s_data")
+
         if isinstance(average, dict):
             value = average.get("value")
+
             if value is not None:
                 return value, data.get("received_at")
 
         value = data.get("value")
+
         if value is not None:
             timestamp = (
-                data.get("ts_ms") or data.get("time") or
-                data.get("timestamp") or data.get("received_at")
+                data.get("ts_ms") or
+                data.get("time") or
+                data.get("timestamp") or
+                data.get("received_at")
             )
+
             return value, timestamp
 
     for key in ("msg", "data", "payload"):
         nested = data.get(key)
+
         if isinstance(nested, (dict, list, str)):
             found = find_brti_value(nested)
+
             if found is not None:
                 return found
 
@@ -515,22 +596,40 @@ def kalshi_message(ws, message):
 
     try:
         data = json.loads(message)
-        print("KALSHI MENSAJE:", json.dumps(data)[:2000], flush=True)
+
+        print(
+            "KALSHI MENSAJE:",
+            json.dumps(data)[:2000],
+            flush=True
+        )
 
         if isinstance(data, dict):
             if data.get("type") == "error":
                 with lock:
                     kalshi_error = str(data.get("msg", data))
-                print("KALSHI ERROR:", kalshi_error, flush=True)
+
+                print(
+                    "KALSHI ERROR:",
+                    kalshi_error,
+                    flush=True
+                )
 
             if data.get("type") in ("subscribed", "subscription"):
-                print("KALSHI SUSCRIPCIÓN:", data, flush=True)
+                print(
+                    "KALSHI SUSCRIPCIÓN:",
+                    data,
+                    flush=True
+                )
 
         found = find_brti_value(data)
 
         if found is not None:
             value, timestamp = found
-            timestamp = float(timestamp) if timestamp else time.time()
+
+            timestamp = (
+                float(timestamp)
+                if timestamp else time.time()
+            )
 
             if timestamp > 10_000_000_000:
                 timestamp /= 1000
@@ -545,11 +644,17 @@ def kalshi_message(ws, message):
     except Exception as exc:
         with lock:
             kalshi_error = str(exc)
-        print("ERROR LEYENDO KALSHI:", str(exc), flush=True)
+
+        print(
+            "ERROR LEYENDO KALSHI:",
+            str(exc),
+            flush=True
+        )
 
 
 def set_kalshi_error(error):
     global kalshi_connected, kalshi_error
+
     with lock:
         kalshi_connected = False
         kalshi_error = str(error)
@@ -557,6 +662,7 @@ def set_kalshi_error(error):
 
 def set_kalshi_status(value):
     global kalshi_connected
+
     with lock:
         kalshi_connected = value
 
@@ -577,7 +683,10 @@ def kalshi_worker():
                 on_close=lambda ws, code, msg: set_kalshi_status(False)
             )
 
-            ws.run_forever(ping_interval=20, ping_timeout=10)
+            ws.run_forever(
+                ping_interval=20,
+                ping_timeout=10
+            )
 
         except Exception as exc:
             with lock:
@@ -593,11 +702,23 @@ def start_services():
     with lock:
         if started:
             return
+
         started = True
 
-    threading.Thread(target=load_coinbase_history, daemon=True).start()
-    threading.Thread(target=coinbase_worker, daemon=True).start()
-    threading.Thread(target=kalshi_worker, daemon=True).start()
+    threading.Thread(
+        target=load_coinbase_history,
+        daemon=True
+    ).start()
+
+    threading.Thread(
+        target=coinbase_worker,
+        daemon=True
+    ).start()
+
+    threading.Thread(
+        target=kalshi_worker,
+        daemon=True
+    ).start()
 
 
 def get_data():
@@ -606,8 +727,11 @@ def get_data():
         bt = brti_time
         cp = coinbase_price
         ct = coinbase_time
+
         bh = [dict(c) for c in brti_candles]
         ch = [dict(c) for c in coinbase_candles]
+        ticks = list(brti_ticks)
+
         kc = kalshi_connected
         cc = coinbase_connected
         ke = kalshi_error
@@ -615,18 +739,26 @@ def get_data():
 
     now = time.time()
     countdown = 900 - (int(now) % 900)
-    brti_live = bool(bp is not None and now - bt <= STALE_SECONDS)
-    coinbase_live = bool(cp is not None and now - ct <= STALE_SECONDS)
+
+    brti_live = bool(
+        bp is not None and now - bt <= STALE_SECONDS
+    )
+
+    coinbase_live = bool(
+        cp is not None and now - ct <= STALE_SECONDS
+    )
 
     indicators = get_indicators(
-        bp if bp is not None else 0,
+        bp,
         bh,
+        ticks,
         countdown
     )
 
     difference = (
         round(cp - bp, 2)
-        if cp is not None and bp is not None else None
+        if cp is not None and bp is not None
+        else None
     )
 
     return {
@@ -646,6 +778,8 @@ def get_data():
         "coinbase_error": ce,
         **indicators
     }
+
+
 @app.route("/")
 def home():
     start_services()
@@ -661,6 +795,7 @@ def api():
 @app.route("/health")
 def health():
     data = get_data()
+
     return jsonify({
         "ok": True,
         "brti_live": data["brti_live"],
@@ -672,7 +807,6 @@ def health():
         "kalshi_error": data["kalshi_error"],
         "coinbase_error": data["coinbase_error"]
     })
-
 
 HTML = r"""
 <!DOCTYPE html>
@@ -868,13 +1002,14 @@ canvas{
         <div class="label">ESTIMACIÓN AL CIERRE · 15 MIN</div>
         <div id="predictedPrice" class="price">--</div>
         <div id="signalStage" class="small yellow">
-            RECOPILANDO DATOS
+            ESPERANDO DATOS
         </div>
     </section>
 </div>
 
 <section class="card">
     <div class="label">LECTURA TÉCNICA DEL ÍNDICE BRTI</div>
+
     <div id="direction" class="signal yellow">
         ESPERANDO DATOS
     </div>
@@ -902,6 +1037,7 @@ canvas{
     </div>
 
     <div id="strength" class="small">FUERZA TÉCNICA: --</div>
+
     <div id="confirmations" class="small">
         Esperando confirmaciones...
     </div>
@@ -937,7 +1073,7 @@ canvas{
         </div>
 
         <div class="indicator">
-            <div class="label">VELAS BRTI</div>
+            <div class="label">HISTORIAL BRTI</div>
             <strong id="candleCount">0</strong>
         </div>
     </div>
@@ -1312,7 +1448,7 @@ async function refreshData(manual=false){
         $("predictedPrice").textContent=money(d.predicted_price);
 
         $("signalStage").textContent=
-            d.signal_stage || "RECOPILANDO DATOS";
+            d.signal_stage || "ESPERANDO DATOS";
 
         $("brtiStatus").textContent=
             d.brti_live ? "BRTI EN VIVO" : "BRTI SIN DATOS";
@@ -1325,15 +1461,8 @@ async function refreshData(manual=false){
             ? "--"
             : "Dato hace "+d.brti_age+" s";
 
-        const candleCount=(d.brti_candles || []).length;
-
         $("direction").textContent=
-            d.direction === "RECOPILANDO DATOS"
-            ? `RECOPILANDO DATOS: ${candleCount}/6 VELAS`
-            : (d.direction || "INDECISO");
-
-        $("signalStage").textContent=
-            d.signal_stage || "RECOPILANDO DATOS";
+            d.direction || "INDECISO";
 
         const directionClass=
             d.direction==="ALCISTA" ? "green" :
@@ -1429,4 +1558,4 @@ if __name__ == "__main__":
         host="0.0.0.0",
         port=10000,
         threaded=True
-)
+    )
