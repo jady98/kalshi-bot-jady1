@@ -8,47 +8,91 @@ from collections import deque
 
 import requests
 import websocket
+
 from flask import Flask, jsonify, render_template_string
+
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 
 app = Flask(__name__)
 
-COINBASE_WS = "wss://advanced-trade-ws.coinbase.com"
-COINBASE_REST = "https://api.exchange.coinbase.com"
+# ==========================================
+# CONFIGURACIÓN
+# ==========================================
+
 KALSHI_WS = "wss://external-api-ws.kalshi.com/trade-api/ws/v2"
 KALSHI_WS_PATH = "/trade-api/ws/v2"
 
-PRODUCT = "BTC-USD"
+COINBASE_WS = "wss://advanced-trade-ws.coinbase.com"
+COINBASE_REST = "https://api.exchange.coinbase.com"
+
 INDEX_ID = "BRTI"
+PRODUCT = "BTC-USD"
+
 MAX_CANDLES = 300
+MAX_TICKS = 3600
 STALE_SECONDS = 15
 
 API_KEY_ID = os.getenv("KALSHI_API_KEY_ID", "").strip()
-PRIVATE_KEY_PEM = os.getenv("KALSHI_PRIVATE_KEY", "").replace("\\n", "\n")
+PRIVATE_KEY_PEM = os.getenv(
+    "KALSHI_PRIVATE_KEY", ""
+).replace("\\n", "\n").strip()
 
 lock = threading.RLock()
 
-brti_candles = deque(maxlen=MAX_CANDLES)
+brti_ticks = deque(maxlen=MAX_TICKS)
 coinbase_candles = deque(maxlen=MAX_CANDLES)
-brti_ticks = deque(maxlen=120)
 
 brti_price = None
 brti_time = 0
+
 coinbase_price = None
 coinbase_time = 0
 
 kalshi_connected = False
 coinbase_connected = False
+
 kalshi_error = ""
 coinbase_error = ""
 
 started = False
+
 session = requests.Session()
-session.headers.update({"User-Agent": "BitcoinRadar/6.0"})
+session.headers.update({
+    "User-Agent": "BitcoinRadar/7.0"
+})
+
+
+# ==========================================
+# UTILIDADES
+# ==========================================
+
+def valid_price(value):
+    try:
+        value = float(value)
+        return math.isfinite(value) and value > 0
+    except (TypeError, ValueError):
+        return False
+
+
+def normalize_timestamp(value):
+    if value is None:
+        return time.time()
+
+    try:
+        value = float(value)
+
+        if value > 10_000_000_000:
+            value /= 1000
+
+        return value
+
+    except (TypeError, ValueError):
+        return time.time()
 
 
 def kalshi_headers():
+
     if not API_KEY_ID or not PRIVATE_KEY_PEM:
         raise RuntimeError(
             "Faltan KALSHI_API_KEY_ID o KALSHI_PRIVATE_KEY en Render"
@@ -60,6 +104,7 @@ def kalshi_headers():
     )
 
     timestamp = str(int(time.time() * 1000))
+
     message = (
         timestamp + "GET" + KALSHI_WS_PATH
     ).encode("utf-8")
@@ -81,24 +126,34 @@ def kalshi_headers():
     ]
 
 
+# ==========================================
+# VELAS
+# ==========================================
+
 def update_candle(target, price, timestamp=None, volume=0):
+
     if timestamp is None:
         timestamp = time.time()
 
     price = float(price)
 
-    if not math.isfinite(price) or price <= 0:
+    if not valid_price(price):
         return
 
     bucket = int(timestamp // 60) * 60
 
     if target and int(target[-1]["time"]) == bucket:
+
         candle = target[-1]
+
         candle["high"] = max(candle["high"], price)
         candle["low"] = min(candle["low"], price)
         candle["close"] = price
+
         candle["volume"] += float(volume or 0)
+
     else:
+
         target.append({
             "time": bucket,
             "open": price,
@@ -109,55 +164,81 @@ def update_candle(target, price, timestamp=None, volume=0):
         })
 
 
+# ==========================================
+# REGISTRO BRTI
+# ==========================================
+
 def set_brti(price, timestamp=None):
+
     global brti_price, brti_time
 
-    price = float(price)
-
-    if not math.isfinite(price) or price <= 0:
+    if not valid_price(price):
         return
 
-    if timestamp is None:
-        timestamp = time.time()
+    price = float(price)
+
+    timestamp = normalize_timestamp(timestamp)
 
     with lock:
-        brti_price = price
-        brti_time = float(timestamp)
-        brti_ticks.append((float(timestamp), price))
-        update_candle(brti_candles, price, timestamp)
 
+        brti_price = price
+        brti_time = timestamp
+
+        brti_ticks.append((timestamp, price))
+
+
+# ==========================================
+# REGISTRO COINBASE
+# ==========================================
 
 def set_coinbase(price, timestamp=None):
+
     global coinbase_price, coinbase_time
+
+    if not valid_price(price):
+        return
 
     price = float(price)
 
-    if not math.isfinite(price) or price <= 0:
-        return
-
-    if timestamp is None:
-        timestamp = time.time()
+    timestamp = normalize_timestamp(timestamp)
 
     with lock:
-        coinbase_price = price
-        coinbase_time = float(timestamp)
-        update_candle(coinbase_candles, price, timestamp)
 
+        coinbase_price = price
+        coinbase_time = timestamp
+
+        update_candle(
+            coinbase_candles,
+            price,
+            timestamp
+        )
+
+
+# ==========================================
+# INDICADORES
+# ==========================================
 
 def calculate_ema(values, period):
+
     if len(values) < period:
         return None
 
     alpha = 2 / (period + 1)
+
     result = float(values[0])
 
     for value in values[1:]:
-        result = alpha * float(value) + (1 - alpha) * result
+
+        result = (
+            alpha * float(value)
+            + (1 - alpha) * result
+        )
 
     return result
 
 
 def calculate_rsi(values, period=14):
+
     if len(values) < period + 1:
         return None
 
@@ -173,6 +254,7 @@ def calculate_rsi(values, period=14):
     avg_loss = sum(losses[:period]) / period
 
     for i in range(period, len(changes)):
+
         avg_gain = (
             avg_gain * (period - 1) + gains[i]
         ) / period
@@ -185,16 +267,20 @@ def calculate_rsi(values, period=14):
         return 100.0 if avg_gain > 0 else 50.0
 
     rs = avg_gain / avg_loss
+
     return 100 - (100 / (1 + rs))
 
 
 def calculate_vwap(history):
+
     rows = [
         c for c in history
         if float(c.get("volume", 0)) > 0
     ]
 
-    total = sum(float(c["volume"]) for c in rows)
+    total = sum(
+        float(c["volume"]) for c in rows
+    )
 
     if total <= 0:
         return None
@@ -211,180 +297,194 @@ def calculate_vwap(history):
     return weighted / total
 
 
-def get_indicators(price, history, tick_history, seconds_to_close=900):
-    closes = [float(c["close"]) for c in history]
+# ==========================================
+# PROMEDIO LOCAL DE LOS ÚLTIMOS 60 SEGUNDOS
+# ==========================================
 
-    ema9 = calculate_ema(closes, 9)
-    ema21 = calculate_ema(closes, 21)
-    rsi = calculate_rsi(closes)
-    vwap = calculate_vwap(history)
+def calculate_brti_average(ticks):
 
-    ticks = list(tick_history)
-    tick_momentum = None
-    elapsed_minutes = 0.0
+    now = time.time()
 
-    if len(ticks) >= 2:
-        first_time, first_price = ticks[0]
-        last_time, last_price = ticks[-1]
+    recent = [
+        price
+        for timestamp, price in ticks
+        if now - timestamp <= 60
+        and timestamp <= now + 1
+    ]
 
-        elapsed_minutes = max(
-            (last_time - first_time) / 60.0,
-            0.25
+    if not recent:
+        return None, 0
+
+    return sum(recent) / len(recent), len(recent)
+
+
+# ==========================================
+# ANÁLISIS DE MOVIMIENTO BRTI
+# ==========================================
+
+def calculate_prediction(price, ticks, seconds_to_close):
+
+    if not valid_price(price):
+
+        return {
+            "direction": "ESPERANDO BRTI",
+            "predicted_price": None,
+            "bullish_score": 50,
+            "bearish_score": 50,
+            "technical_strength": 0,
+            "momentum_pct": None,
+            "ema9": None,
+            "ema21": None,
+            "rsi": None
+        }
+
+    now = time.time()
+
+    recent = [
+        (t, p)
+        for t, p in ticks
+        if now - t <= 120
+        and t <= now + 1
+    ]
+
+    prices = [p for _, p in recent]
+
+    if len(prices) >= 2:
+
+        first_time, first_price = recent[0]
+        last_time, last_price = recent[-1]
+
+        elapsed = max(
+            last_time - first_time,
+            1
         )
 
-        if first_price > 0:
-            tick_momentum = (
-                (last_price / first_price) - 1
-            ) * 100
+        momentum = (
+            (last_price / first_price) - 1
+        ) * 100
+
+    else:
+
+        momentum = 0
+        elapsed = 1
+
+    ema9 = calculate_ema(prices, 9)
+    ema21 = calculate_ema(prices, 21)
+    rsi = calculate_rsi(prices)
 
     score = 0.0
     possible = 0.0
-    confirmations = []
 
-    if tick_momentum is not None:
+    if len(prices) >= 2:
+
         possible += 3
 
-        if tick_momentum > 0.00001:
+        if momentum > 0.00001:
             score += 3
-            confirmations.append("BRTI EN MOVIMIENTO ALCISTA")
 
-        elif tick_momentum < -0.00001:
+        elif momentum < -0.00001:
             score -= 3
-            confirmations.append("BRTI EN MOVIMIENTO BAJISTA")
 
-        else:
-            confirmations.append("BRTI SIN CAMBIO NETO")
+    if len(prices) >= 6:
 
-    if len(ticks) >= 3:
-        recent = [float(item[1]) for item in ticks[-3:]]
-        possible += 1
+        possible += 2
 
-        if recent[-1] > recent[0]:
-            score += 1
-            confirmations.append("ÚLTIMOS TICKS ALCISTAS")
+        if prices[-1] > prices[-6]:
+            score += 2
 
-        elif recent[-1] < recent[0]:
-            score -= 1
-            confirmations.append("ÚLTIMOS TICKS BAJISTAS")
+        elif prices[-1] < prices[-6]:
+            score -= 2
 
     if ema9 is not None and ema21 is not None:
-        possible += 1
+
+        possible += 2
 
         if ema9 > ema21:
-            score += 1
-            confirmations.append("EMA ALCISTA")
+            score += 2
 
         elif ema9 < ema21:
-            score -= 1
-            confirmations.append("EMA BAJISTA")
+            score -= 2
 
     if rsi is not None:
+
         possible += 1
 
-        if rsi >= 55:
+        if rsi > 55:
             score += 1
-            confirmations.append("RSI ALCISTA")
 
-        elif rsi <= 45:
+        elif rsi < 45:
             score -= 1
-            confirmations.append("RSI BAJISTA")
 
-    if vwap is not None:
-        possible += 1
+    normalized = (
+        score / possible
+        if possible > 0 else 0
+    )
 
-        if price is not None and price > vwap:
-            score += 1
-            confirmations.append("SOBRE VWAP")
+    bullish = max(
+        0,
+        min(100, round(50 + normalized * 50, 1))
+    )
 
-        elif price is not None and price < vwap:
-            score -= 1
-            confirmations.append("BAJO VWAP")
+    bearish = round(100 - bullish, 1)
 
-    normalized = score / possible if possible else 0
-    enough_data = len(closes) >= 22
+    if len(prices) < 2:
 
-    if price is None or price <= 0:
-        direction = "ESPERANDO BRTI"
-        stage = "ESPERANDO EL PRIMER PRECIO"
+        direction = "RECOPILANDO"
 
-    elif len(ticks) < 2:
-        direction = "INDECISO"
-        stage = "LECTURA INICIAL · ESPERANDO MOVIMIENTO"
+    elif normalized > 0.03:
+
+        direction = "ALCISTA"
+
+    elif normalized < -0.03:
+
+        direction = "BAJISTA"
 
     else:
-        direction = (
-            "ALCISTA" if normalized > 0.03 else
-            "BAJISTA" if normalized < -0.03 else
-            "INDECISO"
-        )
 
-        stage = (
-            "LECTURA EN VIVO · HISTORIAL AMPLIADO"
-            if enough_data else
-            "LECTURA EN VIVO · ACTUALIZACIÓN POR TICK"
-        )
+        direction = "INDECISO"
 
-    bullish_score = max(
+    remaining = max(
         0,
-        min(100, round(50 + normalized * 50))
+        min(900, seconds_to_close)
     )
 
-    bearish_score = 100 - bullish_score
+    # Proyección suavizada.
+    rate_per_second = momentum / elapsed
 
-    predicted_price = (
-        price if price is not None and price > 0 else None
+    projected_change = (
+        rate_per_second * remaining * 0.12
     )
 
-    if predicted_price is not None and tick_momentum is not None:
-        remaining_minutes = max(
-            0,
-            min(15, float(seconds_to_close) / 60)
-        )
+    projected_change = max(
+        -0.50,
+        min(0.50, projected_change)
+    )
 
-        rate_per_minute = (
-            tick_momentum / max(elapsed_minutes, 0.25)
-        )
-
-        projected_change = max(
-            -0.5,
-            min(
-                0.5,
-                rate_per_minute * remaining_minutes * 0.15
-            )
-        )
-
-        predicted_price = price * (
-            1 + projected_change / 100
-        )
+    predicted = price * (
+        1 + projected_change / 100
+    )
 
     return {
         "direction": direction,
-        "signal_stage": stage,
-        "predicted_price": (
-            round(predicted_price, 2)
-            if predicted_price is not None else None
-        ),
-        "bullish_score": bullish_score,
-        "bearish_score": bearish_score,
+        "predicted_price": round(predicted, 2),
+        "bullish_score": bullish,
+        "bearish_score": bearish,
         "technical_strength": round(abs(normalized) * 100),
+        "momentum_pct": round(momentum, 5),
         "ema9": round(ema9, 2) if ema9 is not None else None,
         "ema21": round(ema21, 2) if ema21 is not None else None,
-        "rsi": round(rsi, 2) if rsi is not None else None,
-        "vwap": round(vwap, 2) if vwap is not None else None,
-        "momentum_pct": (
-            round(tick_momentum, 5)
-            if tick_momentum is not None else None
-        ),
-        "confirmations": confirmations,
-        "enough_data": enough_data,
-        "brti_tick_count": len(ticks)
+        "rsi": round(rsi, 2) if rsi is not None else None
     }
-
+    # ==========================================
+# HISTORIAL COINBASE
+# ==========================================
 
 def load_coinbase_history():
+
     global coinbase_error
 
     try:
+
         response = session.get(
             f"{COINBASE_REST}/products/{PRODUCT}/candles",
             params={"granularity": 60},
@@ -396,6 +496,7 @@ def load_coinbase_history():
         rows = []
 
         for item in response.json():
+
             if len(item) < 6:
                 continue
 
@@ -411,16 +512,27 @@ def load_coinbase_history():
         rows.sort(key=lambda x: x["time"])
 
         with lock:
+
             coinbase_candles.clear()
-            coinbase_candles.extend(rows[-MAX_CANDLES:])
+
+            coinbase_candles.extend(
+                rows[-MAX_CANDLES:]
+            )
+
             coinbase_error = ""
 
     except Exception as exc:
-        with lock:
-            coinbase_error = "Historial Coinbase: " + str(exc)
 
+        with lock:
+            coinbase_error = str(exc)
+
+
+# ==========================================
+# COINBASE WEBSOCKET
+# ==========================================
 
 def coinbase_open(ws):
+
     global coinbase_connected
 
     ws.send(json.dumps({
@@ -429,62 +541,67 @@ def coinbase_open(ws):
         "channel": "ticker"
     }))
 
-    ws.send(json.dumps({
-        "type": "subscribe",
-        "product_ids": [PRODUCT],
-        "channel": "market_trades"
-    }))
-
     with lock:
         coinbase_connected = True
 
 
 def coinbase_message(ws, message):
+
     global coinbase_error
 
     try:
+
         data = json.loads(message)
 
         if data.get("channel") == "ticker":
+
             for event in data.get("events", []):
+
                 for item in event.get("tickers", []):
+
                     if item.get("product_id") == PRODUCT:
-                        set_coinbase(item["price"])
+
+                        set_coinbase(
+                            item.get("price")
+                        )
 
         with lock:
             coinbase_error = ""
 
     except Exception as exc:
+
         with lock:
             coinbase_error = str(exc)
 
 
-def set_coinbase_error(error):
+def coinbase_status(value, error=""):
+
     global coinbase_connected, coinbase_error
 
     with lock:
-        coinbase_connected = False
-        coinbase_error = str(error)
 
-
-def set_coinbase_status(value):
-    global coinbase_connected
-
-    with lock:
         coinbase_connected = value
+
+        if error:
+            coinbase_error = str(error)
 
 
 def coinbase_worker():
-    global coinbase_connected, coinbase_error
 
     while True:
+
         try:
+
             ws = websocket.WebSocketApp(
                 COINBASE_WS,
                 on_open=coinbase_open,
                 on_message=coinbase_message,
-                on_error=lambda ws, err: set_coinbase_error(err),
-                on_close=lambda ws, code, msg: set_coinbase_status(False)
+                on_error=lambda ws, err: coinbase_status(
+                    False, err
+                ),
+                on_close=lambda ws, code, msg: coinbase_status(
+                    False
+                )
             )
 
             ws.run_forever(
@@ -493,14 +610,119 @@ def coinbase_worker():
             )
 
         except Exception as exc:
-            with lock:
-                coinbase_connected = False
-                coinbase_error = str(exc)
+
+            coinbase_status(False, exc)
 
         time.sleep(5)
 
 
+# ==========================================
+# BUSCAR VALOR BRTI EN MENSAJES KALSHI
+# ==========================================
+
+def find_brti_value(data):
+
+    if isinstance(data, str):
+
+        try:
+            data = json.loads(data)
+
+        except (ValueError, TypeError):
+            return None
+
+    if isinstance(data, list):
+
+        for item in data:
+
+            found = find_brti_value(item)
+
+            if found is not None:
+                return found
+
+        return None
+
+    if not isinstance(data, dict):
+        return None
+
+    index_id = (
+        data.get("index_id")
+        or data.get("ticker")
+        or data.get("id")
+    )
+
+    if index_id == INDEX_ID:
+
+        raw = data.get("data")
+
+        if isinstance(raw, str):
+
+            try:
+                raw = json.loads(raw)
+
+            except (ValueError, TypeError):
+                raw = None
+
+        if isinstance(raw, dict):
+
+            value = raw.get("value")
+
+            timestamp = (
+                raw.get("time")
+                or raw.get("ts_ms")
+                or raw.get("timestamp")
+                or data.get("received_at")
+            )
+
+            if valid_price(value):
+
+                return value, timestamp
+
+        average = data.get("avg_60s_data")
+
+        if isinstance(average, dict):
+
+            value = average.get("value")
+
+            if valid_price(value):
+
+                return (
+                    value,
+                    data.get("received_at")
+                )
+
+        value = data.get("value")
+
+        if valid_price(value):
+
+            timestamp = (
+                data.get("time")
+                or data.get("ts_ms")
+                or data.get("timestamp")
+                or data.get("received_at")
+            )
+
+            return value, timestamp
+
+    for key in ("msg", "payload", "data"):
+
+        nested = data.get(key)
+
+        if isinstance(nested, (dict, list, str)):
+
+            found = find_brti_value(nested)
+
+            if found is not None:
+                return found
+
+    return None
+
+
+# ==========================================
+# KALSHI WEBSOCKET
+# ==========================================
+
 def kalshi_open(ws):
+
     global kalshi_connected, kalshi_error
 
     ws.send(json.dumps({
@@ -513,135 +735,69 @@ def kalshi_open(ws):
     }))
 
     with lock:
+
         kalshi_connected = True
         kalshi_error = ""
 
-
-def find_brti_value(data):
-    if isinstance(data, str):
-        try:
-            data = json.loads(data)
-        except (ValueError, TypeError):
-            return None
-
-    if isinstance(data, list):
-        for item in data:
-            found = find_brti_value(item)
-
-            if found is not None:
-                return found
-
-        return None
-
-    if not isinstance(data, dict):
-        return None
-
-    index_id = data.get("index_id") or data.get("ticker")
-
-    if index_id == INDEX_ID:
-        raw = data.get("data")
-
-        if isinstance(raw, str):
-            try:
-                raw = json.loads(raw)
-            except (ValueError, TypeError):
-                raw = None
-
-        if isinstance(raw, dict):
-            value = raw.get("value")
-
-            timestamp = (
-                raw.get("ts_ms") or
-                raw.get("time") or
-                data.get("received_at")
-            )
-
-            if value is not None:
-                return value, timestamp
-
-        average = data.get("avg_60s_data")
-
-        if isinstance(average, dict):
-            value = average.get("value")
-
-            if value is not None:
-                return value, data.get("received_at")
-
-        value = data.get("value")
-
-        if value is not None:
-            timestamp = (
-                data.get("ts_ms") or
-                data.get("time") or
-                data.get("timestamp") or
-                data.get("received_at")
-            )
-
-            return value, timestamp
-
-    for key in ("msg", "data", "payload"):
-        nested = data.get(key)
-
-        if isinstance(nested, (dict, list, str)):
-            found = find_brti_value(nested)
-
-            if found is not None:
-                return found
-
-    return None
+    print(
+        "KALSHI: SUSCRIPCIÓN BRTI ENVIADA",
+        flush=True
+    )
 
 
 def kalshi_message(ws, message):
+
     global kalshi_error
 
     try:
+
         data = json.loads(message)
 
-        print(
-            "KALSHI MENSAJE:",
-            json.dumps(data)[:2000],
-            flush=True
-        )
-
         if isinstance(data, dict):
+
             if data.get("type") == "error":
+
+                error = str(data.get("msg", data))
+
                 with lock:
-                    kalshi_error = str(data.get("msg", data))
+                    kalshi_error = error
 
                 print(
                     "KALSHI ERROR:",
-                    kalshi_error,
+                    error,
                     flush=True
                 )
 
-            if data.get("type") in ("subscribed", "subscription"):
-                print(
-                    "KALSHI SUSCRIPCIÓN:",
-                    data,
-                    flush=True
-                )
+                return
 
         found = find_brti_value(data)
 
         if found is not None:
+
             value, timestamp = found
 
-            timestamp = (
-                float(timestamp)
-                if timestamp else time.time()
-            )
-
-            if timestamp > 10_000_000_000:
-                timestamp /= 1000
+            timestamp = normalize_timestamp(timestamp)
 
             set_brti(value, timestamp)
 
             with lock:
                 kalshi_error = ""
 
-            print("BRTI RECIBIDO:", value, flush=True)
+        elif isinstance(data, dict):
+
+            if data.get("type") in (
+                "subscribed",
+                "subscription"
+            ):
+
+                print(
+                    "KALSHI SUSCRIPCIÓN CONFIRMADA:",
+                    json.dumps(data)[:1000],
+                    flush=True
+                )
 
     except Exception as exc:
+
         with lock:
             kalshi_error = str(exc)
 
@@ -652,26 +808,24 @@ def kalshi_message(ws, message):
         )
 
 
-def set_kalshi_error(error):
+def kalshi_status(value, error=""):
+
     global kalshi_connected, kalshi_error
 
     with lock:
-        kalshi_connected = False
-        kalshi_error = str(error)
 
-
-def set_kalshi_status(value):
-    global kalshi_connected
-
-    with lock:
         kalshi_connected = value
+
+        if error:
+            kalshi_error = str(error)
 
 
 def kalshi_worker():
-    global kalshi_connected, kalshi_error
 
     while True:
+
         try:
+
             headers = kalshi_headers()
 
             ws = websocket.WebSocketApp(
@@ -679,8 +833,12 @@ def kalshi_worker():
                 header=headers,
                 on_open=kalshi_open,
                 on_message=kalshi_message,
-                on_error=lambda ws, err: set_kalshi_error(err),
-                on_close=lambda ws, code, msg: set_kalshi_status(False)
+                on_error=lambda ws, err: kalshi_status(
+                    False, err
+                ),
+                on_close=lambda ws, code, msg: kalshi_status(
+                    False
+                )
             )
 
             ws.run_forever(
@@ -689,17 +847,28 @@ def kalshi_worker():
             )
 
         except Exception as exc:
-            with lock:
-                kalshi_connected = False
-                kalshi_error = str(exc)
+
+            kalshi_status(False, exc)
+
+            print(
+                "ERROR CONECTANDO KALSHI:",
+                str(exc),
+                flush=True
+            )
 
         time.sleep(7)
 
 
+# ==========================================
+# INICIAR SERVICIOS UNA SOLA VEZ
+# ==========================================
+
 def start_services():
+
     global started
 
     with lock:
+
         if started:
             return
 
@@ -721,38 +890,67 @@ def start_services():
     ).start()
 
 
+# ==========================================
+# DATOS PRINCIPALES
+# ==========================================
+
 def get_data():
+
     with lock:
+
         bp = brti_price
         bt = brti_time
+
         cp = coinbase_price
         ct = coinbase_time
 
-        bh = [dict(c) for c in brti_candles]
-        ch = [dict(c) for c in coinbase_candles]
         ticks = list(brti_ticks)
+
+        candles = [
+            dict(c)
+            for c in coinbase_candles
+        ]
 
         kc = kalshi_connected
         cc = coinbase_connected
+
         ke = kalshi_error
         ce = coinbase_error
 
     now = time.time()
+
     countdown = 900 - (int(now) % 900)
 
-    brti_live = bool(
-        bp is not None and now - bt <= STALE_SECONDS
+    brti_age = (
+        round(now - bt, 1)
+        if bt else None
     )
 
-    coinbase_live = bool(
-        cp is not None and now - ct <= STALE_SECONDS
+    coinbase_age = (
+        round(now - ct, 1)
+        if ct else None
     )
 
-    indicators = get_indicators(
+    brti_live = (
+        bp is not None
+        and brti_age is not None
+        and 0 <= brti_age <= STALE_SECONDS
+    )
+
+    coinbase_live = (
+        cp is not None
+        and coinbase_age is not None
+        and 0 <= coinbase_age <= STALE_SECONDS
+    )
+
+    indicators = calculate_prediction(
         bp,
-        bh,
         ticks,
         countdown
+    )
+
+    average, average_count = calculate_brti_average(
+        ticks
     )
 
     difference = (
@@ -762,511 +960,930 @@ def get_data():
     )
 
     return {
+
         "ok": True,
-        "brti_price": round(bp, 2) if bp is not None else None,
+
+        "brti_price": (
+            round(bp, 2)
+            if bp is not None else None
+        ),
+
         "brti_live": brti_live,
+        "brti_age": brti_age,
+        "brti_samples": len(ticks),
+
         "kalshi_connected": kc,
-        "brti_age": round(now - bt, 1) if bt else None,
-        "coinbase_price": round(cp, 2) if cp is not None else None,
-        "coinbase_live": coinbase_live,
-        "coinbase_connected": cc,
-        "price_difference": difference,
-        "brti_candles": bh,
-        "coinbase_candles": ch,
-        "countdown": countdown,
         "kalshi_error": ke,
+
+        "coinbase_price": (
+            round(cp, 2)
+            if cp is not None else None
+        ),
+
+        "coinbase_live": coinbase_live,
+        "coinbase_age": coinbase_age,
+        "coinbase_connected": cc,
         "coinbase_error": ce,
+
+        "price_difference": difference,
+
+        "coinbase_candles": candles,
+
+        "countdown": countdown,
+
+        "brti_average_60s": (
+            round(average, 2)
+            if average is not None else None
+        ),
+
+        "brti_average_samples": average_count,
+
         **indicators
     }
 
 
+# ==========================================
+# RUTAS FLASK
+# ==========================================
+
 @app.route("/")
 def home():
+
     start_services()
+
     return render_template_string(HTML)
 
 
 @app.route("/api")
 def api():
+
     start_services()
+
     return jsonify(get_data())
 
 
 @app.route("/health")
 def health():
+
+    start_services()
+
     data = get_data()
 
     return jsonify({
-        "ok": True,
-        "brti_live": data["brti_live"],
-        "kalshi_connected": data["kalshi_connected"],
-        "coinbase_live": data["coinbase_live"],
-        "coinbase_connected": data["coinbase_connected"],
-        "brti_price": data["brti_price"],
-        "coinbase_price": data["coinbase_price"],
-        "kalshi_error": data["kalshi_error"],
-        "coinbase_error": data["coinbase_error"]
-    })
 
-HTML = r"""
+        "ok": True,
+
+        "brti_live": data["brti_live"],
+        "brti_price": data["brti_price"],
+        "brti_age": data["brti_age"],
+
+        "kalshi_connected": data["kalshi_connected"],
+        "kalshi_error": data["kalshi_error"],
+
+        "coinbase_live": data["coinbase_live"],
+        "coinbase_price": data["coinbase_price"],
+        "coinbase_connected": data["coinbase_connected"],
+
+        "brti_samples": data["brti_samples"]
+
+    })
+    HTML = r"""
 <!DOCTYPE html>
 <html lang="es">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Bitcoin Radar</title>
+<meta name="theme-color" content="#080b14">
+
+<title>BTC USD Radar</title>
 
 <style>
-*{box-sizing:border-box}
+
+*{
+    box-sizing:border-box;
+}
 
 body{
     margin:0;
     padding:12px;
-    background:#080d18;
-    color:#edf2ff;
-    font-family:Arial,sans-serif
+    background:#080b14;
+    color:#f3f5ff;
+    font-family:Arial,sans-serif;
 }
 
 main{
-    max-width:900px;
-    margin:auto
+    max-width:750px;
+    margin:auto;
 }
 
-.header,.row{
+.header{
     display:flex;
     justify-content:space-between;
     align-items:center;
-    gap:10px
+    margin:5px 0 16px;
+    gap:8px;
 }
 
-.header{margin:5px 0 14px}
-
-h1{
-    font-size:20px;
-    margin:0
+.logo{
+    font-size:22px;
+    font-weight:900;
+    letter-spacing:1px;
 }
 
-.card{
-    background:#111a2b;
-    border:1px solid #263650;
-    border-radius:14px;
-    padding:14px;
-    margin-bottom:11px;
-    min-width:0
+.purple{
+    color:#b88aff;
 }
 
-.label{
-    font-size:11px;
-    color:#91a2c1;
-    letter-spacing:.5px
+.status{
+    font-size:10px;
+    text-align:right;
+    color:#9ba9c4;
 }
 
-.price{
-    font-size:clamp(25px,6vw,36px);
-    font-weight:bold;
-    margin:9px 0
+.dot{
+    display:inline-block;
+    width:7px;
+    height:7px;
+    border-radius:50%;
+    background:#ff536b;
+    margin-right:4px;
 }
 
-.value{
-    font-size:20px;
-    font-weight:bold;
-    margin-top:6px
+.dot.live{
+    background:#00e69a;
+    box-shadow:0 0 9px #00e69a;
 }
-
-.small{
-    font-size:11px;
-    color:#91a2c1;
-    line-height:1.6
-}
-
-.green{color:#22d69a}
-.red{color:#ff6475}
-.yellow{color:#f4c76b}
 
 .grid{
     display:grid;
     grid-template-columns:1fr 1fr;
-    gap:10px
+    gap:9px;
+}
+
+.card{
+    min-width:0;
+    background:#111827;
+    border:1px solid #26334b;
+    border-radius:15px;
+    padding:14px;
+    margin-bottom:10px;
+}
+
+.label{
+    color:#93a2bf;
+    font-size:10px;
+    letter-spacing:.5px;
+    font-weight:700;
+}
+
+.price{
+    font-size:clamp(19px,5.4vw,29px);
+    font-weight:900;
+    margin:10px 0 5px;
+    overflow-wrap:anywhere;
+}
+
+.predicted{
+    color:#bd91ff;
+}
+
+.small{
+    font-size:10px;
+    color:#8d9bb6;
+    line-height:1.6;
+}
+
+.green{
+    color:#00e69a;
+}
+
+.red{
+    color:#ff536b;
+}
+
+.yellow{
+    color:#f4c95d;
 }
 
 .signal{
     font-size:27px;
-    font-weight:800;
-    margin:9px 0
+    font-weight:900;
+    margin:12px 0;
 }
 
 .bar{
-    height:12px;
-    background:#263650;
-    border-radius:9px;
-    overflow:hidden;
+    height:13px;
     display:flex;
-    margin:12px 0
+    border-radius:20px;
+    overflow:hidden;
+    background:#29344a;
+    margin:12px 0 8px;
 }
 
-.bull{background:#22d69a}
-.bear{background:#ff6475}
-
-button{
-    border:0;
-    border-radius:9px;
-    padding:11px 14px;
-    background:#294a83;
-    color:white;
-    font-weight:bold
+.bull{
+    background:#00d995;
+    width:50%;
 }
 
-button:disabled{opacity:.5}
+.bear{
+    background:#ff5269;
+    width:50%;
+}
 
-canvas{
+.row{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    gap:8px;
+}
+
+.section-title{
+    color:#a1afca;
+    font-size:11px;
+    font-weight:800;
+    margin-bottom:12px;
+}
+
+.metrics{
+    display:grid;
+    grid-template-columns:repeat(3,1fr);
+    gap:8px;
+}
+
+.metric{
+    background:#0b1220;
+    border:1px solid #202d43;
+    padding:10px 5px;
+    border-radius:10px;
+    text-align:center;
+    min-width:0;
+}
+
+.metric-name{
+    font-size:9px;
+    color:#8292af;
+}
+
+.metric-value{
+    font-size:13px;
+    font-weight:800;
+    margin-top:7px;
+    overflow-wrap:anywhere;
+}
+
+.chart-wrap{
     width:100%;
     height:300px;
-    display:block;
-    touch-action:none
+    position:relative;
 }
 
-.tag{
-    display:inline-block;
-    background:#202d45;
-    border-radius:6px;
-    padding:4px 7px;
+canvas{
+    display:block;
+    width:100%;
+    height:100%;
+    touch-action:none;
+}
+
+.chart-legend{
+    display:flex;
+    gap:13px;
+    flex-wrap:wrap;
+    margin:8px 0;
     font-size:10px;
-    color:#c5d2ec
+    color:#9aa9c4;
 }
 
-.indicators{
-    display:grid;
-    grid-template-columns:repeat(2,1fr);
-    gap:9px
+.legend-dot{
+    display:inline-block;
+    width:8px;
+    height:8px;
+    border-radius:50%;
+    margin-right:4px;
 }
 
-.indicator{
-    background:#0c1423;
-    border:1px solid #263650;
+button{
+    border:1px solid #35476b;
+    background:#182640;
+    color:white;
     border-radius:9px;
-    padding:10px;
-    min-width:0
+    padding:10px 12px;
+    font-size:10px;
+    font-weight:800;
 }
 
-.indicator strong{
-    display:block;
-    font-size:17px;
-    margin-top:6px
+button:active{
+    opacity:.7;
 }
 
-#status{
-    font-size:11px;
-    font-weight:bold
+button:disabled{
+    opacity:.5;
 }
 
-#confirmations{margin-top:8px}
-
-@media(max-width:500px){
-    body{padding:8px}
-    .card{padding:11px}
-    canvas{height:260px}
-    h1{font-size:18px}
+.footer{
+    text-align:center;
+    color:#66758f;
+    font-size:9px;
+    padding:12px 0 20px;
 }
+
+@media(max-width:380px){
+
+    body{
+        padding:8px;
+    }
+
+    .card{
+        padding:11px;
+    }
+
+    .logo{
+        font-size:19px;
+    }
+
+    .chart-wrap{
+        height:250px;
+    }
+
+    .metrics{
+        gap:5px;
+    }
+
+}
+
 </style>
 </head>
 
 <body>
+
 <main>
 
+<!-- ENCABEZADO -->
+
 <div class="header">
-    <h1>BITCOIN RADAR LIVE</h1>
-    <div id="status" class="yellow">CONECTANDO...</div>
+
+    <div class="logo">
+        BTC <span class="purple">RADAR</span>
+    </div>
+
+    <div class="status">
+
+        <div>
+            <span id="brtiDot" class="dot"></span>
+            <span id="brtiStatus">BRTI CONECTANDO</span>
+        </div>
+
+        <div>
+            <span id="coinDot" class="dot"></span>
+            <span id="coinStatus">COINBASE</span>
+        </div>
+
+    </div>
+
 </div>
 
-<section class="card">
-    <div class="row">
-        <div class="label">RADAR PRINCIPAL · ÍNDICE BRTI</div>
-        <div class="row">
-            <span id="brtiStatus" class="tag">ESPERANDO BRTI</span>
-            <span id="brtiAge" class="small">--</span>
-        </div>
-    </div>
-    <div class="small">
-        El análisis y la estimación usan el índice BRTI en vivo.
-    </div>
-</section>
+
+<!-- PRECIOS -->
 
 <div class="grid">
-    <section class="card">
-        <div class="label">PRECIO ACTUAL · BRTI</div>
-        <div id="brti" class="price">--</div>
-        <div class="small green">ÍNDICE EN VIVO</div>
-    </section>
 
     <section class="card">
-        <div class="label">ESTIMACIÓN AL CIERRE · 15 MIN</div>
-        <div id="predictedPrice" class="price">--</div>
-        <div id="signalStage" class="small yellow">
-            ESPERANDO DATOS
+
+        <div class="label">
+            PRECIO ACTUAL · BRTI
         </div>
+
+        <div class="price" id="brtiPrice">
+            --
+        </div>
+
+        <div class="small" id="brtiAge">
+            Esperando índice
+        </div>
+
     </section>
+
+
+    <section class="card">
+
+        <div class="label">
+            PREDICCIÓN · 15 MIN
+        </div>
+
+        <div class="price predicted" id="predictedPrice">
+            --
+        </div>
+
+        <div class="small" id="predictionLabel">
+            Calculando movimiento
+        </div>
+
+    </section>
+
 </div>
 
-<section class="card">
-    <div class="label">LECTURA TÉCNICA DEL ÍNDICE BRTI</div>
 
-    <div id="direction" class="signal yellow">
-        ESPERANDO DATOS
+<!-- DIRECCIÓN -->
+
+<section class="card">
+
+    <div class="section-title">
+        DIRECCIÓN ESTIMADA BRTI
+    </div>
+
+    <div class="signal yellow" id="direction">
+        RECOPILANDO
     </div>
 
     <div class="row">
+
         <div>
-            <div class="label">PUNTUACIÓN ALCISTA</div>
-            <div id="bull" class="value green">--</div>
+            <div class="label">ALCISTA</div>
+            <div class="price green" id="bullText">50%</div>
         </div>
 
         <div style="text-align:right">
-            <div class="label">PUNTUACIÓN BAJISTA</div>
-            <div id="bear" class="value red">--</div>
+
+            <div class="label">BAJISTA</div>
+            <div class="price red" id="bearText">50%</div>
+
         </div>
+
     </div>
 
     <div class="bar">
-        <div id="bullBar" class="bull" style="width:50%"></div>
-        <div id="bearBar" class="bear" style="width:50%"></div>
+
+        <div class="bull" id="bullBar"></div>
+
+        <div class="bear" id="bearBar"></div>
+
     </div>
 
-    <div class="small">
-        Son puntuaciones de indicadores, no probabilidades
-        reales de ganar una apuesta.
-    </div>
-
-    <div id="strength" class="small">FUERZA TÉCNICA: --</div>
-
-    <div id="confirmations" class="small">
-        Esperando confirmaciones...
-    </div>
-</section>
-
-<section class="card">
-    <div class="label">INDICADORES CALCULADOS SOBRE BRTI</div>
-
-    <div class="indicators">
-        <div class="indicator">
-            <div class="label">EMA 9</div>
-            <strong id="ema9">--</strong>
-        </div>
-
-        <div class="indicator">
-            <div class="label">EMA 21</div>
-            <strong id="ema21">--</strong>
-        </div>
-
-        <div class="indicator">
-            <div class="label">RSI 14</div>
-            <strong id="rsi">--</strong>
-        </div>
-
-        <div class="indicator">
-            <div class="label">VWAP</div>
-            <strong id="vwap">--</strong>
-        </div>
-
-        <div class="indicator">
-            <div class="label">MOMENTUM</div>
-            <strong id="momentum">--</strong>
-        </div>
-
-        <div class="indicator">
-            <div class="label">HISTORIAL BRTI</div>
-            <strong id="candleCount">0</strong>
-        </div>
-    </div>
-</section>
-
-<section class="card">
     <div class="row">
+
+        <span class="small">
+            FUERZA TÉCNICA
+        </span>
+
+        <strong id="strength" class="purple">
+            --
+        </strong>
+
+    </div>
+
+    <div class="small" id="signalStage">
+        Esperando movimiento BRTI
+    </div>
+
+</section>
+
+
+<!-- GRÁFICA -->
+
+<section class="card">
+
+    <div class="row">
+
         <div>
-            <div class="label">GRÁFICA EN VIVO · COINBASE</div>
-            <div class="small">
-                BTC/USD · Velas de 1 minuto · EMA 9 y EMA 21
+
+            <div class="section-title">
+                GRÁFICA BTC/USD
             </div>
+
+            <div class="small">
+                Coinbase · Velas de 1 minuto
+            </div>
+
         </div>
 
-        <button id="refreshButton" onclick="refreshData(true)">
+        <button id="refreshButton"
+                onclick="refreshData(true)">
             ACTUALIZAR
         </button>
+
     </div>
 
-    <div style="height:9px"></div>
+    <div class="chart-legend">
 
-    <canvas id="chart" width="1000" height="430"></canvas>
+        <span>
+            <i class="legend-dot"
+               style="background:#b98aff"></i>
+            EMA 9
+        </span>
+
+        <span>
+            <i class="legend-dot"
+               style="background:#45a9ff"></i>
+            EMA 21
+        </span>
+
+        <span>
+            <i class="legend-dot"
+               style="background:#f4c95d"></i>
+            PRECIO
+        </span>
+
+    </div>
+
+    <div class="chart-wrap">
+
+        <canvas id="chart"></canvas>
+
+    </div>
 
     <div class="row">
-        <span class="small">Arrastra para mover</span>
-        <button onclick="goLive()">VOLVER A EN VIVO</button>
+
+        <span class="small" id="candleCount">
+            0 velas
+        </span>
+
+        <button onclick="goLive()">
+            VOLVER A EN VIVO
+        </button>
+
     </div>
 
     <div class="small">
-        También puedes usar dos dedos para acercar o alejar.
-        La gráfica es de Coinbase; las señales se calculan con BRTI.
+        Arrastra para desplazarte. Usa dos dedos
+        para acercar o alejar la gráfica.
     </div>
+
 </section>
 
+
+<!-- INDICADORES -->
+
 <section class="card">
+
+    <div class="section-title">
+        INDICADORES DEL BRTI
+    </div>
+
+    <div class="metrics">
+
+        <div class="metric">
+
+            <div class="metric-name">
+                EMA 9
+            </div>
+
+            <div class="metric-value" id="ema9">
+                --
+            </div>
+
+        </div>
+
+        <div class="metric">
+
+            <div class="metric-name">
+                EMA 21
+            </div>
+
+            <div class="metric-value" id="ema21">
+                --
+            </div>
+
+        </div>
+
+        <div class="metric">
+
+            <div class="metric-name">
+                RSI 14
+            </div>
+
+            <div class="metric-value" id="rsi">
+                --
+            </div>
+
+        </div>
+
+        <div class="metric">
+
+            <div class="metric-name">
+                MOMENTUM
+            </div>
+
+            <div class="metric-value" id="momentum">
+                --
+            </div>
+
+        </div>
+
+        <div class="metric">
+
+            <div class="metric-name">
+                PROMEDIO LOCAL 60S
+            </div>
+
+            <div class="metric-value" id="averagePrice">
+                --
+            </div>
+
+        </div>
+
+        <div class="metric">
+
+            <div class="metric-name">
+                MUESTRAS BRTI
+            </div>
+
+            <div class="metric-value" id="brtiSamples">
+                0
+            </div>
+
+        </div>
+
+    </div>
+
+    <div class="small" id="averageStatus">
+        Promedio de muestras locales recibidas
+    </div>
+
+</section>
+
+
+<!-- CIERRE Y CONEXIONES -->
+
+<section class="card">
+
     <div class="row">
+
         <div>
-            <div class="label">CIERRE DEL BLOQUE DE 15 MINUTOS</div>
-            <div id="countdown" class="signal">15:00</div>
+
+            <div class="label">
+                CIERRE DEL BLOQUE 15 MIN
+            </div>
+
+            <div class="signal purple" id="countdown">
+                15:00
+            </div>
+
         </div>
 
         <div style="text-align:right">
-            <div class="label">DATOS KALSHI</div>
-            <div id="kalshiConnection" class="value yellow">--</div>
+
+            <div class="label">
+                KALSHI
+            </div>
+
+            <div class="value yellow" id="kalshiConnection">
+                --
+            </div>
+
         </div>
+
     </div>
 
     <div class="small" id="coinbaseConnection"></div>
+
     <div class="small" id="errors"></div>
+
 </section>
 
+
+<div class="footer">
+    BTC RADAR · DATOS EN TIEMPO REAL · MODO LECTURA
+</div>
 </main>
 
 <script>
+
 const $ = id => document.getElementById(id);
 
-let chartData = [];
-let zoom = 1;
-let offset = 0;
+let candles = [];
+
+let chartOffset = 0;
+let chartScale = 1;
+
 let pointers = new Map();
+let previousX = 0;
+
 let initialDistance = 0;
 let initialZoom = 1;
-let previousX = 0;
+
 let busy = false;
 
+
+// ==========================================
+// FORMATO DE PRECIOS
+// ==========================================
+
 function money(value){
-    if(value === null || value === undefined) return "--";
 
-    return Number(value).toLocaleString("en-US",{
-        style:"currency",
-        currency:"USD",
-        maximumFractionDigits:2
-    });
+    if(
+        value === null ||
+        value === undefined ||
+        !Number.isFinite(Number(value))
+    ){
+        return "--";
+    }
+
+    return "$" + Number(value).toLocaleString(
+        "en-US",
+        {
+            minimumFractionDigits:2,
+            maximumFractionDigits:2
+        }
+    );
 }
 
-function percent(value){
-    if(value === null || value === undefined) return "--";
-    return Number(value).toFixed(1) + "%";
-}
 
 function clock(seconds){
+
     const m = Math.floor(seconds / 60);
     const s = seconds % 60;
 
-    return String(m).padStart(2,"0") + ":" +
-           String(s).padStart(2,"0");
+    return String(m).padStart(2,"0")
+        + ":" +
+        String(s).padStart(2,"0");
 }
 
+
+// ==========================================
+// EMA PARA LA GRÁFICA
+// ==========================================
+
 function emaSeries(values, period){
+
     if(!values.length) return [];
 
     const alpha = 2 / (period + 1);
+
     let result = values[0];
+
     const output = [result];
 
     for(let i=1;i<values.length;i++){
-        result = alpha * values[i] + (1-alpha) * result;
+
+        result =
+            alpha * values[i]
+            + (1-alpha) * result;
+
         output.push(result);
     }
 
     return output;
 }
 
+
+// ==========================================
+// DIBUJAR GRÁFICA
+// ==========================================
+
 function drawChart(data){
-    chartData = data || [];
+
+    if(data){
+        candles = data;
+    }
 
     const canvas = $("chart");
+
+    const rect = canvas.getBoundingClientRect();
+
+    if(!rect.width || !rect.height) return;
+
+    const ratio = window.devicePixelRatio || 1;
+
+    canvas.width = Math.round(rect.width * ratio);
+    canvas.height = Math.round(rect.height * ratio);
+
     const ctx = canvas.getContext("2d");
-    const W = canvas.width;
-    const H = canvas.height;
+
+    ctx.setTransform(ratio,0,0,ratio,0,0);
+
+    const W = rect.width;
+    const H = rect.height;
 
     ctx.clearRect(0,0,W,H);
 
-    if(!chartData.length){
-        ctx.fillStyle = "#91a2c1";
-        ctx.font = "18px Arial";
-        ctx.fillText("ESPERANDO VELAS DE COINBASE...",25,45);
+    if(!candles.length){
+
+        ctx.fillStyle="#91a2c1";
+        ctx.font="13px Arial";
+        ctx.textAlign="center";
+
+        ctx.fillText(
+            "ESPERANDO VELAS DE COINBASE",
+            W/2,
+            H/2
+        );
+
         return;
     }
 
     const count = Math.max(
-        12,
-        Math.min(100,Math.floor(90/zoom))
+        10,
+        Math.min(
+            100,
+            Math.floor(65/chartScale)
+        )
     );
 
-    const center = Math.floor(count * 0.55);
-    const visibleCount = Math.min(
-        chartData.length,
-        center+1
-    );
+    const center = Math.floor(count*.58);
 
-    offset = Math.max(
+    chartOffset = Math.max(
         0,
-        Math.min(offset,chartData.length-1)
+        Math.min(chartOffset,candles.length-1)
     );
 
-    const end = chartData.length - offset;
-    const start = Math.max(0,end-visibleCount);
-    const visible = chartData.slice(start,end);
+    const end = candles.length-chartOffset;
 
-    const closes = chartData.map(c => Number(c.close));
-    const e9 = emaSeries(closes,9).slice(start,end);
-    const e21 = emaSeries(closes,21).slice(start,end);
+    const start = Math.max(
+        0,
+        end-count
+    );
 
-    const values = visible.flatMap(c => [
-        Number(c.high),Number(c.low)
+    const visible = candles.slice(start,end);
+
+    if(!visible.length) return;
+
+    const closes = candles.map(
+        c => Number(c.close)
+    );
+
+    const e9 = emaSeries(
+        closes,9
+    ).slice(start,end);
+
+    const e21 = emaSeries(
+        closes,21
+    ).slice(start,end);
+
+    const values = visible.flatMap(c=>[
+        Number(c.high),
+        Number(c.low)
     ]).concat(e9,e21);
 
     let min = Math.min(...values);
     let max = Math.max(...values);
 
-    const padding = Math.max((max-min)*0.13,2);
+    const padding = Math.max(
+        (max-min)*.13,
+        2
+    );
+
     min -= padding;
     max += padding;
 
-    const left = 90;
-    const right = W - 12;
-    const top = 28;
-    const bottom = H - 28;
-    const usable = bottom-top;
+    const left = 75;
+    const right = W-9;
+    const top = 20;
+    const bottom = H-20;
 
-    const y = p => bottom - ((p-min)/(max-min))*usable;
-    const step = (right-left)/count;
+    const plotHeight = bottom-top;
+    const plotWidth = right-left;
+
+    const y = price =>
+        bottom -
+        ((price-min)/(max-min))*plotHeight;
+
+    const step = plotWidth/count;
+
     const candleWidth = Math.max(
         3,
-        Math.min(18,step*.62)
+        Math.min(14,step*.65)
     );
 
-    ctx.font = "13px Arial";
-    ctx.strokeStyle = "#263650";
-    ctx.lineWidth = 1;
+    function candleX(i){
 
-    for(let i=0;i<5;i++){
-        const yy = top + usable*i/4;
+        return left + (
+            center-(visible.length-1-i)+.5
+        )*step;
+
+    }
+
+
+    // CUADRÍCULA
+
+    ctx.font="10px Arial";
+    ctx.strokeStyle="#263247";
+    ctx.lineWidth=1;
+
+    for(let i=0;i<=4;i++){
+
+        const yy = top+plotHeight*i/4;
 
         ctx.beginPath();
         ctx.moveTo(left,yy);
         ctx.lineTo(right,yy);
         ctx.stroke();
 
-        const p = max - (max-min)*i/4;
+        const price =
+            max-(max-min)*i/4;
 
-        ctx.fillStyle = "#91a2c1";
-        ctx.fillText(money(p),3,yy-3);
+        ctx.fillStyle="#8999b5";
+
+        ctx.fillText(
+            price.toFixed(0),
+            right+2,
+            yy+3
+        );
     }
 
-    function candleX(i){
-        return left + (
-            center-(visible.length-1-i)+.5
-        )*step;
-    }
+
+    // VELAS
 
     visible.forEach((c,i)=>{
+
         const x = candleX(i);
 
         const open = Number(c.open);
@@ -1274,153 +1891,442 @@ function drawChart(data){
         const high = Number(c.high);
         const low = Number(c.low);
 
-        const color = close >= open ? "#22d69a" : "#ff6475";
+        const up = close>=open;
 
-        ctx.strokeStyle = color;
-        ctx.fillStyle = color;
-        ctx.lineWidth = 2;
+        const color = up
+            ? "#00df9a"
+            : "#ff5269";
+
+        ctx.strokeStyle=color;
+        ctx.fillStyle=color;
+        ctx.lineWidth=1.5;
+
+        // MECHA
 
         ctx.beginPath();
+
         ctx.moveTo(x,y(high));
         ctx.lineTo(x,y(low));
+
         ctx.stroke();
+
+        // CUERPO
+
+        const bodyTop = Math.min(
+            y(open),
+            y(close)
+        );
+
+        const bodyHeight = Math.max(
+            2,
+            Math.abs(y(open)-y(close))
+        );
 
         ctx.fillRect(
             x-candleWidth/2,
-            Math.min(y(open),y(close)),
+            bodyTop,
             candleWidth,
-            Math.max(2,Math.abs(y(open)-y(close)))
+            bodyHeight
         );
+
     });
 
-    function line(series,color){
-        if(!series.length) return;
+
+    // EMA 9 Y EMA 21
+
+    function drawLine(series,color){
+
+        if(series.length<2) return;
 
         ctx.beginPath();
-        ctx.strokeStyle = color;
-        ctx.lineWidth = 2;
 
-        series.forEach((v,i)=>{
-            const x = candleX(i);
+        ctx.strokeStyle=color;
+        ctx.lineWidth=1.7;
 
-            if(i===0) ctx.moveTo(x,y(v));
-            else ctx.lineTo(x,y(v));
+        series.forEach((value,i)=>{
+
+            const x=candleX(i);
+            const yy=y(value);
+
+            if(i===0){
+                ctx.moveTo(x,yy);
+            }else{
+                ctx.lineTo(x,yy);
+            }
+
         });
 
         ctx.stroke();
     }
 
-    line(e9,"#69a8ff");
-    line(e21,"#f4a43b");
+    drawLine(e9,"#b98aff");
+    drawLine(e21,"#45a9ff");
 
-    ctx.fillStyle = "#69a8ff";
-    ctx.fillText("EMA 9",left+5,17);
 
-    ctx.fillStyle = "#f4a43b";
-    ctx.fillText("EMA 21",left+65,17);
+    // PRECIO ACTUAL
 
-    if(offset===0){
-        const last = chartData[chartData.length-1];
-        const yy = y(Number(last.close));
+    if(chartOffset===0){
 
-        ctx.setLineDash([5,5]);
-        ctx.strokeStyle = "#d6e2ff";
+        const last = candles[candles.length-1];
+
+        const lastPrice = Number(last.close);
+
+        const lastY = y(lastPrice);
+
+        ctx.setLineDash([5,4]);
+
+        ctx.strokeStyle="#f4c95d";
 
         ctx.beginPath();
-        ctx.moveTo(left,yy);
-        ctx.lineTo(right,yy);
+
+        ctx.moveTo(left,lastY);
+        ctx.lineTo(right,lastY);
+
         ctx.stroke();
 
         ctx.setLineDash([]);
+
     }
+
 }
+
+
+// ==========================================
+// VOLVER A LA ÚLTIMA VELA
+// ==========================================
 
 function goLive(){
-    offset = 0;
-    zoom = 1;
-    drawChart(chartData);
+
+    chartOffset=0;
+    chartScale=1;
+
+    drawChart();
 }
 
-function distance(a,b){
-    return Math.hypot(a.x-b.x,a.y-b.y);
+
+// ==========================================
+// CONTROL TÁCTIL Y ZOOM
+// ==========================================
+
+function pointerDistance(a,b){
+
+    return Math.hypot(
+        a.x-b.x,
+        a.y-b.y
+    );
 }
 
-const canvas = $("chart");
+const canvas=$("chart");
 
-canvas.addEventListener("pointerdown",e=>{
-    canvas.setPointerCapture(e.pointerId);
+canvas.addEventListener(
+    "pointerdown",
+    event=>{
 
-    pointers.set(e.pointerId,{
-        x:e.clientX,
-        y:e.clientY
-    });
+        canvas.setPointerCapture(event.pointerId);
 
-    if(pointers.size===1){
-        previousX=e.clientX;
-    }
+        pointers.set(
+            event.pointerId,
+            {
+                x:event.clientX,
+                y:event.clientY
+            }
+        );
 
-    if(pointers.size===2){
-        const p=[...pointers.values()];
-        initialDistance=distance(p[0],p[1]);
-        initialZoom=zoom;
-    }
-});
+        if(pointers.size===1){
 
-canvas.addEventListener("pointermove",e=>{
-    if(!pointers.has(e.pointerId)) return;
+            previousX=event.clientX;
 
-    pointers.set(e.pointerId,{
-        x:e.clientX,
-        y:e.clientY
-    });
-
-    if(pointers.size===2){
-        const p=[...pointers.values()];
-        const d=distance(p[0],p[1]);
-
-        if(initialDistance>0){
-            zoom=Math.max(
-                .5,
-                Math.min(8,initialZoom*d/initialDistance)
-            );
-
-            drawChart(chartData);
         }
 
-    }else if(pointers.size===1){
-        const delta=e.clientX-previousX;
-        previousX=e.clientX;
+        if(pointers.size===2){
 
-        const count=Math.max(
-            12,
-            Math.min(100,Math.floor(90/zoom))
-        );
+            const p=[...pointers.values()];
 
-        const step=canvas.clientWidth/count;
-        offset += -delta/Math.max(1,step);
+            initialDistance=pointerDistance(
+                p[0],p[1]
+            );
 
-        offset=Math.max(
-            0,
-            Math.min(offset,chartData.length-1)
-        );
+            initialZoom=chartScale;
 
-        drawChart(chartData);
+        }
+
     }
-});
+);
 
-function releasePointer(e){
-    pointers.delete(e.pointerId);
+
+canvas.addEventListener(
+    "pointermove",
+    event=>{
+
+        if(!pointers.has(event.pointerId)) return;
+
+        pointers.set(
+            event.pointerId,
+            {
+                x:event.clientX,
+                y:event.clientY
+            }
+        );
+
+        if(pointers.size===2){
+
+            const p=[...pointers.values()];
+
+            const distance=pointerDistance(
+                p[0],p[1]
+            );
+
+            if(initialDistance>0){
+
+                chartScale=Math.max(
+                    .5,
+                    Math.min(
+                        8,
+                        initialZoom*distance/initialDistance
+                    )
+                );
+
+                drawChart();
+
+            }
+
+        }else if(pointers.size===1){
+
+            const delta=event.clientX-previousX;
+
+            previousX=event.clientX;
+
+            const count=Math.max(
+                10,
+                Math.min(
+                    100,
+                    Math.floor(65/chartScale)
+                )
+            );
+
+            const step=canvas.clientWidth/count;
+
+            chartOffset+=-delta/Math.max(step,1);
+
+            chartOffset=Math.max(
+                0,
+                Math.min(
+                    chartOffset,
+                    candles.length-1
+                )
+            );
+
+            drawChart();
+
+        }
+
+    }
+);
+
+
+function releasePointer(event){
+
+    pointers.delete(event.pointerId);
 
     if(pointers.size<2){
         initialDistance=0;
     }
+
 }
 
-canvas.addEventListener("pointerup",releasePointer);
-canvas.addEventListener("pointercancel",releasePointer);
+canvas.addEventListener(
+    "pointerup",
+    releasePointer
+);
 
+canvas.addEventListener(
+    "pointercancel",
+    releasePointer
+);
+
+
+// ==========================================
+// ACTUALIZAR INFORMACIÓN DEL RADAR
+// ==========================================
+
+function updateRadar(d){
+
+    $("brtiPrice").textContent=
+        money(d.brti_price);
+
+    $("predictedPrice").textContent=
+        money(d.predicted_price);
+
+    $("brtiAge").textContent=
+        d.brti_age==null
+        ? "Esperando índice"
+        : "Dato actualizado hace "+d.brti_age+" s";
+
+
+    // DIRECCIÓN
+
+    const direction=d.direction || "RECOPILANDO";
+
+    $("direction").textContent=direction;
+
+    $("direction").className="signal "+
+        (
+            direction==="ALCISTA" ? "green":
+            direction==="BAJISTA" ? "red":
+            "yellow"
+        );
+
+
+    // PORCENTAJES
+
+    const bullish=Number(d.bullish_score ?? 50);
+
+    const bearish=Number(d.bearish_score ?? 50);
+
+    $("bullText").textContent=
+        bullish.toFixed(1)+"%";
+
+    $("bearText").textContent=
+        bearish.toFixed(1)+"%";
+
+    $("bullBar").style.width=
+        bullish+"%";
+
+    $("bearBar").style.width=
+        bearish+"%";
+
+
+    // FUERZA
+
+    $("strength").textContent=
+        Number(d.technical_strength ?? 0)+"%";
+
+    $("signalStage").textContent=
+        d.signal_stage || (
+            direction==="RECOPILANDO"
+            ? "Esperando movimiento BRTI"
+            : "Lectura técnica en vivo"
+        );
+
+
+    // INDICADORES
+
+    $("ema9").textContent=
+        money(d.ema9);
+
+    $("ema21").textContent=
+        money(d.ema21);
+
+    $("rsi").textContent=
+        d.rsi==null
+        ? "--"
+        : Number(d.rsi).toFixed(1);
+
+    $("momentum").textContent=
+        d.momentum_pct==null
+        ? "--"
+        : Number(d.momentum_pct).toFixed(5)+"%";
+
+
+    // PROMEDIO LOCAL
+
+    $("averagePrice").textContent=
+        money(d.brti_average_60s);
+
+    $("averageStatus").textContent=
+        "Muestras recibidas en 60 segundos: "+
+        (d.brti_average_samples || 0)+
+        " · Cálculo local";
+
+
+    $("brtiSamples").textContent=
+        d.brti_samples || 0;
+
+
+    // CONEXIONES
+
+    $("brtiDot").className=
+        d.brti_live ? "dot live":"dot";
+
+    $("coinDot").className=
+        d.coinbase_live ? "dot live":"dot";
+
+    $("brtiStatus").textContent=
+        d.brti_live
+        ? "BRTI EN VIVO"
+        : "BRTI SIN DATOS";
+
+    $("coinStatus").textContent=
+        d.coinbase_live
+        ? "COINBASE EN VIVO"
+        : "COINBASE SIN DATOS";
+
+
+    $("kalshiConnection").textContent=
+        d.kalshi_connected
+        ? "CONECTADO"
+        : "DESCONECTADO";
+
+    $("kalshiConnection").className=
+        d.kalshi_connected
+        ? "green"
+        : "red";
+
+
+    $("coinbaseConnection").textContent=
+        "Coinbase WebSocket: "+
+        (
+            d.coinbase_connected
+            ? "CONECTADO"
+            : "DESCONECTADO"
+        );
+
+
+    // CUENTA REGRESIVA
+
+    $("countdown").textContent=
+        clock(Number(d.countdown || 0));
+
+
+    // ESTADO GENERAL
+
+    if(d.brti_live){
+
+        $("brtiStatus").textContent="BRTI EN VIVO";
+
+    }else{
+
+        $("brtiStatus").textContent="BRTI SIN DATOS";
+
+    }
+
+
+    $("errors").textContent=
+        [
+            d.kalshi_error,
+            d.coinbase_error
+        ]
+        .filter(Boolean)
+        .join(" | ");
+
+
+    // GRÁFICA
+
+    drawChart(d.coinbase_candles || []);
+
+    $("candleCount").textContent=
+        (d.coinbase_candles || []).length+
+        " velas";
+
+}
+
+
+// ==========================================
+// ACTUALIZACIÓN AUTOMÁTICA
+// ==========================================
 
 async function refreshData(manual=false){
+
     if(busy) return;
 
     busy=true;
@@ -1428,134 +2334,92 @@ async function refreshData(manual=false){
     const button=$("refreshButton");
 
     if(manual){
+
         button.disabled=true;
+
         button.textContent="ACTUALIZANDO";
+
     }
 
     try{
+
         const response=await fetch(
-            "/api?_="+Date.now(),
-            {cache:"no-store"}
+            "/api?t="+Date.now(),
+            {
+                cache:"no-store"
+            }
         );
 
         if(!response.ok){
-            throw new Error("HTTP "+response.status);
+
+            throw new Error(
+                "HTTP "+response.status
+            );
+
         }
 
-        const d=await response.json();
+        const data=await response.json();
 
-        $("brti").textContent=money(d.brti_price);
-        $("predictedPrice").textContent=money(d.predicted_price);
+        updateRadar(data);
 
-        $("signalStage").textContent=
-            d.signal_stage || "ESPERANDO DATOS";
+    }catch(error){
 
-        $("brtiStatus").textContent=
-            d.brti_live ? "BRTI EN VIVO" : "BRTI SIN DATOS";
+        $("brtiStatus").textContent="ERROR DE DATOS";
 
-        $("brtiStatus").className=
-            d.brti_live ? "tag green" : "tag red";
+        $("errors").textContent=String(error);
 
-        $("brtiAge").textContent=
-            d.brti_age==null
-            ? "--"
-            : "Dato hace "+d.brti_age+" s";
-
-        $("direction").textContent=
-            d.direction || "INDECISO";
-
-        const directionClass=
-            d.direction==="ALCISTA" ? "green" :
-            d.direction==="BAJISTA" ? "red" : "yellow";
-
-        $("direction").className="signal "+directionClass;
-
-        $("bull").textContent=percent(d.bullish_score);
-        $("bear").textContent=percent(d.bearish_score);
-
-        $("bullBar").style.width=(d.bullish_score||0)+"%";
-        $("bearBar").style.width=(d.bearish_score||0)+"%";
-
-        $("strength").textContent=
-            "FUERZA TÉCNICA: "+
-            (d.technical_strength ?? "--")+"%";
-
-        $("ema9").textContent=money(d.ema9);
-        $("ema21").textContent=money(d.ema21);
-
-        $("rsi").textContent=
-            d.rsi==null ? "--" : d.rsi;
-
-        $("vwap").textContent=money(d.vwap);
-
-        $("momentum").textContent=
-            d.momentum_pct==null
-            ? "--"
-            : Number(d.momentum_pct).toFixed(5)+"%";
-
-        $("candleCount").textContent=
-            (d.brti_candles || []).length;
-
-        $("confirmations").textContent=
-            d.confirmations && d.confirmations.length
-            ? d.confirmations.join(" · ")
-            : "Esperando suficientes confirmaciones de BRTI.";
-
-        $("countdown").textContent=clock(d.countdown||0);
-
-        $("kalshiConnection").textContent=
-            d.kalshi_connected ? "CONECTADO" : "DESCONECTADO";
-
-        $("kalshiConnection").className=
-            d.kalshi_connected ? "value green" : "value red";
-
-        $("coinbaseConnection").textContent=
-            "Coinbase WebSocket: "+
-            (d.coinbase_connected ? "CONECTADO" : "DESCONECTADO");
-
-        $("errors").textContent=
-            [d.kalshi_error,d.coinbase_error]
-            .filter(Boolean).join(" | ");
-
-        const allLive=d.brti_live && d.coinbase_live;
-
-        $("status").textContent=
-            allLive ? "● FUENTES EN VIVO" :
-            d.brti_live ? "● BRTI EN VIVO" :
-            "● ESPERANDO DATOS";
-
-        $("status").className=
-            d.brti_live ? "green" : "yellow";
-
-        drawChart(d.coinbase_candles);
-
-    }catch(err){
-        $("status").textContent="ERROR DE CONEXIÓN";
-        $("errors").textContent=String(err);
+        console.error(error);
 
     }finally{
+
         busy=false;
 
         if(manual){
+
             button.disabled=false;
+
             button.textContent="ACTUALIZAR";
+
         }
+
     }
+
 }
 
+
+// ==========================================
+// ARRANQUE
+// ==========================================
+
+window.addEventListener(
+    "resize",
+    ()=>drawChart()
+);
+
 refreshData();
-setInterval(()=>refreshData(false),1000);
+
+setInterval(
+    ()=>refreshData(false),
+    1000
+);
 
 </script>
+
 </body>
 </html>
 """
 
+# ==========================================
+# INICIAR APLICACIÓN
+# ==========================================
 
 if __name__ == "__main__":
+
     start_services()
+
     app.run(
         host="0.0.0.0",
-        port=10000,
-        threaded=True
+        port=int(os.environ.get("PORT",10000)),
+        threaded=True,
+        debug=False
     )
