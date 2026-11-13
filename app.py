@@ -1047,7 +1047,7 @@ def health():
         "brti_samples": data["brti_samples"]
 
     })
-    HTML = r"""
+HTML = r"""
 <!DOCTYPE html>
 <html lang="es">
 <head>
