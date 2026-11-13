@@ -646,7 +646,7 @@ def get_data():
         "coinbase_error": ce,
         **indicators
     }
-    @app.route("/")
+@app.route("/")
 def home():
     start_services()
     return render_template_string(HTML)
