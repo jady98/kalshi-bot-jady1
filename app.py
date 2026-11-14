@@ -1889,85 +1889,90 @@ function drawChart(data){
     }
 
     const count = Math.max(
-        10,
-        Math.min(
-            100,
-            Math.floor(65/chartScale)
-        )
-    );
+    10,
+    Math.min(
+        100,
+        Math.floor(65 / chartScale)
+    )
+);
 
-    const center = Math.floor(count*.58);
+// La última vela queda al 72% del ancho.
+const center = Math.floor(count * 0.72);
 
-    chartOffset = Math.max(
-        0,
-        Math.min(chartOffset,candles.length-1)
-    );
+chartOffset = Math.max(
+    0,
+    Math.min(
+        Math.floor(chartOffset),
+        candles.length - 1
+    )
+);
 
-    const end = candles.length-chartOffset;
+const end = candles.length - chartOffset;
 
-    const start = Math.max(
-        0,
-        end-count
-    );
+// Evita dibujar velas fuera del área visible.
+const visibleCount = center + 1;
 
-    const visible = candles.slice(start,end);
+const start = Math.max(
+    0,
+    end - visibleCount
+);
 
-    if(!visible.length) return;
+const visible = candles.slice(start, end);
 
-    const closes = candles.map(
-        c => Number(c.close)
-    );
+if (!visible.length) return;
 
-    const e9 = emaSeries(
-        closes,9
-    ).slice(start,end);
+const closes = candles.map(
+    c => Number(c.close)
+);
 
-    const e21 = emaSeries(
-        closes,21
-    ).slice(start,end);
+const e9 = emaSeries(
+    closes, 9
+).slice(start, end);
 
-    const values = visible.flatMap(c=>[
-        Number(c.high),
-        Number(c.low)
-    ]).concat(e9,e21);
+const e21 = emaSeries(
+    closes, 21
+).slice(start, end);
 
-    let min = Math.min(...values);
-    let max = Math.max(...values);
+const values = visible.flatMap(c => [
+    Number(c.high),
+    Number(c.low)
+]).concat(e9, e21);
 
-    const padding = Math.max(
-        (max-min)*.13,
-        2
-    );
+let min = Math.min(...values);
+let max = Math.max(...values);
 
-    min -= padding;
-    max += padding;
+const padding = Math.max(
+    (max - min) * 0.13,
+    2
+);
 
-    const left = 75;
-    const right = W-9;
-    const top = 20;
-    const bottom = H-20;
+min -= padding;
+max += padding;
 
-    const plotHeight = bottom-top;
-    const plotWidth = right-left;
+const left = 75;
+const right = W - 9;
+const top = 20;
+const bottom = H - 20;
 
-    const y = price =>
-        bottom -
-        ((price-min)/(max-min))*plotHeight;
+const plotHeight = bottom - top;
+const plotWidth = right - left;
 
-    const step = plotWidth/count;
+const y = price =>
+    bottom -
+    ((price - min) / (max - min)) * plotHeight;
 
-    const candleWidth = Math.max(
-        3,
-        Math.min(14,step*.65)
-    );
+const step = plotWidth / count;
 
-    function candleX(i){
+const candleWidth = Math.max(
+    3,
+    Math.min(14, step * 0.65)
+);
 
-        return left + (
-            center-(visible.length-1-i)+.5
-        )*step;
-
-    }
+function candleX(i) {
+    return left + (
+        center - (visible.length - 1 - i) + 0.5
+    ) * step;
+}
 
 
     // CUADRÍCULA
