@@ -317,12 +317,12 @@ def calculate_brti_average(ticks):
 # ANÁLISIS DE MOVIMIENTO BRTI
 # ==========================================
 
-def calculate_prediction(price, ticks, seconds_to_close):
+
+def calculate_prediction(price, ticks, seconds_to_close, market_target=None):
 
     if not valid_price(price):
-
         return {
-            "direction": "ESPERANDO BRTI",
+            "direction": "RECOPILANDO",
             "predicted_price": None,
             "bullish_score": 50,
             "bearish_score": 50,
@@ -330,134 +330,147 @@ def calculate_prediction(price, ticks, seconds_to_close):
             "momentum_pct": None,
             "ema9": None,
             "ema21": None,
-            "rsi": None
+            "rsi": None,
+            "target_influence": 0
         }
 
     now = time.time()
 
     recent = [
-        (t, p)
-        for t, p in ticks
-        if now - t <= 120
-        and t <= now + 1
+        (t, p) for t, p in ticks
+        if now - t <= 120 and t <= now + 1
     ]
 
     prices = [p for _, p in recent]
-
-    if len(prices) >= 2:
-
-        first_time, first_price = recent[0]
-        last_time, last_price = recent[-1]
-
-        elapsed = max(
-            last_time - first_time,
-            1
-        )
-
-        momentum = (
-            (last_price / first_price) - 1
-        ) * 100
-
-    else:
-
-        momentum = 0
-        elapsed = 1
 
     ema9 = calculate_ema(prices, 9)
     ema21 = calculate_ema(prices, 21)
     rsi = calculate_rsi(prices)
 
+    momentum = 0.0
+    short_momentum = 0.0
+    velocity = 0.0
+
+    if len(recent) >= 2:
+        first_t, first_p = recent[0]
+        last_t, last_p = recent[-1]
+
+        elapsed = max(last_t - first_t, 1)
+
+        momentum = (last_p / first_p - 1) * 100
+        velocity = (last_p - first_p) / elapsed
+
+        older = [
+            p for t, p in recent
+            if last_t - t >= 10
+        ]
+
+        if older:
+            short_momentum = (
+                (last_p / older[-1]) - 1
+            ) * 100
+
+    remaining = max(0, min(900, seconds_to_close))
+
+    # Proyección basada en velocidad reciente.
+    projected_change = (
+        (velocity * remaining * 0.18) / price
+    ) * 100
+
+    projected_change = max(
+        -0.35,
+        min(0.35, projected_change)
+    )
+
+    predicted = price * (1 + projected_change / 100)
+
+    # Puntuación técnica.
     score = 0.0
     possible = 0.0
 
     if len(prices) >= 2:
+        possible += 2
 
-        possible += 3
-
-        if momentum > 0.00001:
-            score += 3
-
-        elif momentum < -0.00001:
-            score -= 3
+        score += (
+            2 if momentum > 0
+            else -2 if momentum < 0
+            else 0
+        )
 
     if len(prices) >= 6:
-
         possible += 2
 
-        if prices[-1] > prices[-6]:
-            score += 2
+        score += (
+            2 if prices[-1] > prices[-6]
+            else -2 if prices[-1] < prices[-6]
+            else 0
+        )
 
-        elif prices[-1] < prices[-6]:
-            score -= 2
+    if abs(short_momentum) > 0:
+        possible += 2
+
+        score += (
+            2 if short_momentum > 0
+            else -2
+        )
 
     if ema9 is not None and ema21 is not None:
-
         possible += 2
 
-        if ema9 > ema21:
-            score += 2
-
-        elif ema9 < ema21:
-            score -= 2
+        score += (
+            2 if ema9 > ema21
+            else -2 if ema9 < ema21
+            else 0
+        )
 
     if rsi is not None:
-
         possible += 1
 
         if rsi > 55:
             score += 1
-
         elif rsi < 45:
             score -= 1
+
+    # Influencia del objetivo real de Kalshi.
+    target_influence = 0
+
+    if valid_price(market_target):
+        possible += 3
+
+        target_gap = (
+            (predicted / market_target) - 1
+        ) * 100
+
+        if target_gap > 0.015:
+            target_influence = 3
+        elif target_gap < -0.015:
+            target_influence = -3
+        elif target_gap > 0:
+            target_influence = 1
+        elif target_gap < 0:
+            target_influence = -1
+
+        score += target_influence
 
     normalized = (
         score / possible
         if possible > 0 else 0
     )
 
+    # Porcentajes continuos, sin ESPERAR como decisión dominante.
     bullish = max(
-        0,
-        min(100, round(50 + normalized * 50, 1))
+        5,
+        min(95, round(50 + normalized * 35, 1))
     )
 
     bearish = round(100 - bullish, 1)
 
-    if len(prices) < 2:
-
-        direction = "RECOPILANDO"
-
-    elif normalized > 0.03:
-
+    if bullish > 52:
         direction = "ALCISTA"
-
-    elif normalized < -0.03:
-
+    elif bearish > 52:
         direction = "BAJISTA"
-
     else:
-
         direction = "INDECISO"
-
-    remaining = max(
-        0,
-        min(900, seconds_to_close)
-    )
-
-    # Proyección suavizada.
-    rate_per_second = momentum / elapsed
-
-    projected_change = (
-        rate_per_second * remaining * 0.12
-    )
-
-    projected_change = max(
-        -0.50,
-        min(0.50, projected_change)
-    )
-
-    predicted = price * (
-        1 + projected_change / 100
-    )
 
     return {
         "direction": direction,
@@ -468,8 +481,10 @@ def calculate_prediction(price, ticks, seconds_to_close):
         "momentum_pct": round(momentum, 5),
         "ema9": round(ema9, 2) if ema9 is not None else None,
         "ema21": round(ema21, 2) if ema21 is not None else None,
-        "rsi": round(rsi, 2) if rsi is not None else None
+        "rsi": round(rsi, 2) if rsi is not None else None,
+        "target_influence": target_influence
     }
+    
     # ==========================================
 # HISTORIAL COINBASE
 # ==========================================
