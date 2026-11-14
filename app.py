@@ -897,8 +897,7 @@ def fetch_active_market():
             if isinstance(payload, dict)
             else []
         )
-
-        now = time.time()
+                now = time.time()
         candidates = []
 
         for market in markets:
@@ -974,7 +973,6 @@ def market_worker():
 # ==========================================
 # INICIAR SERVICIOS UNA SOLA VEZ
 # ==========================================
-
 def start_services():
 
     global started
@@ -1010,7 +1008,6 @@ def start_services():
 # ==========================================
 # DATOS PRINCIPALES
 # ==========================================
-
 def get_data():
 
     with lock:
@@ -1180,7 +1177,6 @@ def get_data():
 # ==========================================
 # RUTAS FLASK
 # ==========================================
-
 @app.route("/")
 def home():
 
@@ -1225,6 +1221,8 @@ def health():
         "market_target": data["market_target"],
         "market_error": data["market_error"]
     })
+
+
 HTML = r"""
 <!DOCTYPE html>
 <html lang="es">
@@ -1798,7 +1796,7 @@ button:disabled{
     </div>
 
     <div class="small" id="marketStatus">
-        Buscando el contrato abierto de Kalshi
+            Buscando el contrato abierto de Kalshi
     </div>
 
 </section>
