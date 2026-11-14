@@ -25,6 +25,8 @@ KALSHI_WS_PATH = "/trade-api/ws/v2"
 
 COINBASE_WS = "wss://advanced-trade-ws.coinbase.com"
 COINBASE_REST = "https://api.exchange.coinbase.com"
+KALSHI_REST = "https://api.elections.kalshi.com/trade-api/v2"
+KALSHI_SERIES = "KXBTC15M"
 
 INDEX_ID = "BRTI"
 PRODUCT = "BTC-USD"
@@ -41,6 +43,7 @@ PRIVATE_KEY_PEM = os.getenv(
 lock = threading.RLock()
 
 brti_ticks = deque(maxlen=MAX_TICKS)
+brti_candles = deque(maxlen=MAX_CANDLES)
 coinbase_candles = deque(maxlen=MAX_CANDLES)
 
 brti_price = None
@@ -54,6 +57,10 @@ coinbase_connected = False
 
 kalshi_error = ""
 coinbase_error = ""
+kalshi_market_target = None
+kalshi_market_ticker = ""
+kalshi_market_close = None
+kalshi_market_error = ""
 
 started = False
 
@@ -185,6 +192,7 @@ def set_brti(price, timestamp=None):
         brti_time = timestamp
 
         brti_ticks.append((timestamp, price))
+        update_candle(brti_candles, price, timestamp)
 
 
 # ==========================================
@@ -448,7 +456,6 @@ def calculate_prediction(price, ticks, seconds_to_close):
         min(900, seconds_to_close)
     )
 
-    # Proyección suavizada.
     rate_per_second = momentum / elapsed
 
     projected_change = (
@@ -860,6 +867,104 @@ def kalshi_worker():
 
 
 # ==========================================
+# OBJETIVO DEL CONTRATO ACTIVO DE KALSHI
+# ==========================================
+
+def kalshi_market_worker():
+
+    global kalshi_market_target
+    global kalshi_market_ticker
+    global kalshi_market_close
+    global kalshi_market_error
+
+    while True:
+
+        try:
+
+            response = session.get(
+                f"{KALSHI_REST}/markets",
+                params={
+                    "series_ticker": KALSHI_SERIES,
+                    "status": "open",
+                    "limit": 100
+                },
+                timeout=12
+            )
+
+            response.raise_for_status()
+
+            markets = response.json().get("markets", [])
+
+            now = time.time()
+            found = []
+
+            for market in markets:
+
+                raw = market.get("floor_strike")
+
+                if raw is None:
+                    raw = market.get("strike_price")
+
+                if raw is None:
+                    raw = market.get("cap_strike")
+
+                try:
+                    target = float(raw)
+                except (TypeError, ValueError):
+                    continue
+
+                if not valid_price(target):
+                    continue
+
+                close_value = (
+                    market.get("close_time")
+                    or market.get("expiration_time")
+                )
+
+                close_ts = (
+                    normalize_timestamp(close_value)
+                    if close_value else now + 3600
+                )
+
+                if close_ts >= now - 30:
+
+                    found.append((
+                        close_ts,
+                        str(market.get("ticker", "")),
+                        target
+                    ))
+
+            if found:
+
+                found.sort(key=lambda item: item[0])
+
+                close_ts, ticker, target = found[0]
+
+                with lock:
+
+                    kalshi_market_target = target
+                    kalshi_market_ticker = ticker
+                    kalshi_market_close = close_ts
+                    kalshi_market_error = ""
+
+            else:
+
+                with lock:
+
+                    kalshi_market_error = (
+                        "No se encontró floor_strike "
+                        "en el contrato abierto."
+                    )
+
+        except Exception as exc:
+
+            with lock:
+                kalshi_market_error = str(exc)
+
+        time.sleep(10)
+
+
+# ==========================================
 # INICIAR SERVICIOS UNA SOLA VEZ
 # ==========================================
 
@@ -876,6 +981,11 @@ def start_services():
 
     threading.Thread(
         target=load_coinbase_history,
+        daemon=True
+    ).start()
+
+    threading.Thread(
+        target=kalshi_market_worker,
         daemon=True
     ).start()
 
@@ -907,9 +1017,13 @@ def get_data():
         ticks = list(brti_ticks)
 
         candles = [
-            dict(c)
-            for c in coinbase_candles
+            dict(c) for c in brti_candles
         ]
+
+        market_target = kalshi_market_target
+        market_ticker = kalshi_market_ticker
+        market_close = kalshi_market_close
+        market_error = kalshi_market_error
 
         kc = kalshi_connected
         cc = coinbase_connected
@@ -987,7 +1101,12 @@ def get_data():
 
         "price_difference": difference,
 
-        "coinbase_candles": candles,
+        "brti_candles": candles,
+
+        "kalshi_market_target": market_target,
+        "kalshi_market_ticker": market_ticker,
+        "kalshi_market_close": market_close,
+        "kalshi_market_error": market_error,
 
         "countdown": countdown,
 
@@ -1000,10 +1119,7 @@ def get_data():
 
         **indicators
     }
-
-
-# ==========================================
-# RUTAS FLASK
+    # RUTAS FLASK
 # ==========================================
 
 @app.route("/")
@@ -1047,6 +1163,8 @@ def health():
         "brti_samples": data["brti_samples"]
 
     })
+
+
 HTML = r"""
 <!DOCTYPE html>
 <html lang="es">
@@ -1366,7 +1484,7 @@ button:disabled{
     <section class="card">
 
         <div class="label">
-            PREDICCIÓN · 15 MIN
+            OBJETIVO KALSHI · 15 MIN
         </div>
 
         <div class="price predicted" id="predictedPrice">
@@ -1374,7 +1492,7 @@ button:disabled{
         </div>
 
         <div class="small" id="predictionLabel">
-            Calculando movimiento
+            Esperando objetivo de Kalshi
         </div>
 
     </section>
@@ -1450,7 +1568,7 @@ button:disabled{
             </div>
 
             <div class="small">
-                Coinbase · Velas de 1 minuto
+                BRTI · Velas de 1 minuto
             </div>
 
         </div>
@@ -1762,7 +1880,7 @@ function drawChart(data){
         ctx.textAlign="center";
 
         ctx.fillText(
-            "ESPERANDO VELAS DE COINBASE",
+            "ESPERANDO VELAS BRTI",
             W/2,
             H/2
         );
@@ -1901,16 +2019,12 @@ function drawChart(data){
         ctx.fillStyle=color;
         ctx.lineWidth=1.5;
 
-        // MECHA
-
         ctx.beginPath();
 
         ctx.moveTo(x,y(high));
         ctx.lineTo(x,y(low));
 
         ctx.stroke();
-
-        // CUERPO
 
         const bodyTop = Math.min(
             y(open),
@@ -2155,7 +2269,15 @@ function updateRadar(d){
         money(d.brti_price);
 
     $("predictedPrice").textContent=
-        money(d.predicted_price);
+        money(d.kalshi_market_target);
+
+    $("predictionLabel").textContent=
+        d.kalshi_market_ticker
+        ? "Contrato: " + d.kalshi_market_ticker
+        : (
+            d.kalshi_market_error
+            || "Esperando objetivo de Kalshi"
+        );
 
     $("brtiAge").textContent=
         d.brti_age==null
@@ -2310,12 +2432,12 @@ function updateRadar(d){
         .join(" | ");
 
 
-    // GRÁFICA
+    // GRÁFICA EXCLUSIVAMENTE BRTI
 
-    drawChart(d.coinbase_candles || []);
+    drawChart(d.brti_candles || []);
 
     $("candleCount").textContent=
-        (d.coinbase_candles || []).length+
+        (d.brti_candles || []).length+
         " velas";
 
 }
