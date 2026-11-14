@@ -2104,16 +2104,235 @@ function drawChart(data){
         ctx.beginPath();
 
         ctx.moveTo(x,y(high));
-        ctx.lineTo(x,y(low));
 
+function drawChart(data){
+
+    if(data){
+        candles = data;
+    }
+
+    const canvas = $("chart");
+    const rect = canvas.getBoundingClientRect();
+
+    if(!rect.width || !rect.height) return;
+
+    const ratio = window.devicePixelRatio || 1;
+
+    canvas.width = Math.round(rect.width * ratio);
+    canvas.height = Math.round(rect.height * ratio);
+
+    const ctx = canvas.getContext("2d");
+    ctx.setTransform(ratio,0,0,ratio,0,0);
+
+    const W = rect.width;
+    const H = rect.height;
+
+    ctx.clearRect(0,0,W,H);
+
+    if(!candles.length){
+
+        ctx.fillStyle="#91a2c1";
+        ctx.font="13px Arial";
+        ctx.textAlign="center";
+
+        ctx.fillText(
+            "ESPERANDO VELAS BRTI",
+            W/2,
+            H/2
+        );
+
+        return;
+    }
+
+    // CONFIGURACIÓN DEL GRÁFICO
+
+    const count = Math.max(
+        12,
+        Math.min(
+            100,
+            Math.floor(65/chartScale)
+        )
+    );
+
+    chartOffset = Math.max(
+        0,
+        Math.min(
+            chartOffset,
+            candles.length-1
+        )
+    );
+
+    const end = candles.length-chartOffset;
+
+    // Reservar espacio a la derecha para la última vela
+    const maxVisible = Math.max(
+        8,
+        Math.floor(count*.74)
+    );
+
+    const start = Math.max(
+        0,
+        end-maxVisible
+    );
+
+    const visible = candles.slice(start,end);
+
+    if(!visible.length) return;
+
+    // INDICADORES EMA
+
+    const closes = candles.map(
+        c=>Number(c.close)
+    );
+
+    const e9 = emaSeries(
+        closes,9
+    ).slice(start,end);
+
+    const e21 = emaSeries(
+        closes,21
+    ).slice(start,end);
+
+    // ESCALA DE PRECIOS
+
+    const values = [];
+
+    visible.forEach(c=>{
+
+        values.push(Number(c.high));
+        values.push(Number(c.low));
+
+    });
+
+    values.push(...e9,...e21);
+
+    const validValues = values.filter(
+        v=>Number.isFinite(v)
+    );
+
+    if(!validValues.length) return;
+
+    let min = Math.min(...validValues);
+    let max = Math.max(...validValues);
+
+    if(max-min<0.01){
+        max+=1;
+        min-=1;
+    }
+
+    const padding = Math.max(
+        (max-min)*.15,
+        1
+    );
+
+    min-=padding;
+    max+=padding;
+
+    // ÁREA ÚTIL
+
+    const left = 10;
+    const right = W-57;
+    const top = 18;
+    const bottom = H-24;
+
+    const plotWidth = right-left;
+    const plotHeight = bottom-top;
+
+    if(plotWidth<=0 || plotHeight<=0) return;
+
+    const y = price =>
+        bottom-
+        ((price-min)/(max-min))*plotHeight;
+
+    const step = plotWidth/count;
+
+    const candleWidth = Math.max(
+        4,
+        Math.min(13,step*.72)
+    );
+
+    // POSICIÓN CORRECTA DE LAS VELAS
+
+    function candleX(i){
+
+        const offset = count*.74-visible.length;
+
+        return left+
+            (offset+i+.5)*step;
+
+    }
+
+    // CUADRÍCULA Y PRECIOS
+
+    ctx.font="10px Arial";
+    ctx.textAlign="left";
+    ctx.lineWidth=1;
+
+    for(let i=0;i<=4;i++){
+
+        const yy=top+plotHeight*i/4;
+
+        ctx.strokeStyle="#263247";
+        ctx.beginPath();
+        ctx.moveTo(left,yy);
+        ctx.lineTo(right,yy);
         ctx.stroke();
 
-        const bodyTop = Math.min(
+        const price=max-(max-min)*i/4;
+
+        ctx.fillStyle="#a3b1ca";
+
+        ctx.fillText(
+            price.toFixed(0),
+            right+5,
+            yy+3
+        );
+
+    }
+
+    // VELAS ALCISTAS Y BAJISTAS
+
+    visible.forEach((c,i)=>{
+
+        const open=Number(c.open);
+        const close=Number(c.close);
+        const high=Number(c.high);
+        const low=Number(c.low);
+
+        if(
+            !Number.isFinite(open) ||
+            !Number.isFinite(close) ||
+            !Number.isFinite(high) ||
+            !Number.isFinite(low)
+        ) return;
+
+        const x=candleX(i);
+
+        const up=close>=open;
+
+        const color=up
+            ? "#00df9a"
+            : "#ff5269";
+
+        ctx.strokeStyle=color;
+        ctx.fillStyle=color;
+        ctx.lineWidth=1.5;
+
+        // MECHA
+
+        ctx.beginPath();
+        ctx.moveTo(x,y(high));
+        ctx.lineTo(x,y(low));
+        ctx.stroke();
+
+        // CUERPO
+
+        const bodyTop=Math.min(
             y(open),
             y(close)
         );
 
-        const bodyHeight = Math.max(
+        const bodyHeight=Math.max(
             2,
             Math.abs(y(open)-y(close))
         );
@@ -2127,19 +2346,19 @@ function drawChart(data){
 
     });
 
-
-    // EMA 9 Y EMA 21
+    // DIBUJAR EMA
 
     function drawLine(series,color){
 
         if(series.length<2) return;
 
         ctx.beginPath();
-
         ctx.strokeStyle=color;
-        ctx.lineWidth=1.7;
+        ctx.lineWidth=1.8;
 
         series.forEach((value,i)=>{
+
+            if(!Number.isFinite(value)) return;
 
             const x=candleX(i);
             const yy=y(value);
@@ -2153,45 +2372,40 @@ function drawChart(data){
         });
 
         ctx.stroke();
+
     }
 
     drawLine(e9,"#b98aff");
     drawLine(e21,"#45a9ff");
 
-
-    // PRECIO ACTUAL
+    // PRECIO ACTUAL BRTI
 
     if(chartOffset===0){
 
-        const last = candles[candles.length-1];
+        const last=candles[candles.length-1];
+        const lastPrice=Number(last.close);
 
-        const lastPrice = Number(last.close);
+        if(Number.isFinite(lastPrice)){
 
-        const lastY = y(lastPrice);
+            const lastY=y(lastPrice);
 
-        ctx.setLineDash([5,4]);
+            ctx.setLineDash([5,4]);
+            ctx.strokeStyle="#f4c95d";
+            ctx.lineWidth=1;
 
-        ctx.strokeStyle="#f4c95d";
+            ctx.beginPath();
+            ctx.moveTo(left,lastY);
+            ctx.lineTo(right,lastY);
+            ctx.stroke();
 
-        ctx.beginPath();
+            ctx.setLineDash([]);
 
-        ctx.moveTo(left,lastY);
-        ctx.lineTo(right,lastY);
-
-        ctx.stroke();
-
-        ctx.setLineDash([]);
+        }
 
     }
 
 }
 
-
-// ==========================================
-// VOLVER A LA ÚLTIMA VELA
-// ==========================================
-
-function goLive(){
 
     chartOffset=0;
     chartScale=1;
