@@ -1207,7 +1207,7 @@ def health():
         "market_target": data["market_target"],
         "market_error": data["market_error"]
     })
-    HTML = r"""
+HTML = r"""
 <!DOCTYPE html>
 <html lang="es">
 <head>
