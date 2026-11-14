@@ -47,6 +47,7 @@ PRIVATE_KEY_PEM = os.getenv(
 lock = threading.RLock()
 
 brti_ticks = deque(maxlen=MAX_TICKS)
+brti_candles = deque(maxlen=MAX_CANDLES)
 coinbase_candles = deque(maxlen=MAX_CANDLES)
 
 brti_price = None
@@ -186,6 +187,7 @@ def set_brti(price, timestamp=None):
         brti_time = timestamp
 
         brti_ticks.append((timestamp, price))
+        update_candle(brti_candles, price, timestamp)
 
 # ==========================================
 # REGISTRO COINBASE
@@ -484,7 +486,7 @@ def calculate_prediction(price, ticks, seconds_to_close, market_target=None):
         "rsi": round(rsi, 2) if rsi is not None else None,
         "target_influence": target_influence
     }
-    
+
     # ==========================================
 # HISTORIAL COINBASE
 # ==========================================
@@ -1023,7 +1025,7 @@ def get_data():
 
         candles = [
             dict(c)
-            for c in coinbase_candles
+            for c in brti_candles
         ]
 
         kc = kalshi_connected
@@ -1150,7 +1152,7 @@ def get_data():
 
         "price_difference": difference,
 
-        "coinbase_candles": candles,
+        "brti_candles": candles,
 
         "countdown": countdown,
 
@@ -1520,7 +1522,7 @@ button:disabled{
 
 <!-- PRECIOS -->
 
-<div class="grid">
+<div class="grid top-grid">
 
     <section class="card">
 
@@ -1553,6 +1555,18 @@ button:disabled{
             Calculando movimiento
         </div>
 
+    </section>
+
+    <section class="card">
+        <div class="label">OBJETIVO KALSHI</div>
+        <div class="price yellow" id="marketTargetTop">--</div>
+        <div class="small">Objetivo del contrato activo</div>
+    </section>
+
+    <section class="card">
+        <div class="label">TIEMPO RESTANTE</div>
+        <div class="price predicted" id="countdownTop">15:00</div>
+        <div class="small">Cierre del contrato</div>
     </section>
 
 </div>
@@ -1622,11 +1636,11 @@ button:disabled{
         <div>
 
             <div class="section-title">
-                GRÁFICA BTC/USD
+                GRÁFICA BRTI/USD
             </div>
 
             <div class="small">
-                Coinbase · Velas de 1 minuto
+                BRTI · Velas reales de 1 minuto
             </div>
 
         </div>
@@ -1748,7 +1762,7 @@ button:disabled{
         <div class="metric">
             <div class="metric-name">
                 OBJETIVO DE APERTURA
-            </div>
+                            </div>
             <div class="metric-value" id="marketTarget">
                 --
             </div>
@@ -2431,6 +2445,9 @@ function updateRadar(d){
     $("marketTarget").textContent=
         money(d.market_target);
 
+    $("marketTargetTop").textContent=money(d.market_target);
+    $("countdownTop").textContent=clock(Number(d.countdown || 0));
+
     $("targetGap").textContent=
         d.market_target_gap_pct==null
         ? "--"
@@ -2513,11 +2530,11 @@ function updateRadar(d){
 
     // GRÁFICA
 
-    drawChart(d.coinbase_candles || []);
+    drawChart(d.brti_candles || []);
 
     $("candleCount").textContent=
-        (d.coinbase_candles || []).length+
-        " velas";
+        (d.brti_candles || []).length+
+        " velas BRTI";
 
 }
 
