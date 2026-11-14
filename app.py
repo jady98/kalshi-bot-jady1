@@ -29,6 +29,12 @@ COINBASE_REST = "https://api.exchange.coinbase.com"
 INDEX_ID = "BRTI"
 PRODUCT = "BTC-USD"
 
+# Mercado activo de Kalshi: objetivo y horario del contrato KXBTC15M
+KALSHI_REST = "https://external-api.kalshi.com/trade-api/v2"
+MARKET_POLL_SECONDS = 10
+active_market = None
+market_error = ""
+
 MAX_CANDLES = 300
 MAX_TICKS = 3600
 STALE_SECONDS = 15
@@ -62,7 +68,6 @@ session.headers.update({
     "User-Agent": "BitcoinRadar/7.0"
 })
 
-
 # ==========================================
 # UTILIDADES
 # ==========================================
@@ -73,7 +78,6 @@ def valid_price(value):
         return math.isfinite(value) and value > 0
     except (TypeError, ValueError):
         return False
-
 
 def normalize_timestamp(value):
     if value is None:
@@ -89,7 +93,6 @@ def normalize_timestamp(value):
 
     except (TypeError, ValueError):
         return time.time()
-
 
 def kalshi_headers():
 
@@ -124,7 +127,6 @@ def kalshi_headers():
         "KALSHI-ACCESS-SIGNATURE: " +
         base64.b64encode(signature).decode("utf-8")
     ]
-
 
 # ==========================================
 # VELAS
@@ -163,7 +165,6 @@ def update_candle(target, price, timestamp=None, volume=0):
             "volume": float(volume or 0)
         })
 
-
 # ==========================================
 # REGISTRO BRTI
 # ==========================================
@@ -185,7 +186,6 @@ def set_brti(price, timestamp=None):
         brti_time = timestamp
 
         brti_ticks.append((timestamp, price))
-
 
 # ==========================================
 # REGISTRO COINBASE
@@ -213,7 +213,6 @@ def set_coinbase(price, timestamp=None):
             timestamp
         )
 
-
 # ==========================================
 # INDICADORES
 # ==========================================
@@ -235,7 +234,6 @@ def calculate_ema(values, period):
         )
 
     return result
-
 
 def calculate_rsi(values, period=14):
 
@@ -270,7 +268,6 @@ def calculate_rsi(values, period=14):
 
     return 100 - (100 / (1 + rs))
 
-
 def calculate_vwap(history):
 
     rows = [
@@ -296,7 +293,6 @@ def calculate_vwap(history):
 
     return weighted / total
 
-
 # ==========================================
 # PROMEDIO LOCAL DE LOS ÚLTIMOS 60 SEGUNDOS
 # ==========================================
@@ -316,7 +312,6 @@ def calculate_brti_average(ticks):
         return None, 0
 
     return sum(recent) / len(recent), len(recent)
-
 
 # ==========================================
 # ANÁLISIS DE MOVIMIENTO BRTI
@@ -526,7 +521,6 @@ def load_coinbase_history():
         with lock:
             coinbase_error = str(exc)
 
-
 # ==========================================
 # COINBASE WEBSOCKET
 # ==========================================
@@ -543,7 +537,6 @@ def coinbase_open(ws):
 
     with lock:
         coinbase_connected = True
-
 
 def coinbase_message(ws, message):
 
@@ -573,7 +566,6 @@ def coinbase_message(ws, message):
         with lock:
             coinbase_error = str(exc)
 
-
 def coinbase_status(value, error=""):
 
     global coinbase_connected, coinbase_error
@@ -584,7 +576,6 @@ def coinbase_status(value, error=""):
 
         if error:
             coinbase_error = str(error)
-
 
 def coinbase_worker():
 
@@ -600,7 +591,7 @@ def coinbase_worker():
                     False, err
                 ),
                 on_close=lambda ws, code, msg: coinbase_status(
-                    False
+                        False
                 )
             )
 
@@ -623,22 +614,16 @@ def coinbase_worker():
 def find_brti_value(data):
 
     if isinstance(data, str):
-
         try:
             data = json.loads(data)
-
         except (ValueError, TypeError):
             return None
 
     if isinstance(data, list):
-
         for item in data:
-
             found = find_brti_value(item)
-
             if found is not None:
                 return found
-
         return None
 
     if not isinstance(data, dict):
@@ -655,10 +640,8 @@ def find_brti_value(data):
         raw = data.get("data")
 
         if isinstance(raw, str):
-
             try:
                 raw = json.loads(raw)
-
             except (ValueError, TypeError):
                 raw = None
 
@@ -674,21 +657,7 @@ def find_brti_value(data):
             )
 
             if valid_price(value):
-
                 return value, timestamp
-
-        average = data.get("avg_60s_data")
-
-        if isinstance(average, dict):
-
-            value = average.get("value")
-
-            if valid_price(value):
-
-                return (
-                    value,
-                    data.get("received_at")
-                )
 
         value = data.get("value")
 
@@ -735,7 +704,6 @@ def kalshi_open(ws):
     }))
 
     with lock:
-
         kalshi_connected = True
         kalshi_error = ""
 
@@ -860,6 +828,133 @@ def kalshi_worker():
 
 
 # ==========================================
+# MERCADO ACTIVO KALSHI KXBTC15M
+# ==========================================
+
+def parse_market_time(value):
+
+    if not value:
+        return None
+
+    try:
+
+        from datetime import datetime, timezone
+
+        parsed = datetime.fromisoformat(
+            str(value).replace("Z", "+00:00")
+        )
+
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(
+                tzinfo=timezone.utc
+            )
+
+        return parsed.timestamp()
+
+    except Exception:
+        return None
+
+
+def fetch_active_market():
+
+    global active_market, market_error
+
+    try:
+
+        response = session.get(
+            f"{KALSHI_REST}/markets",
+            params={
+                "series_ticker": "KXBTC15M",
+                "status": "open",
+                "limit": 1000
+            },
+            timeout=12
+        )
+
+        response.raise_for_status()
+
+        payload = response.json()
+
+        markets = (
+            payload.get("markets", [])
+            if isinstance(payload, dict)
+            else []
+        )
+
+        now = time.time()
+        candidates = []
+
+        for market in markets:
+
+            opened = parse_market_time(
+                market.get("open_time")
+            )
+
+            closed = parse_market_time(
+                market.get("close_time")
+            )
+
+            if opened is None or closed is None:
+                continue
+
+            if opened <= now < closed:
+                candidates.append(
+                    (closed, opened, market)
+                )
+
+        if not candidates:
+
+            with lock:
+                active_market = None
+                market_error = (
+                    "Kalshi no devolvió un contrato "
+                    "KXBTC15M abierto"
+                )
+
+            return
+
+        candidates.sort(
+            key=lambda row: row[0]
+        )
+
+        closed, opened, market = candidates[0]
+
+        raw_target = market.get("floor_strike")
+
+        target = (
+            float(raw_target)
+            if valid_price(raw_target)
+            else None
+        )
+
+        snapshot = {
+            "ticker": market.get("ticker"),
+            "open_time": opened,
+            "close_time": closed,
+            "target": target,
+            "status": market.get("status", "open")
+        }
+
+        with lock:
+            active_market = snapshot
+            market_error = ""
+
+    except Exception as exc:
+
+        with lock:
+            market_error = str(exc)
+
+
+def market_worker():
+
+    while True:
+
+        fetch_active_market()
+
+        time.sleep(MARKET_POLL_SECONDS)
+
+
+# ==========================================
 # INICIAR SERVICIOS UNA SOLA VEZ
 # ==========================================
 
@@ -886,6 +981,11 @@ def start_services():
 
     threading.Thread(
         target=kalshi_worker,
+        daemon=True
+    ).start()
+
+    threading.Thread(
+        target=market_worker,
         daemon=True
     ).start()
 
@@ -917,9 +1017,33 @@ def get_data():
         ke = kalshi_error
         ce = coinbase_error
 
+        market = (
+            dict(active_market)
+            if active_market
+            else None
+        )
+
+        me = market_error
+
     now = time.time()
 
-    countdown = 900 - (int(now) % 900)
+    if market:
+
+        countdown = max(
+            0,
+            int(market["close_time"] - now)
+        )
+
+        market_target = market.get("target")
+        market_ticker = market.get("ticker")
+        market_close_time = market.get("close_time")
+
+    else:
+
+        countdown = 0
+        market_target = None
+        market_ticker = None
+        market_close_time = None
 
     brti_age = (
         round(now - bt, 1)
@@ -952,6 +1076,29 @@ def get_data():
     average, average_count = calculate_brti_average(
         ticks
     )
+
+    projected = indicators.get("predicted_price")
+
+    target_gap_pct = (
+        round(
+            (projected / market_target - 1) * 100,
+            5
+        )
+        if projected is not None and market_target
+        else None
+    )
+
+    if target_gap_pct is None:
+        contract_direction = "SIN OBJETIVO"
+
+    elif target_gap_pct > 0.002:
+        contract_direction = "ALCISTA"
+
+    elif target_gap_pct < -0.002:
+        contract_direction = "BAJISTA"
+
+    else:
+        contract_direction = "INDECISO"
 
     difference = (
         round(cp - bp, 2)
@@ -990,6 +1137,16 @@ def get_data():
         "coinbase_candles": candles,
 
         "countdown": countdown,
+
+        "market_ticker": market_ticker,
+        "market_target": (
+            round(market_target, 2)
+            if market_target else None
+        ),
+        "market_close_time": market_close_time,
+        "market_target_gap_pct": target_gap_pct,
+        "contract_direction": contract_direction,
+        "market_error": me,
 
         "brti_average_60s": (
             round(average, 2)
@@ -1044,10 +1201,13 @@ def health():
         "coinbase_price": data["coinbase_price"],
         "coinbase_connected": data["coinbase_connected"],
 
-        "brti_samples": data["brti_samples"]
+        "brti_samples": data["brti_samples"],
 
+        "market_ticker": data["market_ticker"],
+        "market_target": data["market_target"],
+        "market_error": data["market_error"]
     })
-HTML = r"""
+    HTML = r"""
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -1521,75 +1681,33 @@ button:disabled{
     <div class="metrics">
 
         <div class="metric">
-
-            <div class="metric-name">
-                EMA 9
-            </div>
-
-            <div class="metric-value" id="ema9">
-                --
-            </div>
-
+            <div class="metric-name">EMA 9</div>
+            <div class="metric-value" id="ema9">--</div>
         </div>
 
         <div class="metric">
-
-            <div class="metric-name">
-                EMA 21
-            </div>
-
-            <div class="metric-value" id="ema21">
-                --
-            </div>
-
+            <div class="metric-name">EMA 21</div>
+            <div class="metric-value" id="ema21">--</div>
         </div>
 
         <div class="metric">
-
-            <div class="metric-name">
-                RSI 14
-            </div>
-
-            <div class="metric-value" id="rsi">
-                --
-            </div>
-
+            <div class="metric-name">RSI 14</div>
+            <div class="metric-value" id="rsi">--</div>
         </div>
 
         <div class="metric">
-
-            <div class="metric-name">
-                MOMENTUM
-            </div>
-
-            <div class="metric-value" id="momentum">
-                --
-            </div>
-
+            <div class="metric-name">MOMENTUM</div>
+            <div class="metric-value" id="momentum">--</div>
         </div>
 
         <div class="metric">
-
-            <div class="metric-name">
-                PROMEDIO LOCAL 60S
-            </div>
-
-            <div class="metric-value" id="averagePrice">
-                --
-            </div>
-
+            <div class="metric-name">PROMEDIO LOCAL 60S</div>
+            <div class="metric-value" id="averagePrice">--</div>
         </div>
 
         <div class="metric">
-
-            <div class="metric-name">
-                MUESTRAS BRTI
-            </div>
-
-            <div class="metric-value" id="brtiSamples">
-                0
-            </div>
-
+            <div class="metric-name">MUESTRAS BRTI</div>
+            <div class="metric-value" id="brtiSamples">0</div>
         </div>
 
     </div>
@@ -1601,7 +1719,60 @@ button:disabled{
 </section>
 
 
-<!-- CIERRE Y CONEXIONES -->
+<!-- CONTRATO ACTIVO KALSHI -->
+
+<section class="card">
+
+    <div class="section-title">
+        CONTRATO ACTIVO KALSHI · 15 MIN
+    </div>
+
+    <div class="metrics" style="grid-template-columns:1fr 1fr">
+
+        <div class="metric">
+            <div class="metric-name">
+                OBJETIVO DE APERTURA
+            </div>
+            <div class="metric-value" id="marketTarget">
+                --
+            </div>
+        </div>
+
+        <div class="metric">
+            <div class="metric-name">
+                DIFERENCIA PROYECTADA
+            </div>
+            <div class="metric-value" id="targetGap">
+                --
+            </div>
+        </div>
+
+    </div>
+
+    <div class="row" style="margin-top:12px">
+
+        <div>
+            <div class="label">
+                LECTURA FRENTE AL OBJETIVO
+            </div>
+            <div class="signal yellow" id="contractDirection">
+                BUSCANDO CONTRATO
+            </div>
+        </div>
+
+        <div style="text-align:right">
+            <div class="label">CONTRATO</div>
+            <div class="small" id="marketTicker">--</div>
+        </div>
+
+    </div>
+
+    <div class="small" id="marketStatus">
+        Buscando el contrato abierto de Kalshi
+    </div>
+
+</section>
+    <!-- CIERRE Y CONEXIONES -->
 
 <section class="card">
 
@@ -1610,7 +1781,7 @@ button:disabled{
         <div>
 
             <div class="label">
-                CIERRE DEL BLOQUE 15 MIN
+                CIERRE DEL CONTRATO KALSHI
             </div>
 
             <div class="signal purple" id="countdown">
@@ -1643,6 +1814,7 @@ button:disabled{
 <div class="footer">
     BTC RADAR · DATOS EN TIEMPO REAL · MODO LECTURA
 </div>
+
 </main>
 
 <script>
@@ -1901,16 +2073,12 @@ function drawChart(data){
         ctx.fillStyle=color;
         ctx.lineWidth=1.5;
 
-        // MECHA
-
         ctx.beginPath();
 
         ctx.moveTo(x,y(high));
         ctx.lineTo(x,y(low));
 
         ctx.stroke();
-
-        // CUERPO
 
         const bodyTop = Math.min(
             y(open),
@@ -2238,9 +2406,37 @@ function updateRadar(d){
         (d.brti_average_samples || 0)+
         " · Cálculo local";
 
-
     $("brtiSamples").textContent=
         d.brti_samples || 0;
+
+
+    // CONTRATO KALSHI
+
+    $("marketTarget").textContent=
+        money(d.market_target);
+
+    $("targetGap").textContent=
+        d.market_target_gap_pct==null
+        ? "--"
+        : Number(d.market_target_gap_pct).toFixed(4)+"%";
+
+    $("contractDirection").textContent=
+        d.contract_direction || "SIN OBJETIVO";
+
+    $("contractDirection").className="signal "+
+        (
+            d.contract_direction==="ALCISTA" ? "green":
+            d.contract_direction==="BAJISTA" ? "red":
+            "yellow"
+        );
+
+    $("marketTicker").textContent=
+        d.market_ticker || "--";
+
+    $("marketStatus").textContent=
+        d.market_error
+        ? "Mercado no disponible: "+d.market_error
+        : "Consulta automática del contrato activo de Kalshi";
 
 
     // CONEXIONES
@@ -2282,24 +2478,13 @@ function updateRadar(d){
         );
 
 
-    // CUENTA REGRESIVA
+    // CUENTA REGRESIVA REAL DEL CONTRATO
 
     $("countdown").textContent=
         clock(Number(d.countdown || 0));
 
 
-    // ESTADO GENERAL
-
-    if(d.brti_live){
-
-        $("brtiStatus").textContent="BRTI EN VIVO";
-
-    }else{
-
-        $("brtiStatus").textContent="BRTI SIN DATOS";
-
-    }
-
+    // ERRORES
 
     $("errors").textContent=
         [
