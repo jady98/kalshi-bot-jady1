@@ -897,7 +897,7 @@ def fetch_active_market():
             if isinstance(payload, dict)
             else []
         )
-                now = time.time()
+        now = time.time()
         candidates = []
 
         for market in markets:
