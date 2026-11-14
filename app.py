@@ -1082,13 +1082,13 @@ def get_data():
         and 0 <= coinbase_age <= STALE_SECONDS
     )
 
-    indicators = 
-calculate_prediction(
-        bp,
-        ticks,
-        countdown,
-        market_target
-    )
+        indicators = 
+    calculate_prediction(
+            bp,
+            ticks,
+            countdown,
+            market_target
+        )
 
     average, average_count = calculate_brti_average(
         ticks
