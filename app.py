@@ -1049,7 +1049,7 @@ def get_data():
 
     now = time.time()
 
-    countdown = 900 - (int(now) % 900)
+    countdown = max(0, int(market_close - now)) if market_close else 0
 
     brti_age = (
         round(now - bt, 1)
