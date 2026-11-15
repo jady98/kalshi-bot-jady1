@@ -137,7 +137,6 @@ def kalshi_headers():
 # VELAS
 # ==========================================
 
-
 def update_candle(target, price, timestamp=None, volume=0):
     """Construye velas OHLC de 1 minuto y ordena ticks atrasados."""
 
@@ -190,8 +189,6 @@ def update_candle(target, price, timestamp=None, volume=0):
 
     target.clear()
     target.extend(rows[-MAX_CANDLES:])
-    
-    
 
 
 # ==========================================
@@ -206,11 +203,9 @@ def set_brti(price, timestamp=None):
         return
 
     price = float(price)
-
     timestamp = normalize_timestamp(timestamp)
 
     with lock:
-
         brti_price = price
         brti_time = timestamp
 
@@ -230,11 +225,9 @@ def set_coinbase(price, timestamp=None):
         return
 
     price = float(price)
-
     timestamp = normalize_timestamp(timestamp)
 
     with lock:
-
         coinbase_price = price
         coinbase_time = timestamp
 
@@ -255,11 +248,9 @@ def calculate_ema(values, period):
         return None
 
     alpha = 2 / (period + 1)
-
     result = float(values[0])
 
     for value in values[1:]:
-
         result = (
             alpha * float(value)
             + (1 - alpha) * result
@@ -285,7 +276,6 @@ def calculate_rsi(values, period=14):
     avg_loss = sum(losses[:period]) / period
 
     for i in range(period, len(changes)):
-
         avg_gain = (
             avg_gain * (period - 1) + gains[i]
         ) / period
@@ -451,9 +441,13 @@ def calculate_prediction(price, ticks, seconds_to_close):
         if possible > 0 else 0
     )
 
+    # PORCENTAJES SUAVIZADOS:
+    # Evita que una señal técnica aislada
+    # produzca automáticamente 100% / 0%.
+
     bullish = max(
-        0,
-        min(100, round(50 + normalized * 50, 1))
+        20,
+        min(80, round(50 + normalized * 30, 1))
     )
 
     bearish = round(100 - bullish, 1)
@@ -1043,6 +1037,11 @@ def get_data():
             dict(c) for c in brti_candles
         ]
 
+        # HISTORIAL REAL DE COINBASE
+        coin_candles = [
+            dict(c) for c in coinbase_candles
+        ]
+
         market_target = kalshi_market_target
         market_ticker = kalshi_market_ticker
         market_close = kalshi_market_close
@@ -1126,6 +1125,9 @@ def get_data():
 
         "brti_candles": candles,
 
+        # LA GRÁFICA RECIBE LAS 300 VELAS DE COINBASE
+        "coinbase_candles": coin_candles,
+
         "kalshi_market_target": market_target,
         "kalshi_market_ticker": market_ticker,
         "kalshi_market_close": market_close,
@@ -1185,6 +1187,8 @@ def health():
         "coinbase_live": data["coinbase_live"],
         "coinbase_price": data["coinbase_price"],
         "coinbase_connected": data["coinbase_connected"],
+
+        "coinbase_candles": len(data["coinbase_candles"]),
 
         "brti_samples": data["brti_samples"]
 
@@ -1323,6 +1327,7 @@ main{
     background:#29344a;
     margin:12px 0 8px;
 }
+
 .bull{
     background:#00d995;
     width:50%;
@@ -1548,7 +1553,6 @@ button:disabled{
 
             <div class="label">BAJISTA</div>
             <div class="price red" id="bearText">50%</div>
-
         </div>
 
     </div>
@@ -1593,7 +1597,7 @@ button:disabled{
             </div>
 
             <div class="small">
-                BRTI · Velas de 1 minuto
+                COINBASE · Velas de 1 minuto
             </div>
 
         </div>
@@ -1651,54 +1655,6 @@ button:disabled{
     </div>
 
 </section>
-
-
-<!-- INDICADORES -->
-
-<section class="card">
-
-    <div class="section-title">
-        INDICADORES DEL BRTI
-    </div>
-
-    <div class="metrics">
-
-        <div class="metric">
-
-            <div class="metric-name">
-                EMA 9
-            </div>
-
-            <div class="metric-value" id="ema9">
-                --
-            </div>
-
-        </div>
-
-        <div class="metric">
-
-            <div class="metric-name">
-                EMA 21
-            </div>
-
-            <div class="metric-value" id="ema21">
-                --
-            </div>
-
-        </div>
-
-        <div class="metric">
-
-            <div class="metric-name">
-                RSI 14
-            </div>
-
-            <div class="metric-value" id="rsi">
-                --
-            </div>
-
-        </div>
-
         <div class="metric">
 
             <div class="metric-name">
@@ -1866,8 +1822,10 @@ function emaSeries(values, period){
 
     return output;
 }
+
+
 // ==========================================
-// DIBUJAR GRÁFICA BRTI
+// DIBUJAR GRÁFICA COINBASE
 // ==========================================
 
 function drawChart(data){
@@ -1902,7 +1860,7 @@ function drawChart(data){
         ctx.textAlign="center";
 
         ctx.fillText(
-            "ESPERANDO VELAS BRTI",
+            "ESPERANDO VELAS COINBASE",
             W/2,
             H/2
         );
@@ -2038,7 +1996,7 @@ function drawChart(data){
 
     ctx.font="10px Arial";
     ctx.textAlign="left";
-    ctx.strokeStyle="#263247";
+        ctx.strokeStyle="#263247";
     ctx.lineWidth=1;
 
     for(let i=0;i<=4;i++){
@@ -2063,7 +2021,7 @@ function drawChart(data){
     }
 
 
-    // VELAS BRTI
+    // VELAS COINBASE
 
     visible.forEach(item=>{
 
@@ -2169,7 +2127,7 @@ function drawChart(data){
     drawLine(e21,"#45a9ff");
 
 
-    // PRECIO ACTUAL BRTI
+    // PRECIO DE LA ÚLTIMA VELA COINBASE
 
     if(chartOffset < 0.05){
 
@@ -2325,7 +2283,6 @@ canvas.addEventListener(
 
             const step=plotWidth/count;
 
-            // Se conserva el movimiento decimal.
             // El dedo hacia la derecha permite
             // desplazarse hacia velas anteriores.
 
@@ -2424,11 +2381,14 @@ function updateRadar(d){
         );
 
 
-    // PORCENTAJES
+    // PORCENTAJES ALCISTA Y BAJISTA
 
-    const bullish=Number(d.bullish_score ?? 50);
+    const bullish=Math.max(
+        20,
+        Math.min(80,Number(d.bullish_score ?? 50))
+    );
 
-    const bearish=Number(d.bearish_score ?? 50);
+    const bearish=100-bullish;
 
     $("bullText").textContent=
         bullish.toFixed(1)+"%";
@@ -2485,7 +2445,6 @@ function updateRadar(d){
         (d.brti_average_samples || 0)+
         " · Cálculo local";
 
-
     $("brtiSamples").textContent=
         d.brti_samples || 0;
 
@@ -2537,17 +2496,6 @@ function updateRadar(d){
 
     // ESTADO GENERAL
 
-    if(d.brti_live){
-
-        $("brtiStatus").textContent="BRTI EN VIVO";
-
-    }else{
-
-        $("brtiStatus").textContent="BRTI SIN DATOS";
-
-    }
-
-
     $("errors").textContent=
         [
             d.kalshi_error,
@@ -2557,13 +2505,13 @@ function updateRadar(d){
         .join(" | ");
 
 
-    // GRÁFICA EXCLUSIVAMENTE BRTI
+    // GRÁFICA EXCLUSIVAMENTE COINBASE
 
-    drawChart(d.brti_candles || []);
+    drawChart(d.coinbase_candles || []);
 
     $("candleCount").textContent=
-        (d.brti_candles || []).length+
-        " velas";
+        (d.coinbase_candles || []).length+
+        " velas Coinbase";
 
 }
 
