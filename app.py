@@ -340,15 +340,21 @@ def calculate_brti_average(ticks):
 
 
 # ==========================================
-# ANÁLISIS DE MOVIMIENTO BRTI
+# ANÁLISIS DE MOVIMIENTO CON VELAS COINBASE
 # ==========================================
 
-def calculate_prediction(price, ticks, seconds_to_close):
+def calculate_prediction(
+    price,
+    ticks,
+    seconds_to_close,
+    market_target=None,
+    candles=None
+):
 
     if not valid_price(price):
 
         return {
-            "direction": "ESPERANDO BRTI",
+            "direction": "RECOPILANDO",
             "predicted_price": None,
             "bullish_score": 50,
             "bearish_score": 50,
@@ -356,85 +362,345 @@ def calculate_prediction(price, ticks, seconds_to_close):
             "momentum_pct": None,
             "ema9": None,
             "ema21": None,
-            "rsi": None
+            "rsi": None,
+            "pattern": "SIN DATOS",
+            "target_influence": "SIN DATOS"
         }
 
-    now = time.time()
+    # --------------------------------------
+    # PREPARAR HISTORIAL DE VELAS COINBASE
+    # --------------------------------------
 
-    recent = [
-        (t, p)
-        for t, p in ticks
-        if now - t <= 120
-        and t <= now + 1
+    valid_candles = []
+
+    for candle in (candles or []):
+
+        try:
+            open_price = float(candle["open"])
+            high = float(candle["high"])
+            low = float(candle["low"])
+            close = float(candle["close"])
+            volume = float(candle.get("volume", 0))
+
+            if not all(math.isfinite(x) for x in (
+                open_price, high, low, close, volume
+            )):
+                continue
+
+            if min(open_price, high, low, close) <= 0:
+                continue
+
+            if high < low:
+                continue
+
+            valid_candles.append({
+                "open": open_price,
+                "high": high,
+                "low": low,
+                "close": close,
+                "volume": max(0, volume)
+            })
+
+        except (TypeError, ValueError, KeyError):
+            continue
+
+    # Orden cronológico: antiguas primero
+    valid_candles = valid_candles[-300:]
+
+    closes = [
+        candle["close"]
+        for candle in valid_candles
     ]
 
-    prices = [p for _, p in recent]
+    if len(valid_candles) < 3:
 
-    if len(prices) >= 2:
+        return {
+            "direction": "RECOPILANDO",
+            "predicted_price": round(float(price), 2),
+            "bullish_score": 50,
+            "bearish_score": 50,
+            "technical_strength": 0,
+            "momentum_pct": 0,
+            "ema9": None,
+            "ema21": None,
+            "rsi": None,
+            "pattern": "RECOPILANDO VELAS",
+            "target_influence": "PENDIENTE"
+        }
 
-        first_time, first_price = recent[0]
-        last_time, last_price = recent[-1]
+    # --------------------------------------
+    # INDICADORES TÉCNICOS
+    # --------------------------------------
 
-        elapsed = max(
-            last_time - first_time,
-            1
-        )
+    ema9 = calculate_ema(closes, 9)
+    ema21 = calculate_ema(closes, 21)
+    rsi = calculate_rsi(closes, 14)
 
-        momentum = (
-            (last_price / first_price) - 1
-        ) * 100
+    # Momentum de las últimas cinco velas
+    reference_index = max(0, len(closes) - 6)
 
-    else:
+    reference_price = closes[reference_index]
+    latest_close = closes[-1]
 
-        momentum = 0
-        elapsed = 1
+    momentum = (
+        (latest_close / reference_price) - 1
+    ) * 100 if reference_price > 0 else 0
 
-    ema9 = calculate_ema(prices, 9)
-    ema21 = calculate_ema(prices, 21)
-    rsi = calculate_rsi(prices)
+    # --------------------------------------
+    # ANÁLISIS DE LA ÚLTIMA VELA
+    # --------------------------------------
+
+    last = valid_candles[-1]
+
+    previous = valid_candles[-2]
+
+    body = abs(last["close"] - last["open"])
+
+    candle_range = max(
+        last["high"] - last["low"],
+        0.00000001
+    )
+
+    upper_wick = (
+        last["high"] - max(last["open"], last["close"])
+    )
+
+    lower_wick = (
+        min(last["open"], last["close"]) - last["low"]
+    )
+
+    bullish_candle = last["close"] > last["open"]
+    bearish_candle = last["close"] < last["open"]
+
+    pattern = "SIN PATRÓN CLARO"
+
+    # Envolvente alcista
+    if (
+        previous["close"] < previous["open"]
+        and bullish_candle
+        and last["open"] <= previous["close"]
+        and last["close"] >= previous["open"]
+    ):
+        pattern = "ENVOLVENTE ALCISTA"
+
+    # Envolvente bajista
+    elif (
+        previous["close"] > previous["open"]
+        and bearish_candle
+        and last["open"] >= previous["close"]
+        and last["close"] <= previous["open"]
+    ):
+        pattern = "ENVOLVENTE BAJISTA"
+
+    # Martillo
+    elif (
+        lower_wick >= body * 2
+        and upper_wick <= max(body, 0.00000001)
+        and body / candle_range <= 0.40
+    ):
+        pattern = "POSIBLE MARTILLO"
+
+    # Estrella fugaz
+    elif (
+        upper_wick >= body * 2
+        and lower_wick <= max(body, 0.00000001)
+        and body / candle_range <= 0.40
+    ):
+        pattern = "POSIBLE ESTRELLA FUGAZ"
+
+    # Doji
+    elif body / candle_range <= 0.10:
+        pattern = "DOJI"
+
+    # --------------------------------------
+    # TENDENCIA DE TRES VELAS
+    # --------------------------------------
+
+    if len(valid_candles) >= 3:
+
+        a, b, c = valid_candles[-3:]
+
+        if (
+            a["close"] > a["open"]
+            and b["close"] > b["open"]
+            and c["close"] > c["open"]
+            and c["close"] > b["close"] > a["close"]
+        ):
+            pattern = "TRES VELAS ALCISTAS"
+
+        elif (
+            a["close"] < a["open"]
+            and b["close"] < b["open"]
+            and c["close"] < c["open"]
+            and c["close"] < b["close"] < a["close"]
+        ):
+            pattern = "TRES VELAS BAJISTAS"
+
+    # --------------------------------------
+    # CÁLCULO DE FUERZA ALCISTA Y BAJISTA
+    # --------------------------------------
 
     score = 0.0
     possible = 0.0
 
-    if len(prices) >= 2:
+    # Momentum
+    possible += 3
+
+    if momentum > 0:
+        score += 3
+    elif momentum < 0:
+        score -= 3
+
+    # EMA 9 y EMA 21
+    if ema9 is not None and ema21 is not None:
 
         possible += 3
 
-        if momentum > 0.00001:
+        if ema9 > ema21:
             score += 3
 
-        elif momentum < -0.00001:
+        elif ema9 < ema21:
             score -= 3
 
-    if len(prices) >= 6:
+    # Precio frente a EMA 9
+    if ema9 is not None:
 
         possible += 2
 
-        if prices[-1] > prices[-6]:
+        if price > ema9:
             score += 2
 
-        elif prices[-1] < prices[-6]:
+        elif price < ema9:
             score -= 2
 
-    if ema9 is not None and ema21 is not None:
-
-        possible += 2
-
-        if ema9 > ema21:
-            score += 2
-
-        elif ema9 < ema21:
-            score -= 2
-
+    # RSI
     if rsi is not None:
+
+        possible += 2
+
+        if rsi > 55:
+            score += 2
+
+        elif rsi < 45:
+            score -= 2
+
+    # Patrón de velas
+    possible += 2
+
+    if pattern in (
+        "ENVOLVENTE ALCISTA",
+        "TRES VELAS ALCISTAS"
+    ):
+        score += 2
+
+    elif pattern in (
+        "ENVOLVENTE BAJISTA",
+        "TRES VELAS BAJISTAS"
+    ):
+        score -= 2
+
+    elif pattern == "POSIBLE MARTILLO":
+        score += 1
+
+    elif pattern == "POSIBLE ESTRELLA FUGAZ":
+        score -= 1
+
+    # Dirección de la última vela
+    possible += 1
+
+    if bullish_candle:
+        score += 1
+
+    elif bearish_candle:
+        score -= 1
+
+    # Volumen comparado con las últimas velas
+    recent_volumes = [
+        c["volume"]
+        for c in valid_candles[-6:]
+    ]
+
+    average_volume = (
+        sum(recent_volumes[:-1]) / len(recent_volumes[:-1])
+        if len(recent_volumes) > 1 else 0
+    )
+
+    if average_volume > 0:
 
         possible += 1
 
-        if rsi > 55:
-            score += 1
+        if last["volume"] > average_volume:
 
-        elif rsi < 45:
-            score -= 1
+            if bullish_candle:
+                score += 1
+
+            elif bearish_candle:
+                score -= 1
+
+    # --------------------------------------
+    # PROYECCIÓN HASTA EL CIERRE
+    # --------------------------------------
+
+    remaining = max(
+        0,
+        min(900, float(seconds_to_close or 0))
+    )
+
+    remaining_minutes = remaining / 60
+
+    # Movimiento medio reciente por vela
+    if len(closes) >= 6 and closes[-6] > 0:
+
+        recent_change = (
+            (closes[-1] / closes[-6]) - 1
+        ) * 100
+
+        projected_change = (
+            recent_change
+            * (remaining_minutes / 5)
+            * 0.15
+        )
+
+    else:
+        projected_change = 0
+
+    projected_change = max(
+        -0.50,
+        min(0.50, projected_change)
+    )
+
+    predicted = float(price) * (
+        1 + projected_change / 100
+    )
+
+    # --------------------------------------
+    # INFLUENCIA DEL OBJETIVO KALSHI
+    # --------------------------------------
+
+    target_influence = "SIN OBJETIVO"
+
+    if valid_price(market_target):
+
+        difference = predicted - float(market_target)
+
+        tolerance = float(market_target) * 0.00005
+
+        possible += 2
+
+        if difference > tolerance:
+            score += 2
+            target_influence = "PROYECCIÓN SOBRE OBJETIVO"
+
+        elif difference < -tolerance:
+            score -= 2
+            target_influence = "PROYECCIÓN BAJO OBJETIVO"
+
+        else:
+            target_influence = "CERCA DEL OBJETIVO"
+
+    # --------------------------------------
+    # PORCENTAJES FINALES
+    # --------------------------------------
 
     normalized = (
         score / possible
@@ -448,45 +714,37 @@ def calculate_prediction(price, ticks, seconds_to_close):
 
     bearish = round(100 - bullish, 1)
 
-    if len(prices) < 2:
-        direction = "RECOPILANDO"
-    elif normalized > 0.03:
+    # --------------------------------------
+    # DIRECCIÓN
+    # --------------------------------------
+
+    if normalized > 0.08:
         direction = "ALCISTA"
-    elif normalized < -0.03:
+
+    elif normalized < -0.08:
         direction = "BAJISTA"
+
     else:
         direction = "INDECISO"
 
-    remaining = max(
-        0,
-        min(900, seconds_to_close)
-    )
-
-    rate_per_second = momentum / elapsed
-
-    projected_change = (
-        rate_per_second * remaining * 0.12
-    )
-
-    projected_change = max(
-        -0.50,
-        min(0.50, projected_change)
-    )
-
-    predicted = price * (
-        1 + projected_change / 100
-    )
+    # --------------------------------------
+    # RESULTADO
+    # --------------------------------------
 
     return {
         "direction": direction,
         "predicted_price": round(predicted, 2),
         "bullish_score": bullish,
         "bearish_score": bearish,
-        "technical_strength": round(abs(normalized) * 100),
+        "technical_strength": round(
+            abs(normalized) * 100
+        ),
         "momentum_pct": round(momentum, 5),
         "ema9": round(ema9, 2) if ema9 is not None else None,
         "ema21": round(ema21, 2) if ema21 is not None else None,
-        "rsi": round(rsi, 2) if rsi is not None else None
+        "rsi": round(rsi, 2) if rsi is not None else None,
+        "pattern": pattern,
+        "target_influence": target_influence
     }
 
 
