@@ -441,10 +441,6 @@ def calculate_prediction(price, ticks, seconds_to_close):
         if possible > 0 else 0
     )
 
-    # PORCENTAJES SUAVIZADOS:
-    # Evita que una señal técnica aislada
-    # produzca automáticamente 100% / 0%.
-
     bullish = max(
         20,
         min(80, round(50 + normalized * 30, 1))
@@ -453,19 +449,12 @@ def calculate_prediction(price, ticks, seconds_to_close):
     bearish = round(100 - bullish, 1)
 
     if len(prices) < 2:
-
         direction = "RECOPILANDO"
-
     elif normalized > 0.03:
-
         direction = "ALCISTA"
-
     elif normalized < -0.03:
-
         direction = "BAJISTA"
-
     else:
-
         direction = "INDECISO"
 
     remaining = max(
@@ -506,51 +495,79 @@ def calculate_prediction(price, ticks, seconds_to_close):
 # ==========================================
 
 def load_coinbase_history():
-
+    """
+    Descarga continuamente las últimas 300 velas Coinbase de 1 minuto.
+    Si falla, reintenta; al actualizar conserva los ticks WebSocket
+    de la vela actual para no borrar datos recientes.
+    """
     global coinbase_error
 
-    try:
-
-        response = session.get(
-            f"{COINBASE_REST}/products/{PRODUCT}/candles",
-            params={"granularity": 60},
-            timeout=15
-        )
-
-        response.raise_for_status()
-
-        rows = []
-
-        for item in response.json():
-
-            if len(item) < 6:
-                continue
-
-            rows.append({
-                "time": int(item[0]),
-                "low": float(item[1]),
-                "high": float(item[2]),
-                "open": float(item[3]),
-                "close": float(item[4]),
-                "volume": float(item[5])
-            })
-
-        rows.sort(key=lambda x: x["time"])
-
-        with lock:
-
-            coinbase_candles.clear()
-
-            coinbase_candles.extend(
-                rows[-MAX_CANDLES:]
+    while True:
+        try:
+            response = session.get(
+                f"{COINBASE_REST}/products/{PRODUCT}/candles",
+                params={"granularity": 60},
+                timeout=15
             )
+            response.raise_for_status()
+            payload = response.json()
 
-            coinbase_error = ""
+            if not isinstance(payload, list) or not payload:
+                raise ValueError("Coinbase no devolvió historial de velas")
 
-    except Exception as exc:
+            history = {}
 
-        with lock:
-            coinbase_error = str(exc)
+            for item in payload:
+                if not isinstance(item, list) or len(item) < 6:
+                    continue
+
+                try:
+                    timestamp = int(item[0])
+                    low = float(item[1])
+                    high = float(item[2])
+                    open_price = float(item[3])
+                    close = float(item[4])
+                    volume = float(item[5])
+                except (TypeError, ValueError, OverflowError):
+                    continue
+
+                values = (low, high, open_price, close, volume)
+                if not all(math.isfinite(value) for value in values):
+                    continue
+                if min(low, high, open_price, close) <= 0 or high < low:
+                    continue
+
+                history[timestamp] = {
+                    "time": timestamp,
+                    "low": low,
+                    "high": high,
+                    "open": open_price,
+                    "close": close,
+                    "volume": volume
+                }
+
+            if not history:
+                raise ValueError("Coinbase no devolvió velas válidas")
+
+            with lock:
+                for candle in coinbase_candles:
+                    history[int(candle["time"])] = dict(candle)
+
+                ordered = sorted(
+                    history.values(),
+                    key=lambda candle: int(candle["time"])
+                )
+
+                coinbase_candles.clear()
+                coinbase_candles.extend(ordered[-MAX_CANDLES:])
+                coinbase_error = ""
+
+            time.sleep(60)
+
+        except Exception as exc:
+            with lock:
+                coinbase_error = str(exc)
+            time.sleep(15)
 
 
 # ==========================================
@@ -640,31 +657,19 @@ def coinbase_worker():
             coinbase_status(False, exc)
 
         time.sleep(5)
-
-
-# ==========================================
-# BUSCAR VALOR BRTI EN MENSAJES KALSHI
-# ==========================================
-
-def find_brti_value(data):
+        def find_brti_value(data):
 
     if isinstance(data, str):
-
         try:
             data = json.loads(data)
-
         except (ValueError, TypeError):
             return None
 
     if isinstance(data, list):
-
         for item in data:
-
             found = find_brti_value(item)
-
             if found is not None:
                 return found
-
         return None
 
     if not isinstance(data, dict):
@@ -681,10 +686,8 @@ def find_brti_value(data):
         raw = data.get("data")
 
         if isinstance(raw, str):
-
             try:
                 raw = json.loads(raw)
-
             except (ValueError, TypeError):
                 raw = None
 
@@ -700,7 +703,6 @@ def find_brti_value(data):
             )
 
             if valid_price(value):
-
                 return value, timestamp
 
         average = data.get("avg_60s_data")
@@ -710,11 +712,7 @@ def find_brti_value(data):
             value = average.get("value")
 
             if valid_price(value):
-
-                return (
-                    value,
-                    data.get("received_at")
-                )
+                return value, data.get("received_at")
 
         value = data.get("value")
 
@@ -741,7 +739,9 @@ def find_brti_value(data):
                 return found
 
     return None
-    # ==========================================
+
+
+# ==========================================
 # KALSHI WEBSOCKET
 # ==========================================
 
@@ -759,7 +759,6 @@ def kalshi_open(ws):
     }))
 
     with lock:
-
         kalshi_connected = True
         kalshi_error = ""
 
@@ -1037,7 +1036,6 @@ def get_data():
             dict(c) for c in brti_candles
         ]
 
-        # HISTORIAL REAL DE COINBASE
         coin_candles = [
             dict(c) for c in coinbase_candles
         ]
@@ -1124,8 +1122,6 @@ def get_data():
         "price_difference": difference,
 
         "brti_candles": candles,
-
-        # LA GRÁFICA RECIBE LAS 300 VELAS DE COINBASE
         "coinbase_candles": coin_candles,
 
         "kalshi_market_target": market_target,
@@ -1460,12 +1456,165 @@ button:disabled{
 
 </style>
 </head>
+.red{
+    color:#ff536b;
+}
+
+.yellow{
+    color:#f4c95d;
+}
+
+.signal{
+    font-size:27px;
+    font-weight:900;
+    margin:12px 0;
+}
+
+.bar{
+    height:13px;
+    display:flex;
+    border-radius:20px;
+    overflow:hidden;
+    background:#29344a;
+    margin:12px 0 8px;
+}
+
+.bull{
+    background:#00d995;
+    width:50%;
+}
+
+.bear{
+    background:#ff5269;
+    width:50%;
+}
+
+.row{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    gap:8px;
+}
+
+.section-title{
+    color:#a1afca;
+    font-size:11px;
+    font-weight:800;
+    margin-bottom:12px;
+}
+
+.metrics{
+    display:grid;
+    grid-template-columns:repeat(3,1fr);
+    gap:8px;
+}
+
+.metric{
+    background:#0b1220;
+    border:1px solid #202d43;
+    padding:10px 5px;
+    border-radius:10px;
+    text-align:center;
+    min-width:0;
+}
+
+.metric-name{
+    font-size:9px;
+    color:#8292af;
+}
+
+.metric-value{
+    font-size:13px;
+    font-weight:800;
+    margin-top:7px;
+    overflow-wrap:anywhere;
+}
+
+.chart-wrap{
+    width:100%;
+    height:300px;
+    position:relative;
+}
+
+canvas{
+    display:block;
+    width:100%;
+    height:100%;
+    touch-action:none;
+}
+
+.chart-legend{
+    display:flex;
+    gap:13px;
+    flex-wrap:wrap;
+    margin:8px 0;
+    font-size:10px;
+    color:#9aa9c4;
+}
+
+.legend-dot{
+    display:inline-block;
+    width:8px;
+    height:8px;
+    border-radius:50%;
+    margin-right:4px;
+}
+
+button{
+    border:1px solid #35476b;
+    background:#182640;
+    color:white;
+    border-radius:9px;
+    padding:10px 12px;
+    font-size:10px;
+    font-weight:800;
+}
+
+button:active{
+    opacity:.7;
+}
+
+button:disabled{
+    opacity:.5;
+}
+
+.footer{
+    text-align:center;
+    color:#66758f;
+    font-size:9px;
+    padding:12px 0 20px;
+}
+
+@media(max-width:380px){
+
+    body{
+        padding:8px;
+    }
+
+    .card{
+        padding:11px;
+    }
+
+    .logo{
+        font-size:19px;
+    }
+
+    .chart-wrap{
+        height:250px;
+    }
+
+    .metrics{
+        gap:5px;
+    }
+
+}
+
+</style>
+</head>
 
 <body>
 
 <main>
-
-<!-- ENCABEZADO -->
 
 <div class="header">
 
@@ -1490,8 +1639,6 @@ button:disabled{
 </div>
 
 
-<!-- PRECIOS -->
-
 <div class="grid">
 
     <section class="card">
@@ -1514,7 +1661,7 @@ button:disabled{
     <section class="card">
 
         <div class="label">
-            OBJETIVO KALSHI · 15 MIN
+            PREDICCIÓN · CIERRE 15 MIN
         </div>
 
         <div class="price predicted" id="predictedPrice">
@@ -1529,8 +1676,6 @@ button:disabled{
 
 </div>
 
-
-<!-- DIRECCIÓN -->
 
 <section class="card">
 
@@ -1583,8 +1728,6 @@ button:disabled{
 
 </section>
 
-
-<!-- GRÁFICA -->
 
 <section class="card">
 
@@ -1655,39 +1798,63 @@ button:disabled{
     </div>
 
 </section>
+
+
+<!-- CONTINÚA LA GRÁFICA Y LOS INDICADORES -->
+
+<section class="card">
+
+    <div class="section-title">
+        INDICADORES TÉCNICOS
+    </div>
+
+    <div class="metrics">
+
         <div class="metric">
 
-            <div class="metric-name">
-                MOMENTUM
-            </div>
+            <div class="metric-name">EMA 9</div>
 
-            <div class="metric-value" id="momentum">
-                --
-            </div>
+            <div class="metric-value" id="ema9">--</div>
 
         </div>
 
         <div class="metric">
 
-            <div class="metric-name">
-                PROMEDIO LOCAL 60S
-            </div>
+            <div class="metric-name">EMA 21</div>
 
-            <div class="metric-value" id="averagePrice">
-                --
-            </div>
+            <div class="metric-value" id="ema21">--</div>
 
         </div>
 
         <div class="metric">
 
-            <div class="metric-name">
-                MUESTRAS BRTI
-            </div>
+            <div class="metric-name">RSI 14</div>
 
-            <div class="metric-value" id="brtiSamples">
-                0
-            </div>
+            <div class="metric-value" id="rsi">--</div>
+
+        </div>
+
+        <div class="metric">
+
+            <div class="metric-name">MOMENTUM</div>
+
+            <div class="metric-value" id="momentum">--</div>
+
+        </div>
+
+        <div class="metric">
+
+            <div class="metric-name">PROMEDIO LOCAL 60S</div>
+
+            <div class="metric-value" id="averagePrice">--</div>
+
+        </div>
+
+        <div class="metric">
+
+            <div class="metric-name">MUESTRAS BRTI</div>
+
+            <div class="metric-value" id="brtiSamples">0</div>
 
         </div>
 
@@ -1699,8 +1866,6 @@ button:disabled{
 
 </section>
 
-
-<!-- CIERRE Y CONEXIONES -->
 
 <section class="card">
 
@@ -1742,6 +1907,7 @@ button:disabled{
 <div class="footer">
     BTC RADAR · DATOS EN TIEMPO REAL · MODO LECTURA
 </div>
+
 </main>
 
 <script>
@@ -1761,10 +1927,6 @@ let initialZoom = 1;
 
 let busy = false;
 
-
-// ==========================================
-// FORMATO DE PRECIOS
-// ==========================================
 
 function money(value){
 
@@ -1797,10 +1959,6 @@ function clock(seconds){
 }
 
 
-// ==========================================
-// EMA PARA LA GRÁFICA
-// ==========================================
-
 function emaSeries(values, period){
 
     if(!values.length) return [];
@@ -1823,10 +1981,6 @@ function emaSeries(values, period){
     return output;
 }
 
-
-// ==========================================
-// DIBUJAR GRÁFICA COINBASE
-// ==========================================
 
 function drawChart(data){
 
@@ -1903,9 +2057,6 @@ function drawChart(data){
         )
     );
 
-    // El desplazamiento conserva decimales.
-    // No se redondea durante el movimiento táctil.
-
     function candleX(index){
 
         const distanceFromLast = lastIndex - index;
@@ -1966,8 +2117,7 @@ function drawChart(data){
         }
 
     });
-
-    let min = Math.min(...values);
+        let min = Math.min(...values);
     let max = Math.max(...values);
 
     if(!Number.isFinite(min) || !Number.isFinite(max)){
@@ -1996,7 +2146,7 @@ function drawChart(data){
 
     ctx.font="10px Arial";
     ctx.textAlign="left";
-        ctx.strokeStyle="#263247";
+    ctx.strokeStyle="#263247";
     ctx.lineWidth=1;
 
     for(let i=0;i<=4;i++){
@@ -2052,14 +2202,10 @@ function drawChart(data){
         ctx.fillStyle=color;
         ctx.lineWidth=1.5;
 
-        // Mecha
-
         ctx.beginPath();
         ctx.moveTo(x,y(high));
         ctx.lineTo(x,y(low));
         ctx.stroke();
-
-        // Cuerpo
 
         const bodyTop = Math.min(
             y(open),
@@ -2238,8 +2384,6 @@ canvas.addEventListener(
         );
 
 
-        // ZOOM CON DOS DEDOS
-
         if(pointers.size===2){
 
             const p=[...pointers.values()];
@@ -2264,8 +2408,6 @@ canvas.addEventListener(
 
         }
 
-        // DESPLAZAMIENTO CON UN DEDO
-
         else if(pointers.size===1){
 
             const count=Math.max(
@@ -2282,9 +2424,6 @@ canvas.addEventListener(
             );
 
             const step=plotWidth/count;
-
-            // El dedo hacia la derecha permite
-            // desplazarse hacia velas anteriores.
 
             chartOffset += deltaX/Math.max(step,1);
 
@@ -2309,9 +2448,7 @@ function releasePointer(event){
     pointers.delete(event.pointerId);
 
     if(pointers.size<2){
-
         initialDistance=0;
-
     }
 
     if(pointers.size===1){
@@ -2347,18 +2484,19 @@ canvas.addEventListener(
 
 function updateRadar(d){
 
-    $("brtiPrice").textContent=
+    $("brtiPrice").textContent =
         money(d.brti_price);
 
-    $("predictedPrice").textContent=
-        money(d.kalshi_market_target);
+    $("predictedPrice").textContent =
+        money(d.predicted_price);
 
-    $("predictionLabel").textContent=
+    $("predictionLabel").textContent =
         d.kalshi_market_ticker
         ? "Contrato: " + d.kalshi_market_ticker
+          + " · Objetivo: " + money(d.kalshi_market_target)
         : (
             d.kalshi_market_error
-            || "Esperando objetivo de Kalshi"
+            || "Esperando contrato de Kalshi"
         );
 
     $("brtiAge").textContent=
@@ -2366,8 +2504,6 @@ function updateRadar(d){
         ? "Esperando índice"
         : "Dato actualizado hace "+d.brti_age+" s";
 
-
-    // DIRECCIÓN
 
     const direction=d.direction || "RECOPILANDO";
 
@@ -2380,8 +2516,6 @@ function updateRadar(d){
             "yellow"
         );
 
-
-    // PORCENTAJES ALCISTA Y BAJISTA
 
     const bullish=Math.max(
         20,
@@ -2403,8 +2537,6 @@ function updateRadar(d){
         bearish+"%";
 
 
-    // FUERZA
-
     $("strength").textContent=
         Number(d.technical_strength ?? 0)+"%";
 
@@ -2415,8 +2547,6 @@ function updateRadar(d){
             : "Lectura técnica en vivo"
         );
 
-
-    // INDICADORES
 
     $("ema9").textContent=
         money(d.ema9);
@@ -2435,8 +2565,6 @@ function updateRadar(d){
         : Number(d.momentum_pct).toFixed(5)+"%";
 
 
-    // PROMEDIO LOCAL
-
     $("averagePrice").textContent=
         money(d.brti_average_60s);
 
@@ -2448,8 +2576,6 @@ function updateRadar(d){
     $("brtiSamples").textContent=
         d.brti_samples || 0;
 
-
-    // CONEXIONES
 
     $("brtiDot").className=
         d.brti_live ? "dot live":"dot";
@@ -2488,13 +2614,9 @@ function updateRadar(d){
         );
 
 
-    // CUENTA REGRESIVA
-
     $("countdown").textContent=
         clock(Number(d.countdown || 0));
 
-
-    // ESTADO GENERAL
 
     $("errors").textContent=
         [
@@ -2504,8 +2626,6 @@ function updateRadar(d){
         .filter(Boolean)
         .join(" | ");
 
-
-    // GRÁFICA EXCLUSIVAMENTE COINBASE
 
     drawChart(d.coinbase_candles || []);
 
