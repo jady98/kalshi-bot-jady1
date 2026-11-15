@@ -1332,9 +1332,11 @@ def get_data():
     )
 
     indicators = calculate_prediction(
-        bp,
-        ticks,
-        countdown
+        cp,
+        [],
+        countdown,
+        market_target,
+        coin_candles
     )
 
     average, average_count = calculate_brti_average(
