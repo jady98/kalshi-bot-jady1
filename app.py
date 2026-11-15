@@ -2332,13 +2332,20 @@ function updateRadar(d){
     $("predictedPrice").textContent =
         money(d.predicted_price);
 
-    $("predictionLabel").textContent =
+        $("predictionLabel").textContent =
+        "Estimación del cierre del bloque de 15 minutos";
+
+    $("kalshiTarget").textContent =
+        d.kalshi_market_target == null
+        ? "--"
+        : money(d.kalshi_market_target);
+
+    $("kalshiTargetLabel").textContent =
         d.kalshi_market_ticker
-        ? "Contrato: " + d.kalshi_market_ticker
-          + " · Objetivo: " + money(d.kalshi_market_target)
+        ? "Contrato activo: " + d.kalshi_market_ticker
         : (
             d.kalshi_market_error
-            || "Esperando contrato de Kalshi"
+            || "Esperando contrato activo de Kalshi"
         );
 
     $("brtiAge").textContent=
