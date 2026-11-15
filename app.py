@@ -657,7 +657,9 @@ def coinbase_worker():
             coinbase_status(False, exc)
 
         time.sleep(5)
-        def find_brti_value(data):
+    
+def find_brti_value(data):
+    """Extrae el valor BRTI de los mensajes de Kalshi."""
 
     if isinstance(data, str):
         try:
@@ -667,78 +669,72 @@ def coinbase_worker():
 
     if isinstance(data, list):
         for item in data:
-            found = find_brti_value(item)
-            if found is not None:
-                return found
+            result = find_brti_value(item)
+            if result is not None:
+                return result
         return None
 
     if not isinstance(data, dict):
         return None
 
-    index_id = (
+    index = (
         data.get("index_id")
         or data.get("ticker")
         or data.get("id")
     )
 
-    if index_id == INDEX_ID:
+    timestamp = (
+        data.get("ts_ms")
+        or data.get("time")
+        or data.get("timestamp")
+        or data.get("received_at")
+    )
 
-        raw = data.get("data")
+    # Comprobar el índice BRTI
+    if index == INDEX_ID:
 
-        if isinstance(raw, str):
+        # Valor directo
+        value = data.get("value")
+
+        if value is not None:
             try:
-                raw = json.loads(raw)
+                return float(value), timestamp
             except (ValueError, TypeError):
-                raw = None
+                pass
 
-        if isinstance(raw, dict):
+        # Datos anidados
+        for key in ("data", "payload", "msg"):
+            nested = data.get(key)
 
-            value = raw.get("value")
+            if nested is not None:
+                result = find_brti_value(nested)
+                if result is not None:
+                    return result
 
-            timestamp = (
-                raw.get("time")
-                or raw.get("ts_ms")
-                or raw.get("timestamp")
-                or data.get("received_at")
-            )
-
-            if valid_price(value):
-                return value, timestamp
-
+        # Promedio de 60 segundos
         average = data.get("avg_60s_data")
 
         if isinstance(average, dict):
-
             value = average.get("value")
 
-            if valid_price(value):
-                return value, data.get("received_at")
+            if value is not None:
+                try:
+                    return float(value), timestamp
+                except (ValueError, TypeError):
+                    pass
 
-        value = data.get("value")
-
-        if valid_price(value):
-
-            timestamp = (
-                data.get("time")
-                or data.get("ts_ms")
-                or data.get("timestamp")
-                or data.get("received_at")
-            )
-
-            return value, timestamp
-
-    for key in ("msg", "payload", "data"):
-
+    # Buscar dentro de otros objetos
+    for key in ("msg", "data", "payload"):
         nested = data.get(key)
 
         if isinstance(nested, (dict, list, str)):
+            result = find_brti_value(nested)
 
-            found = find_brti_value(nested)
-
-            if found is not None:
-                return found
+            if result is not None:
+                return result
 
     return None
+    
 
 
 # ==========================================
