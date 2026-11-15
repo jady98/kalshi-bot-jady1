@@ -482,7 +482,9 @@ def calculate_prediction(price, ticks, seconds_to_close):
         "ema21": round(ema21, 2) if ema21 is not None else None,
         "rsi": round(rsi, 2) if rsi is not None else None
     }
-    # ==========================================
+
+
+# ==========================================
 # HISTORIAL COINBASE
 # ==========================================
 
@@ -722,9 +724,7 @@ def find_brti_value(data):
                 return found
 
     return None
-
-
-# ==========================================
+    # ==========================================
 # KALSHI WEBSOCKET
 # ==========================================
 
@@ -1119,7 +1119,10 @@ def get_data():
 
         **indicators
     }
-    # RUTAS FLASK
+
+
+# ==========================================
+# RUTAS FLASK
 # ==========================================
 
 @app.route("/")
@@ -1297,7 +1300,6 @@ main{
     background:#29344a;
     margin:12px 0 8px;
 }
-
 .bull{
     background:#00d995;
     width:50%;
@@ -1841,20 +1843,17 @@ function emaSeries(values, period){
 
     return output;
 }
-
-
 // ==========================================
-// DIBUJAR GRÁFICA
+// DIBUJAR GRÁFICA BRTI
 // ==========================================
 
 function drawChart(data){
 
-    if(data){
+    if(Array.isArray(data)){
         candles = data;
     }
 
     const canvas = $("chart");
-
     const rect = canvas.getBoundingClientRect();
 
     if(!rect.width || !rect.height) return;
@@ -1889,101 +1888,139 @@ function drawChart(data){
     }
 
     const count = Math.max(
-    10,
-    Math.min(
-        100,
-        Math.floor(65 / chartScale)
-    )
-);
+        10,
+        Math.min(
+            100,
+            Math.floor(65 / chartScale)
+        )
+    );
 
-// La última vela queda al 72% del ancho.
-const center = Math.floor(count * 0.72);
+    const center = Math.floor(count * 0.72);
 
-chartOffset = Math.max(
-    0,
-    Math.min(
-        Math.floor(chartOffset),
-        candles.length - 1
-    )
-);
+    const left = 12;
+    const right = W - 66;
+    const top = 20;
+    const bottom = H - 20;
 
-const end = candles.length - chartOffset;
+    const plotHeight = bottom - top;
+    const plotWidth = right - left;
 
-// Evita dibujar velas fuera del área visible.
-const visibleCount = center + 1;
+    const step = plotWidth / count;
 
-const start = Math.max(
-    0,
-    end - visibleCount
-);
+    const candleWidth = Math.max(
+        3,
+        Math.min(14, step * 0.65)
+    );
 
-const visible = candles.slice(start, end);
+    const lastIndex = candles.length - 1;
 
-if (!visible.length) return;
+    chartOffset = Math.max(
+        0,
+        Math.min(
+            chartOffset,
+            Math.max(0, candles.length - 1)
+        )
+    );
 
-const closes = candles.map(
-    c => Number(c.close)
-);
+    // El desplazamiento conserva decimales.
+    // No se redondea durante el movimiento táctil.
 
-const e9 = emaSeries(
-    closes, 9
-).slice(start, end);
+    function candleX(index){
 
-const e21 = emaSeries(
-    closes, 21
-).slice(start, end);
+        const distanceFromLast = lastIndex - index;
 
-const values = visible.flatMap(c => [
-    Number(c.high),
-    Number(c.low)
-]).concat(e9, e21);
+        return left + (
+            center
+            - distanceFromLast
+            + 0.5
+            + chartOffset
+        ) * step;
+    }
 
-let min = Math.min(...values);
-let max = Math.max(...values);
+    const closes = candles.map(
+        c => Number(c.close)
+    );
 
-const padding = Math.max(
-    (max - min) * 0.13,
-    2
-);
+    const e9 = emaSeries(closes,9);
+    const e21 = emaSeries(closes,21);
 
-min -= padding;
-max += padding;
+    const visible = [];
 
-const left = 75;
-const right = W - 9;
-const top = 20;
-const bottom = H - 20;
+    for(let i=0;i<candles.length;i++){
 
-const plotHeight = bottom - top;
-const plotWidth = right - left;
+        const x = candleX(i);
 
-const y = price =>
-    bottom -
-    ((price - min) / (max - min)) * plotHeight;
+        if(
+            x >= left - candleWidth
+            && x <= right + candleWidth
+        ){
 
-const step = plotWidth / count;
+            visible.push({
+                index:i,
+                candle:candles[i],
+                x:x
+            });
+        }
+    }
 
-const candleWidth = Math.max(
-    3,
-    Math.min(14, step * 0.65)
-);
+    if(!visible.length) return;
 
-function candleX(i) {
-    return left + (
-        center - (visible.length - 1 - i) + 0.5
-    ) * step;
-}
+    const values = [];
+
+    visible.forEach(item=>{
+
+        const c = item.candle;
+
+        values.push(
+            Number(c.high),
+            Number(c.low)
+        );
+
+        if(e9[item.index] != null){
+            values.push(e9[item.index]);
+        }
+
+        if(e21[item.index] != null){
+            values.push(e21[item.index]);
+        }
+
+    });
+
+    let min = Math.min(...values);
+    let max = Math.max(...values);
+
+    if(!Number.isFinite(min) || !Number.isFinite(max)){
+        return;
+    }
+
+    if(max === min){
+        max += 1;
+        min -= 1;
+    }
+
+    const padding = Math.max(
+        (max-min)*0.13,
+        2
+    );
+
+    min -= padding;
+    max += padding;
+
+    const y = price =>
+        bottom -
+        ((price-min)/(max-min))*plotHeight;
 
 
-    // CUADRÍCULA
+    // CUADRÍCULA Y PRECIOS
 
     ctx.font="10px Arial";
+    ctx.textAlign="left";
     ctx.strokeStyle="#263247";
     ctx.lineWidth=1;
 
     for(let i=0;i<=4;i++){
 
-        const yy = top+plotHeight*i/4;
+        const yy = top + plotHeight*i/4;
 
         ctx.beginPath();
         ctx.moveTo(left,yy);
@@ -1997,24 +2034,34 @@ function candleX(i) {
 
         ctx.fillText(
             price.toFixed(0),
-            right+2,
+            right+7,
             yy+3
         );
     }
 
 
-    // VELAS
+    // VELAS BRTI
 
-    visible.forEach((c,i)=>{
+    visible.forEach(item=>{
 
-        const x = candleX(i);
+        const c = item.candle;
+        const x = item.x;
 
         const open = Number(c.open);
         const close = Number(c.close);
         const high = Number(c.high);
         const low = Number(c.low);
 
-        const up = close>=open;
+        if(
+            !Number.isFinite(open)
+            || !Number.isFinite(close)
+            || !Number.isFinite(high)
+            || !Number.isFinite(low)
+        ){
+            return;
+        }
+
+        const up = close >= open;
 
         const color = up
             ? "#00df9a"
@@ -2024,12 +2071,14 @@ function candleX(i) {
         ctx.fillStyle=color;
         ctx.lineWidth=1.5;
 
-        ctx.beginPath();
+        // Mecha
 
+        ctx.beginPath();
         ctx.moveTo(x,y(high));
         ctx.lineTo(x,y(low));
-
         ctx.stroke();
+
+        // Cuerpo
 
         const bodyTop = Math.min(
             y(open),
@@ -2055,56 +2104,67 @@ function candleX(i) {
 
     function drawLine(series,color){
 
-        if(series.length<2) return;
+        if(!series.length) return;
 
         ctx.beginPath();
 
         ctx.strokeStyle=color;
-        ctx.lineWidth=1.7;
+        ctx.lineWidth=1.8;
+        ctx.lineJoin="round";
+        ctx.lineCap="round";
 
-        series.forEach((value,i)=>{
+        let startedLine = false;
 
-            const x=candleX(i);
-            const yy=y(value);
+        visible.forEach(item=>{
 
-            if(i===0){
+            const value = series[item.index];
+
+            if(!Number.isFinite(value)) return;
+
+            const x = item.x;
+            const yy = y(value);
+
+            if(!startedLine){
+
                 ctx.moveTo(x,yy);
+                startedLine = true;
+
             }else{
+
                 ctx.lineTo(x,yy);
+
             }
 
         });
 
-        ctx.stroke();
+        if(startedLine){
+            ctx.stroke();
+        }
     }
 
     drawLine(e9,"#b98aff");
     drawLine(e21,"#45a9ff");
 
 
-    // PRECIO ACTUAL
+    // PRECIO ACTUAL BRTI
 
-    if(chartOffset===0){
+    if(chartOffset < 0.05){
 
-        const last = candles[candles.length-1];
-
+        const last = candles[lastIndex];
         const lastPrice = Number(last.close);
-
         const lastY = y(lastPrice);
 
         ctx.setLineDash([5,4]);
 
         ctx.strokeStyle="#f4c95d";
+        ctx.lineWidth=1;
 
         ctx.beginPath();
-
         ctx.moveTo(left,lastY);
         ctx.lineTo(right,lastY);
-
         ctx.stroke();
 
         ctx.setLineDash([]);
-
     }
 
 }
@@ -2116,8 +2176,8 @@ function candleX(i) {
 
 function goLive(){
 
-    chartOffset=0;
-    chartScale=1;
+    chartOffset = 0;
+    chartScale = 1;
 
     drawChart();
 }
@@ -2135,11 +2195,14 @@ function pointerDistance(a,b){
     );
 }
 
-const canvas=$("chart");
+const canvas = $("chart");
+
 
 canvas.addEventListener(
     "pointerdown",
     event=>{
+
+        event.preventDefault();
 
         canvas.setPointerCapture(event.pointerId);
 
@@ -2179,6 +2242,12 @@ canvas.addEventListener(
 
         if(!pointers.has(event.pointerId)) return;
 
+        event.preventDefault();
+
+        const oldPoint = pointers.get(event.pointerId);
+
+        const deltaX = event.clientX - oldPoint.x;
+
         pointers.set(
             event.pointerId,
             {
@@ -2186,6 +2255,9 @@ canvas.addEventListener(
                 y:event.clientY
             }
         );
+
+
+        // ZOOM CON DOS DEDOS
 
         if(pointers.size===2){
 
@@ -2198,7 +2270,7 @@ canvas.addEventListener(
             if(initialDistance>0){
 
                 chartScale=Math.max(
-                    .5,
+                    0.5,
                     Math.min(
                         8,
                         initialZoom*distance/initialDistance
@@ -2209,11 +2281,11 @@ canvas.addEventListener(
 
             }
 
-        }else if(pointers.size===1){
+        }
 
-            const delta=event.clientX-previousX;
+        // DESPLAZAMIENTO CON UN DEDO
 
-            previousX=event.clientX;
+        else if(pointers.size===1){
 
             const count=Math.max(
                 10,
@@ -2223,15 +2295,24 @@ canvas.addEventListener(
                 )
             );
 
-            const step=canvas.clientWidth/count;
+            const plotWidth = Math.max(
+                canvas.clientWidth-78,
+                1
+            );
 
-            chartOffset+=-delta/Math.max(step,1);
+            const step=plotWidth/count;
+
+            // Se conserva el movimiento decimal.
+            // El dedo hacia la derecha permite
+            // desplazarse hacia velas anteriores.
+
+            chartOffset += deltaX/Math.max(step,1);
 
             chartOffset=Math.max(
                 0,
                 Math.min(
                     chartOffset,
-                    candles.length-1
+                    Math.max(0,candles.length-1)
                 )
             );
 
@@ -2248,10 +2329,21 @@ function releasePointer(event){
     pointers.delete(event.pointerId);
 
     if(pointers.size<2){
+
         initialDistance=0;
+
+    }
+
+    if(pointers.size===1){
+
+        const remaining=[...pointers.values()][0];
+
+        previousX=remaining.x;
+
     }
 
 }
+
 
 canvas.addEventListener(
     "pointerup",
@@ -2260,6 +2352,11 @@ canvas.addEventListener(
 
 canvas.addEventListener(
     "pointercancel",
+    releasePointer
+);
+
+canvas.addEventListener(
+    "lostpointercapture",
     releasePointer
 );
 
