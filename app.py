@@ -137,38 +137,61 @@ def kalshi_headers():
 # VELAS
 # ==========================================
 
+
 def update_candle(target, price, timestamp=None, volume=0):
+    """Construye velas OHLC de 1 minuto y ordena ticks atrasados."""
 
-    if timestamp is None:
-        timestamp = time.time()
-
+    timestamp = normalize_timestamp(timestamp)
     price = float(price)
 
     if not valid_price(price):
         return
 
     bucket = int(timestamp // 60) * 60
+    rows = list(target)
 
-    if target and int(target[-1]["time"]) == bucket:
+    candle = next(
+        (row for row in rows if int(row["time"]) == bucket),
+        None
+    )
 
-        candle = target[-1]
-
-        candle["high"] = max(candle["high"], price)
-        candle["low"] = min(candle["low"], price)
-        candle["close"] = price
-
-        candle["volume"] += float(volume or 0)
-
-    else:
-
-        target.append({
+    if candle is None:
+        candle = {
             "time": bucket,
             "open": price,
             "high": price,
             "low": price,
             "close": price,
-            "volume": float(volume or 0)
-        })
+            "volume": float(volume or 0),
+            "_open_ts": timestamp,
+            "_close_ts": timestamp
+        }
+        rows.append(candle)
+    else:
+        candle["high"] = max(float(candle["high"]), price)
+        candle["low"] = min(float(candle["low"]), price)
+        candle["volume"] = (
+            float(candle.get("volume", 0))
+            + float(volume or 0)
+        )
+
+        open_ts = float(candle.get("_open_ts", bucket))
+        close_ts = float(candle.get("_close_ts", bucket))
+
+        if timestamp < open_ts:
+            candle["open"] = price
+            candle["_open_ts"] = timestamp
+
+        if timestamp >= close_ts:
+            candle["close"] = price
+            candle["_close_ts"] = timestamp
+
+    rows.sort(key=lambda row: int(row["time"]))
+
+    target.clear()
+    target.extend(rows[-MAX_CANDLES:])
+    
+    
 
 
 # ==========================================
