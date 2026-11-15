@@ -1498,6 +1498,21 @@ button:disabled{
         </div>
 
     </section>
+        <section class="card" style="grid-column:1; grid-row:2;">
+
+        <div class="label">
+            PRECIO OBJETIVO · KALSHI
+        </div>
+
+        <div class="price" id="kalshiTarget">
+            --
+        </div>
+
+        <div class="small" id="kalshiTargetLabel">
+            Esperando contrato activo
+        </div>
+
+    </section>
 
 
     <section class="card">
