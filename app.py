@@ -14,7 +14,7 @@ from flask import Flask, jsonify, render_template_string
 
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
-
+import pattern_memory
 app = Flask(__name__)
 
 # ==========================================
