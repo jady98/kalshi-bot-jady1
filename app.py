@@ -1263,7 +1263,15 @@ def start_services():
             return
 
         started = True
+        
+    def init_pattern_database():
+        while not pattern_memory.init_db():
+            time.sleep(30)
 
+    threading.Thread(
+        target=init_pattern_database,
+        daemon=True
+    ).start()
     threading.Thread(
         target=load_coinbase_history,
         daemon=True
