@@ -252,6 +252,8 @@ def set_coinbase(price, timestamp=None):
             timestamp
         )
 
+    pattern_memory.record_price(price, timestamp)
+
 
 # ==========================================
 # INDICADORES
