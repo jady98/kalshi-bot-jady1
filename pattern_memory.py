@@ -310,6 +310,7 @@ def get_prediction_accuracy():
                   ON s.id = o.snapshot_id
                 WHERE o.horizon_seconds = 900
                   AND o.future_price IS NOT NULL
+                  AND s.features->>'direction_method' = 'technical_only_v1'
             """).fetchone()
 
         evaluated, correct, incorrect, no_change = row
