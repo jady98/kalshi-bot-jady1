@@ -275,7 +275,60 @@ def get_pattern_stats(pattern):
     except Exception as exc:
         _db_status = "ERROR: " + str(exc)[:180]
         return empty
+def get_prediction_accuracy():
+    empty = {
+        "predictions_evaluated": 0,
+        "correct": 0,
+        "incorrect": 0,
+        "no_change": 0,
+        "accuracy_pct": None
+    }
 
+    try:
+        with _connect() as conn:
+            row = conn.execute("""
+                SELECT
+                    COUNT(*) FILTER (
+                        WHERE s.direction IN ('ALCISTA', 'BAJISTA')
+                          AND o.result IN ('ALCISTA', 'BAJISTA')
+                    ),
+                    COUNT(*) FILTER (
+                        WHERE s.direction IN ('ALCISTA', 'BAJISTA')
+                          AND s.direction = o.result
+                    ),
+                    COUNT(*) FILTER (
+                        WHERE s.direction IN ('ALCISTA', 'BAJISTA')
+                          AND o.result IN ('ALCISTA', 'BAJISTA')
+                          AND s.direction <> o.result
+                    ),
+                    COUNT(*) FILTER (
+                        WHERE s.direction IN ('ALCISTA', 'BAJISTA')
+                          AND o.result = 'SIN CAMBIO'
+                    )
+                FROM btc_signal_outcomes AS o
+                JOIN btc_signal_snapshots AS s
+                  ON s.id = o.snapshot_id
+                WHERE o.horizon_seconds = 900
+                  AND o.future_price IS NOT NULL
+            """).fetchone()
+
+        evaluated, correct, incorrect, no_change = row
+        total = correct + incorrect
+
+        return {
+            "predictions_evaluated": evaluated,
+            "correct": correct,
+            "incorrect": incorrect,
+            "no_change": no_change,
+            "accuracy_pct": round(correct * 100 / total, 1)
+                if total else None
+        }
+
+    except Exception as exc:
+        return {
+            **empty,
+            "error": str(exc)[:180]
+        }
 
 def database_status():
     return _db_status
