@@ -1386,8 +1386,9 @@ def get_data():
             "momentum_pct": indicators.get("momentum_pct"),
             "pattern": indicators.get("pattern"),
             "features": {
-                "target_influence": indicators.get("target_influence"),
-                "technical_strength": indicators.get("technical_strength")
+    "target_influence": indicators.get("target_influence"),
+    "technical_strength": indicators.get("technical_strength"),
+    "direction_method": "technical_only_v1"
             }
         })
         
