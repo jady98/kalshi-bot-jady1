@@ -279,3 +279,40 @@ def get_pattern_stats(pattern):
 
 def database_status():
     return _db_status
+
+def get_database_counts():
+    empty = {
+        "signals_saved": 0,
+        "outcomes_resolved_15m": 0,
+        "outcomes_pending_15m": 0
+    }
+
+    try:
+        with _connect() as conn:
+            row = conn.execute("""
+                SELECT
+                    (SELECT COUNT(*)
+                     FROM btc_signal_snapshots),
+
+                    (SELECT COUNT(*)
+                     FROM btc_signal_outcomes
+                     WHERE horizon_seconds = 900
+                     AND future_price IS NOT NULL),
+
+                    (SELECT COUNT(*)
+                     FROM btc_signal_outcomes
+                     WHERE horizon_seconds = 900
+                     AND future_price IS NULL)
+            """).fetchone()
+
+        return {
+            "signals_saved": row[0],
+            "outcomes_resolved_15m": row[1],
+            "outcomes_pending_15m": row[2]
+        }
+
+    except Exception as exc:
+        return {
+            **empty,
+            "error": str(exc)[:180]
+        }
