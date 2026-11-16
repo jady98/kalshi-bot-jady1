@@ -64,7 +64,7 @@ kalshi_market_close = None
 kalshi_market_error = ""
 
 started = False
-
+last_pattern_snapshot_minute = None
 session = requests.Session()
 session.headers.update({
     "User-Agent": "BitcoinRadar/7.0"
