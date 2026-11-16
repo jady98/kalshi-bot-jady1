@@ -696,20 +696,18 @@ def calculate_prediction(
 
     target_influence = "SIN OBJETIVO"
 
-if valid_price(market_target):
+    if valid_price(market_target):
+        difference = predicted - float(market_target)
+        tolerance = float(market_target) * 0.00005
 
-    difference = predicted - float(market_target)
+        if difference > tolerance:
+            target_influence = "PROYECCIÓN SOBRE OBJETIVO"
 
-    tolerance = float(market_target) * 0.00005
+        elif difference < -tolerance:
+            target_influence = "PROYECCIÓN BAJO OBJETIVO"
 
-    if difference > tolerance:
-        target_influence = "PROYECCIÓN SOBRE OBJETIVO"
-
-    elif difference < -tolerance:
-        target_influence = "PROYECCIÓN BAJO OBJETIVO"
-
-    else:
-        target_influence = "CERCA DEL OBJETIVO"
+        else:
+            target_influence = "CERCA DEL OBJETIVO"
 
     # --------------------------------------
     # PORCENTAJES FINALES
