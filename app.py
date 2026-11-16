@@ -1498,8 +1498,8 @@ def health():
 
         "coinbase_candles": len(data["coinbase_candles"]),
 
-        "brti_samples": data["brti_samples"],
-        "database_status": pattern_memory.database_status()
+        "database_status": pattern_memory.database_status(),
+        "database_counts": pattern_memory.get_database_counts()
 
     })
 
