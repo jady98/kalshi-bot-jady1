@@ -188,7 +188,7 @@ def record_price(price, timestamp=None):
         second = int(ts)
 
         with _lock:
-            if second <= _last_tick_second:
+            if second < _last_tick_second + 5:
                 return False
             _last_tick_second = second
 
