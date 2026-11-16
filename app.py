@@ -1499,7 +1499,8 @@ def health():
         "coinbase_candles": len(data["coinbase_candles"]),
 
         "database_status": pattern_memory.database_status(),
-        "database_counts": pattern_memory.get_database_counts()
+        "database_counts": pattern_memory.get_database_counts(),
+        "prediction_accuracy": pattern_memory.get_prediction_accuracy()
 
     })
 
