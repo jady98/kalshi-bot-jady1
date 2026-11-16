@@ -4,6 +4,7 @@ import time
 import math
 import base64
 import threading
+from datetime import datetime, timezone
 from collections import deque
 
 import requests
@@ -87,15 +88,29 @@ def normalize_timestamp(value):
         return time.time()
 
     try:
-        value = float(value)
+        timestamp = float(value)
 
-        if value > 10_000_000_000:
-            value /= 1000
+        if timestamp > 10_000_000_000:
+            timestamp /= 1000
 
-        return value
+        return timestamp
 
     except (TypeError, ValueError):
-        return time.time()
+        try:
+            text = str(value).strip()
+
+            if text.endswith("Z"):
+                text = text[:-1] + "+00:00"
+
+            parsed = datetime.fromisoformat(text)
+
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+
+            return parsed.timestamp()
+
+        except (TypeError, ValueError, OverflowError):
+            return time.time()
 
 
 def kalshi_headers():
