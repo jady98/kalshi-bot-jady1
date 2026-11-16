@@ -1363,7 +1363,38 @@ def get_data():
         market_target,
         coin_candles
     )
+    global last_pattern_snapshot_minute
 
+    snapshot_minute = int(now // 60)
+    should_save_snapshot = False
+
+    if cp is not None and coinbase_live:
+        with lock:
+            if last_pattern_snapshot_minute != snapshot_minute:
+                last_pattern_snapshot_minute = snapshot_minute
+                should_save_snapshot = True
+
+    if should_save_snapshot:
+        pattern_memory.save_snapshot({
+            "signal_ts": now,
+            "price": cp,
+            "market_ticker": market_ticker,
+            "market_close_ts": market_close,
+            "direction": indicators.get("direction"),
+            "bullish_score": indicators.get("bullish_score"),
+            "bearish_score": indicators.get("bearish_score"),
+            "predicted_price": indicators.get("predicted_price"),
+            "ema9": indicators.get("ema9"),
+            "ema21": indicators.get("ema21"),
+            "rsi": indicators.get("rsi"),
+            "momentum_pct": indicators.get("momentum_pct"),
+            "pattern": indicators.get("pattern"),
+            "features": {
+                "target_influence": indicators.get("target_influence"),
+                "technical_strength": indicators.get("technical_strength")
+            }
+        })
+        
     average, average_count = calculate_brti_average(
         ticks
     )
