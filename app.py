@@ -2070,7 +2070,7 @@ function money(value){
         return "--";
     }
 
-    return "$" + Number(value).toLocaleString(
+    return Number(value).toLocaleString(
         "en-US",
         {
             minimumFractionDigits:2,
