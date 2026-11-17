@@ -66,6 +66,7 @@ market_resolution_queue = deque(maxlen=20)
 
 started = False
 last_pattern_snapshot_minute = None
+_last_brti_candle_save = 0.0
 
 # Alertas informativas: no ejecutan cierres ni órdenes.
 _alert_state = {
@@ -243,7 +244,7 @@ def update_candle(target, price, timestamp=None, volume=0):
 
 def set_brti(price, timestamp=None):
 
-    global brti_price, brti_time
+    global brti_price, brti_time, _last_brti_candle_save
 
     if not valid_price(price):
         return
@@ -252,7 +253,9 @@ def set_brti(price, timestamp=None):
     timestamp = normalize_timestamp(timestamp)
 
     completed_candle = None
+    current_snapshot = None
     bucket = int(timestamp // 60) * 60
+    monotonic_now = time.monotonic()
 
     with lock:
         brti_price = price
@@ -269,8 +272,17 @@ def set_brti(price, timestamp=None):
         if previous is not None and int(previous["time"]) == bucket - 60:
             completed_candle = previous
 
+        # Guarda también la vela en formación cada 10 segundos.
+        # Así un reinicio no borra toda la vela del minuto actual.
+        if monotonic_now - _last_brti_candle_save >= 10:
+            current_snapshot = dict(brti_candles[-1])
+            _last_brti_candle_save = monotonic_now
+
     if completed_candle is not None:
         pattern_memory.save_brti_candle(completed_candle)
+
+    if current_snapshot is not None:
+        pattern_memory.save_brti_candle(current_snapshot)
 
     pattern_memory.record_price(price, timestamp)
 
