@@ -29,6 +29,19 @@ def init_db():
     try:
         with _connect() as conn:
             conn.execute("""
+                CREATE TABLE IF NOT EXISTS brti_minute_candles (
+                    candle_time BIGINT PRIMARY KEY,
+                    open_price DOUBLE PRECISION NOT NULL,
+                    high_price DOUBLE PRECISION NOT NULL,
+                    low_price DOUBLE PRECISION NOT NULL,
+                    close_price DOUBLE PRECISION NOT NULL,
+                    volume DOUBLE PRECISION NOT NULL DEFAULT 0,
+                    open_ts DOUBLE PRECISION NOT NULL,
+                    close_ts DOUBLE PRECISION NOT NULL
+                )
+            """)
+
+            conn.execute("""
                 CREATE TABLE IF NOT EXISTS btc_signal_snapshots (
                     id BIGSERIAL PRIMARY KEY,
                     snapshot_key TEXT UNIQUE NOT NULL,
@@ -96,6 +109,72 @@ def init_db():
     except Exception as exc:
         _db_status = "ERROR: " + str(exc)[:180]
         return False
+
+
+def save_brti_candle(candle):
+    """Persiste una vela BRTI cerrada para sobrevivir a reinicios de Render."""
+    global _db_status
+    try:
+        row = {
+            "time": int(candle["time"]),
+            "open": float(candle["open"]),
+            "high": float(candle["high"]),
+            "low": float(candle["low"]),
+            "close": float(candle["close"]),
+            "volume": float(candle.get("volume", 0) or 0),
+            "_open_ts": float(candle.get("_open_ts", candle["time"])),
+            "_close_ts": float(candle.get("_close_ts", candle["time"]))
+        }
+        if row["time"] <= 0 or min(row["open"], row["high"], row["low"], row["close"]) <= 0:
+            return False
+        with _connect() as conn:
+            conn.execute("""
+                INSERT INTO brti_minute_candles
+                    (candle_time, open_price, high_price, low_price,
+                     close_price, volume, open_ts, close_ts)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (candle_time) DO UPDATE SET
+                    open_price = EXCLUDED.open_price,
+                    high_price = EXCLUDED.high_price,
+                    low_price = EXCLUDED.low_price,
+                    close_price = EXCLUDED.close_price,
+                    volume = EXCLUDED.volume,
+                    open_ts = EXCLUDED.open_ts,
+                    close_ts = EXCLUDED.close_ts
+            """, (
+                row["time"], row["open"], row["high"], row["low"],
+                row["close"], row["volume"], row["_open_ts"], row["_close_ts"]
+            ))
+        _db_status = "CONECTADA"
+        return True
+    except Exception as exc:
+        _db_status = "ERROR: " + str(exc)[:180]
+        return False
+
+
+def get_brti_candles(limit=300):
+    """Carga las últimas velas BRTI persistidas, en orden cronológico."""
+    global _db_status
+    try:
+        limit = max(1, min(int(limit), 300))
+        with _connect() as conn:
+            rows = conn.execute("""
+                SELECT candle_time, open_price, high_price, low_price,
+                       close_price, volume, open_ts, close_ts
+                FROM brti_minute_candles
+                ORDER BY candle_time DESC
+                LIMIT %s
+            """, (limit,)).fetchall()
+        candles = [{
+            "time": int(r[0]), "open": float(r[1]), "high": float(r[2]),
+            "low": float(r[3]), "close": float(r[4]), "volume": float(r[5] or 0),
+            "_open_ts": float(r[6]), "_close_ts": float(r[7])
+        } for r in reversed(rows)]
+        _db_status = "CONECTADA"
+        return candles
+    except Exception as exc:
+        _db_status = "ERROR: " + str(exc)[:180]
+        return []
 
 
 def save_snapshot(data):
