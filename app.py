@@ -251,12 +251,26 @@ def set_brti(price, timestamp=None):
     price = float(price)
     timestamp = normalize_timestamp(timestamp)
 
+    completed_candle = None
+    bucket = int(timestamp // 60) * 60
+
     with lock:
         brti_price = price
         brti_time = timestamp
 
+        previous = next(
+            (dict(row) for row in reversed(brti_candles)
+             if int(row.get("time", -1)) < bucket),
+            None
+        )
         brti_ticks.append((timestamp, price))
         update_candle(brti_candles, price, timestamp)
+
+        if previous is not None and int(previous["time"]) == bucket - 60:
+            completed_candle = previous
+
+    if completed_candle is not None:
+        pattern_memory.save_brti_candle(completed_candle)
 
     pattern_memory.record_price(price, timestamp)
 
@@ -1517,9 +1531,28 @@ def start_services():
             while not pattern_memory.init_db():
                 time.sleep(30)
 
+            # Recupera velas BRTI reales guardadas en PostgreSQL.
+            # No utiliza Coinbase ni crea velas artificiales.
+            restored = pattern_memory.get_brti_candles(MAX_CANDLES)
+            if restored:
+                with lock:
+                    brti_candles.clear()
+                    brti_candles.extend(restored[-MAX_CANDLES:])
+                print(
+                    "BRTI: HISTORIAL RESTAURADO",
+                    len(restored),
+                    "velas",
+                    flush=True
+                )
+            else:
+                print(
+                    "BRTI: SIN HISTORIAL PERSISTIDO; "
+                    "se acumulará desde ahora",
+                    flush=True
+                )
 
-    threading.Thread(     
-     
+
+    threading.Thread(
         target=init_pattern_database,
         daemon=True
     ).start()
