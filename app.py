@@ -1260,9 +1260,16 @@ def start_services():
 
         started = True
         
-    def init_pattern_database():
+        def init_pattern_database():
         while not pattern_memory.init_db():
             time.sleep(30)
+
+        pattern_memory.record_official_market_result(
+            "KXBTC15M-26NOV171045-45",
+            "NO",
+            "BAJISTA",
+            "confirmacion_usuario"
+        )
 
     threading.Thread(
         target=init_pattern_database,
