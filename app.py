@@ -71,6 +71,7 @@ _alert_state = {
     "ticker": None,
     "previous_direction": None,
     "previous_bullish": None,
+    "previous_coinbase_live": None,
     "peak_directional_probability": None,
     "last_alert_ts": 0.0,
     "last_alert_key": None,
@@ -1464,8 +1465,17 @@ def update_alert_state(direction, bullish, ticker, divergence_pct,
 
         previous_direction = state["previous_direction"]
         previous_bullish = state["previous_bullish"]
+        previous_coinbase_live = state["previous_coinbase_live"]
 
-        if direction in ("ALCISTA", "BAJISTA"):
+        if previous_coinbase_live is True and not coinbase_live:
+            alert = (
+                "COINBASE_DESCONECTADO",
+                "CRITICA",
+                "COINBASE SIN DATOS",
+                "Se perdió la fuente principal. La predicción queda sin confirmación fiable hasta recuperar Coinbase."
+            )
+
+        if alert is None and direction in ("ALCISTA", "BAJISTA"):
             if (
                 previous_direction in ("ALCISTA", "BAJISTA")
                 and previous_direction != direction
@@ -1552,6 +1562,7 @@ def update_alert_state(direction, bullish, ticker, divergence_pct,
             else state["previous_direction"]
         )
         state["previous_bullish"] = bullish
+        state["previous_coinbase_live"] = coinbase_live
 
         current_alert = dict(state["alert"])
 
