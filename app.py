@@ -66,6 +66,22 @@ kalshi_market_error = ""
 started = False
 last_pattern_snapshot_minute = None
 
+# Alertas informativas: no ejecutan cierres ni órdenes.
+_alert_state = {
+    "ticker": None,
+    "previous_direction": None,
+    "previous_bullish": None,
+    "last_alert_ts": 0.0,
+    "last_alert_key": None,
+    "alert": {
+        "type": "INFO",
+        "level": "INFO",
+        "message": "Sin alertas nuevas",
+        "detail": "El radar vigila cambios de dirección, debilitamiento y divergencia entre fuentes.",
+        "timestamp": None
+    }
+}
+
 # Estado temporal para evitar cambios de dirección por ruido de un solo tick.
 _signal_state = {
     "smoothed": None,
@@ -803,13 +819,43 @@ def calculate_prediction(
             target_influence = "CERCA DEL OBJETIVO"
 
     # --------------------------------------
-    # PORCENTAJES FINALES
+    # SEÑAL FINAL: TÉCNICA + OBJETIVO KALSHI
     # --------------------------------------
 
-    normalized = (
+    technical_normalized = (
         score / possible
         if possible > 0 else 0
     )
+
+    normalized = technical_normalized
+    target_gap_pct = None
+    target_direction = "SIN OBJETIVO"
+
+    if valid_price(market_target):
+        target_gap_pct = (
+            (predicted - float(market_target))
+            / float(market_target)
+        ) * 100
+
+        # El precio proyectado respecto al strike determina el lado
+        # probable del contrato. La técnica de Coinbase aporta contexto.
+        target_normalized = max(
+            -1.0,
+            min(1.0, target_gap_pct / 0.05)
+        )
+
+        normalized = (
+            0.70 * target_normalized
+            + 0.30 * technical_normalized
+        )
+
+        tolerance_pct = 0.005
+        if target_gap_pct > tolerance_pct:
+            target_direction = "ALCISTA"
+        elif target_gap_pct < -tolerance_pct:
+            target_direction = "BAJISTA"
+        else:
+            target_direction = "CERCA DEL OBJETIVO"
 
     normalized, direction = stabilize_direction(
         normalized,
@@ -842,7 +888,18 @@ def calculate_prediction(
         "ema21": round(ema21, 2) if ema21 is not None else None,
         "rsi": round(rsi, 2) if rsi is not None else None,
         "pattern": pattern,
-        "target_influence": target_influence
+        "target_influence": target_influence,
+        "target_gap_pct": (
+            round(target_gap_pct, 5)
+            if target_gap_pct is not None else None
+        ),
+        "target_direction": target_direction,
+        "technical_score": round(technical_normalized, 4),
+        "direction_method": (
+            "COINBASE_TECHNICAL_PLUS_KALSHI_TARGET"
+            if valid_price(market_target)
+            else "COINBASE_TECHNICAL_ONLY_NO_TARGET"
+        )
     }
 
 
@@ -1379,6 +1436,116 @@ def start_services():
 
 
 # ==========================================
+# ALERTAS DE CAMBIOS Y CONFIRMACIÓN DE FUENTES
+# ==========================================
+
+def update_alert_state(direction, bullish, ticker, divergence_pct,
+                       brti_live, coinbase_live):
+    now = time.time()
+    alert = None
+
+    with lock:
+        state = _alert_state
+
+        if state["ticker"] != ticker:
+            state["ticker"] = ticker
+            state["previous_direction"] = None
+            state["previous_bullish"] = None
+            state["last_alert_key"] = None
+
+        previous_direction = state["previous_direction"]
+        previous_bullish = state["previous_bullish"]
+
+        if direction in ("ALCISTA", "BAJISTA"):
+            if (
+                previous_direction in ("ALCISTA", "BAJISTA")
+                and previous_direction != direction
+            ):
+                alert = (
+                    "CAMBIO_DIRECCION",
+                    "CRITICA",
+                    "CAMBIO DE DIRECCIÓN",
+                    "La señal pasó de " + previous_direction
+                    + " a " + direction
+                    + ". Revisa el contrato y tu posición."
+                )
+
+            elif previous_direction == direction and previous_bullish is not None:
+                previous_side_probability = (
+                    previous_bullish
+                    if direction == "ALCISTA"
+                    else 100 - previous_bullish
+                )
+                current_side_probability = (
+                    bullish
+                    if direction == "ALCISTA"
+                    else 100 - bullish
+                )
+                drop = previous_side_probability - current_side_probability
+
+                if drop >= 8:
+                    alert = (
+                        "DEBILITAMIENTO",
+                        "AVISO",
+                        "SEÑAL DEBILITÁNDOSE",
+                        "La probabilidad a favor de " + direction
+                        + " cayó " + str(round(drop, 1))
+                        + " puntos. Revisa si la señal sigue respaldada."
+                    )
+
+        if (
+            alert is None
+            and brti_live
+            and coinbase_live
+            and divergence_pct is not None
+            and abs(divergence_pct) >= 0.05
+        ):
+            alert = (
+                "DIVERGENCIA",
+                "AVISO",
+                "BRTI Y COINBASE DIVERGEN",
+                "Las fuentes difieren " + str(round(divergence_pct, 3))
+                + "%. Coinbase sigue siendo la fuente principal; confirma los datos."
+            )
+
+        if alert is not None:
+            key = alert[0] + ":" + str(ticker)
+            cooldown_ok = now - state["last_alert_ts"] >= 45
+            if cooldown_ok or key != state["last_alert_key"]:
+                state["alert"] = {
+                    "type": alert[0],
+                    "level": alert[1],
+                    "message": alert[2],
+                    "detail": alert[3],
+                    "timestamp": now
+                }
+                state["last_alert_ts"] = now
+                state["last_alert_key"] = key
+
+        state["previous_direction"] = (
+            direction if direction in ("ALCISTA", "BAJISTA")
+            else state["previous_direction"]
+        )
+        state["previous_bullish"] = bullish
+
+        current_alert = dict(state["alert"])
+
+    if (
+        current_alert.get("timestamp") is not None
+        and now - current_alert["timestamp"] > 120
+    ):
+        return {
+            "type": "INFO",
+            "level": "INFO",
+            "message": "Sin alertas nuevas",
+            "detail": "El radar sigue vigilando cambios de dirección, debilitamiento y divergencia entre fuentes.",
+            "timestamp": None
+        }
+
+    return current_alert
+
+
+# ==========================================
 # DATOS PRINCIPALES
 # ==========================================
 
@@ -1481,7 +1648,7 @@ def get_data():
                 "features": {
                     "target_influence": indicators.get("target_influence"),
                     "technical_strength": indicators.get("technical_strength"),
-                    "direction_method": "technical_only_v1"
+                    "direction_method": indicators.get("direction_method")
                 }
             })
 
@@ -1494,6 +1661,21 @@ def get_data():
         round(cp - bp, 2)
         if cp is not None and bp is not None
         else None
+    )
+
+    divergence_pct = (
+        ((bp - cp) / cp) * 100
+        if cp is not None and bp is not None and cp > 0
+        else None
+    )
+
+    alert_data = update_alert_state(
+        indicators.get("direction"),
+        float(indicators.get("bullish_score", 50)),
+        market_ticker,
+        divergence_pct,
+        brti_live,
+        coinbase_live
     )
 
     return {
@@ -1523,6 +1705,17 @@ def get_data():
         "coinbase_error": ce,
 
         "price_difference": difference,
+        "divergence_pct": (
+            round(divergence_pct, 5)
+            if divergence_pct is not None else None
+        ),
+        "brti_confirmation": (
+            "CONFIRMA" if brti_live and coinbase_live
+            and divergence_pct is not None and abs(divergence_pct) < 0.05
+            else "DIVERGENCIA" if brti_live and coinbase_live
+            else "SIN CONFIRMACIÓN"
+        ),
+        "alert": alert_data,
 
         "brti_candles": candles,
         "coinbase_candles": coin_candles,
@@ -2055,6 +2248,27 @@ button:disabled{
     }
 }
 
+.alert-card {
+    border: 1px solid #34425b;
+}
+.alert-card.alert-warning {
+    border-color: rgba(244,201,93,.65);
+}
+.alert-card.alert-critical {
+    border-color: rgba(255,82,105,.8);
+    box-shadow: 0 0 16px rgba(255,82,105,.12);
+}
+.alert-title {
+    font-size: 12px;
+    font-weight: 900;
+    letter-spacing: .7px;
+    margin-bottom: 7px;
+}
+.alert-detail {
+    color: #aab8d0;
+    font-size: 12px;
+    line-height: 1.5;
+}
 </style>
 </head>
 
@@ -2097,9 +2311,9 @@ button:disabled{
             PRECIO ACTUAL · COINBASE
         </div>
 
-        <div class="price" id="brtiPrice">--</div>
+        <div class="price" id="coinbasePrice">--</div>
 
-        <div class="small" id="brtiAge">
+        <div class="small" id="coinbaseAge">
             Esperando índice
         </div>
 
@@ -2186,9 +2400,16 @@ button:disabled{
     </div>
 
     <div class="small" id="signalStage">
-        Esperando movimiento BRTI
+        Coinbase principal · BRTI como confirmación
     </div>
 
+</section>
+
+<section class="card alert-card" id="alertCard">
+    <div class="alert-title" id="alertTitle">ALERTAS DEL RADAR</div>
+    <div class="alert-detail" id="alertDetail">
+        El radar vigila cambios de dirección, debilitamiento y divergencia entre fuentes.
+    </div>
 </section>
 
 
@@ -2985,7 +3206,7 @@ canvas.addEventListener(
 
 function updateRadar(d){
 
-    $("brtiPrice").textContent =
+    $("coinbasePrice").textContent =
         money(d.coinbase_price);
 
     const direction=d.direction || "RECOPILANDO";
@@ -3020,7 +3241,7 @@ function updateRadar(d){
             || "Esperando contrato activo de Kalshi"
         );
 
-     $("brtiAge").textContent=
+     $("coinbaseAge").textContent=
         d.coinbase_age==null
         ? "Esperando Coinbase"
         : "Coinbase actualizado hace "+d.coinbase_age+" s";
@@ -3062,9 +3283,26 @@ function updateRadar(d){
     $("signalStage").textContent=
         d.signal_stage || (
             direction==="RECOPILANDO"
-            ? "Esperando movimiento BRTI"
-            : "Lectura técnica en vivo"
+            ? "Esperando velas de Coinbase"
+            : (
+                d.kalshi_market_target != null
+                ? "Coinbase + objetivo oficial de Kalshi · BRTI confirma"
+                : "Coinbase principal · esperando objetivo de Kalshi"
+            )
         );
+
+    const alertData = d.alert || {};
+    $("alertTitle").textContent =
+        alertData.message || "SIN ALERTAS NUEVAS";
+    $("alertDetail").textContent =
+        alertData.detail || "El radar sigue vigilando la señal.";
+    $("alertCard").className = "card alert-card " + (
+        alertData.level === "CRITICA"
+        ? "alert-critical"
+        : alertData.level === "AVISO"
+        ? "alert-warning"
+        : ""
+    );
 
 
     $("ema9").textContent=
