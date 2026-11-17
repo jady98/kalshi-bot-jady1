@@ -1879,7 +1879,7 @@ button:disabled{
         </div>
 
     </section>
-        <section class="card target-card" style="grid-column:1; grid-row:2;">
+        <section class="card target-card">
 
         <div class="label">
             PRECIO OBJETIVO · KALSHI
