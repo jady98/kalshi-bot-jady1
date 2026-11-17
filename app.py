@@ -1617,6 +1617,79 @@ main{
     color:#bd91ff;
 }
 
+
+/* IDENTIDAD VISUAL DE LAS TRES TARJETAS */
+
+.coinbase-card{
+    border:1px solid #278cff;
+    background:linear-gradient(145deg,#10243c,#111827 75%);
+    box-shadow:0 0 14px rgba(39,140,255,.13);
+}
+
+.kalshi-card{
+    border:1px solid #00d995;
+    background:linear-gradient(145deg,#103329,#111827 75%);
+    box-shadow:0 0 14px rgba(0,217,149,.13);
+}
+
+.forecast-card{
+    border:1px solid #bd75ff;
+    background:linear-gradient(145deg,#29183f,#111827 75%);
+    box-shadow:0 0 14px rgba(189,117,255,.16);
+}
+
+.brand-mark{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    min-width:25px;
+    height:25px;
+    padding:0 7px;
+    border-radius:7px;
+    font-size:12px;
+    font-weight:900;
+    margin-bottom:9px;
+}
+
+.coinbase-card .brand-mark{
+    color:#55aaff;
+    background:#12365c;
+}
+
+.kalshi-card .brand-mark{
+    color:#00e6a0;
+    background:#104b38;
+}
+
+.forecast-card .brand-mark{
+    color:#d4a2ff;
+    background:#43245e;
+}
+
+.coinbase-card .label{
+    color:#69b7ff;
+}
+
+.kalshi-card .label{
+    color:#49e9b1;
+}
+
+.forecast-card .label{
+    color:#d4a2ff;
+}
+
+.coinbase-card .price{
+    color:#70bdff;
+}
+
+.kalshi-card .price{
+    color:#4af0b3;
+}
+
+.forecast-card .price{
+    color:#d5a5ff;
+}
+
 .small{
     font-size:10px;
     color:#8d9bb6;
