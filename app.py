@@ -65,6 +65,17 @@ kalshi_market_error = ""
 
 started = False
 last_pattern_snapshot_minute = None
+
+# Estado temporal para evitar cambios de dirección por ruido de un solo tick.
+_signal_state = {
+    "smoothed": None,
+    "last_ts": 0.0,
+    "last_remaining": None,
+    "direction": "INDECISO",
+    "candidate": None,
+    "candidate_since": 0.0
+}
+
 session = requests.Session()
 session.headers.update({
     "User-Agent": "BitcoinRadar/7.0"
@@ -359,6 +370,82 @@ def calculate_brti_average(ticks):
 # ==========================================
 # ANÁLISIS DE MOVIMIENTO CON VELAS COINBASE
 # ==========================================
+def stabilize_direction(normalized, seconds_to_close):
+    """
+    Suaviza la puntuación y exige persistencia antes de cambiar de dirección.
+    Usa tiempo monotónico para que los intervalos no dependan del reloj del sistema.
+    """
+    now = time.monotonic()
+
+    with lock:
+        previous_ts = _signal_state["last_ts"]
+        previous_remaining = _signal_state["last_remaining"]
+
+        new_contract = (
+            previous_remaining is not None
+            and seconds_to_close > previous_remaining + 30
+        )
+
+        if previous_ts == 0 or new_contract:
+            smoothed = float(normalized)
+            _signal_state["direction"] = "INDECISO"
+            _signal_state["candidate"] = None
+            _signal_state["candidate_since"] = 0.0
+        else:
+            elapsed = max(0.1, min(10.0, now - previous_ts))
+            alpha = 1.0 - math.exp(-elapsed / 7.0)
+            previous = _signal_state["smoothed"]
+            smoothed = (
+                float(normalized) if previous is None
+                else previous + alpha * (float(normalized) - previous)
+            )
+
+        current = _signal_state["direction"]
+
+        if current == "ALCISTA":
+            if smoothed <= -0.20:
+                desired = "BAJISTA"
+            elif smoothed <= 0.025:
+                desired = "INDECISO"
+            else:
+                desired = "ALCISTA"
+        elif current == "BAJISTA":
+            if smoothed >= 0.20:
+                desired = "ALCISTA"
+            elif smoothed >= -0.025:
+                desired = "INDECISO"
+            else:
+                desired = "BAJISTA"
+        else:
+            if smoothed >= 0.14:
+                desired = "ALCISTA"
+            elif smoothed <= -0.14:
+                desired = "BAJISTA"
+            else:
+                desired = "INDECISO"
+
+        if desired == current:
+            _signal_state["candidate"] = None
+            _signal_state["candidate_since"] = 0.0
+        else:
+            if _signal_state["candidate"] != desired:
+                _signal_state["candidate"] = desired
+                _signal_state["candidate_since"] = now
+
+            required_seconds = 15.0 if desired == "INDECISO" else 6.0
+
+            if now - _signal_state["candidate_since"] >= required_seconds:
+                _signal_state["direction"] = desired
+                _signal_state["candidate"] = None
+                _signal_state["candidate_since"] = 0.0
+
+        _signal_state["smoothed"] = smoothed
+        _signal_state["last_ts"] = now
+        _signal_state["last_remaining"] = seconds_to_close
+
+        return smoothed, _signal_state["direction"]
+
+
 
 def calculate_prediction(
     price,
@@ -665,25 +752,31 @@ def calculate_prediction(
 
     remaining_minutes = remaining / 60
 
-    # Movimiento medio reciente por vela
+    # Proyección prudente: combina el ritmo de 5 y 15 velas,
+    # reduce su influencia y limita el movimiento estimado.
+    rates = []
+
     if len(closes) >= 6 and closes[-6] > 0:
+        change_5m = ((closes[-1] / closes[-6]) - 1) * 100
+        rates.append(change_5m / 5)
 
-        recent_change = (
-            (closes[-1] / closes[-6]) - 1
-        ) * 100
+    if len(closes) >= 16 and closes[-16] > 0:
+        change_15m = ((closes[-1] / closes[-16]) - 1) * 100
+        rates.append(change_15m / 15)
 
-        projected_change = (
-            recent_change
-            * (remaining_minutes / 5)
-            * 0.15
-        )
+    if rates:
+        if len(rates) == 2:
+            rate_per_minute = rates[0] * 0.65 + rates[1] * 0.35
+        else:
+            rate_per_minute = rates[0]
 
+        projected_change = rate_per_minute * remaining_minutes * 0.25
     else:
-        projected_change = 0
+        projected_change = 0.0
 
     projected_change = max(
-        -0.50,
-        min(0.50, projected_change)
+        -0.30,
+        min(0.30, projected_change)
     )
 
     predicted = float(price) * (
@@ -718,6 +811,11 @@ def calculate_prediction(
         if possible > 0 else 0
     )
 
+    normalized, direction = stabilize_direction(
+        normalized,
+        remaining
+    )
+
     bullish = max(
         20,
         min(80, round(50 + normalized * 30, 1))
@@ -725,18 +823,7 @@ def calculate_prediction(
 
     bearish = round(100 - bullish, 1)
 
-    # --------------------------------------
-    # DIRECCIÓN
-    # --------------------------------------
-
-    if normalized > 0.08:
-        direction = "ALCISTA"
-
-    elif normalized < -0.08:
-        direction = "BAJISTA"
-
-    else:
-        direction = "INDECISO"
+    # La dirección cambia solo cuando la señal suavizada se confirma.
 
     # --------------------------------------
     # RESULTADO
