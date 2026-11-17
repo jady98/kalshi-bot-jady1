@@ -1724,7 +1724,19 @@ main{
 }
 
 .predicted{
-    color:#bd91ff;
+    color:#f4c95d;
+}
+
+.forecast-card .price.predicted.bullish{
+    color:#00e69a;
+}
+
+.forecast-card .price.predicted.bearish{
+    color:#ff536b;
+}
+
+.forecast-card .price.predicted.uncertain{
+    color:#f4c95d;
 }
 
 
@@ -2223,6 +2235,12 @@ button:disabled{
             PRECIO
         </span>
 
+        <span>
+            <i class="legend-dot"
+               style="background:#00d995"></i>
+            OBJETIVO KALSHI
+        </span>
+
     </div>
 
     <div class="chart-wrap">
@@ -2366,6 +2384,7 @@ button:disabled{
 const $ = id => document.getElementById(id);
 
 let candles = [];
+let chartTargetValue = null;
 
 let chartOffset = 0;
 let chartScale = 1;
@@ -2723,6 +2742,28 @@ function drawChart(data){
     drawLine(e9,"#b98aff");
     drawLine(e21,"#45a9ff");
 
+    // OBJETIVO DEL CONTRATO KALSHI (no es la predicción del radar)
+    if(
+        Number.isFinite(chartTargetValue)
+        && chartTargetValue >= min
+        && chartTargetValue <= max
+    ){
+        const targetY = y(chartTargetValue);
+        ctx.save();
+        ctx.setLineDash([7,4]);
+        ctx.strokeStyle="#00d995";
+        ctx.lineWidth=2;
+        ctx.beginPath();
+        ctx.moveTo(left,targetY);
+        ctx.lineTo(right,targetY);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle="#00d995";
+        ctx.font="bold 10px Arial";
+        ctx.textAlign="right";
+        ctx.fillText("OBJETIVO KALSHI",right-5,Math.max(top+11,targetY-6));
+        ctx.restore();
+    }
 
     // PRECIO DE LA ÚLTIMA VELA COINBASE
 
@@ -2938,8 +2979,21 @@ function updateRadar(d){
     $("brtiPrice").textContent =
         money(d.coinbase_price);
 
-    $("predictedPrice").textContent =
-        money(d.predicted_price);
+    const direction=d.direction || "RECOPILANDO";
+    const predictedElement=$("predictedPrice");
+    predictedElement.textContent=money(d.predicted_price);
+    predictedElement.className="price predicted "+(
+        direction==="ALCISTA" ? "bullish" :
+        direction==="BAJISTA" ? "bearish" :
+        "uncertain"
+    );
+
+    chartTargetValue=(
+        d.kalshi_market_target==null
+        ? null
+        : Number(d.kalshi_market_target)
+    );
+    if(!Number.isFinite(chartTargetValue)) chartTargetValue=null;
 
         $("predictionLabel").textContent =
         "Estimación del cierre del bloque de 15 minutos";
@@ -2962,8 +3016,6 @@ function updateRadar(d){
         ? "Esperando Coinbase"
         : "Coinbase actualizado hace "+d.coinbase_age+" s";
 
-
-    const direction=d.direction || "RECOPILANDO";
 
     $("direction").textContent=direction;
 
