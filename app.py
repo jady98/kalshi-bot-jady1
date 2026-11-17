@@ -1537,6 +1537,15 @@ def stats():
 
     })
 
+@app.route("/history")
+def history():
+    start_services()
+    return jsonify(
+        pattern_memory.get_recent_predictions(50)
+    )
+
+
+
 HTML = r"""
 <!DOCTYPE html>
 <html lang="es">
