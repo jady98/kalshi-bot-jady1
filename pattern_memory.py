@@ -158,7 +158,13 @@ def save_snapshot(data):
 
             snapshot_id = row[0]
 
-            for horizon in (60, 180, 300, 900):
+                        for horizon in (60, 180, 300, 900):
+                    for horizon in (60, 180, 300, 900):
+                target_ts = signal_ts + horizon
+
+                if target_ts > market_close_ts:
+                    continue
+
                 conn.execute("""
                     INSERT INTO btc_signal_outcomes (
                         snapshot_id, horizon_seconds, target_ts
@@ -169,8 +175,8 @@ def save_snapshot(data):
                 """, (
                     snapshot_id,
                     horizon,
-                    signal_ts + horizon
-                ))
+                    target_ts
+                ))        
 
         _db_status = "CONECTADA"
         return True
