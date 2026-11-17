@@ -1763,6 +1763,45 @@ button:disabled{
 
 }
 
+/* OCULTAR TARJETAS SECUNDARIAS */
+
+.target-card,
+.technical-card {
+    display: none !important;
+}
+
+/* ANIMACIÓN ALCISTA */
+
+.signal.green {
+    animation: signalPulseGreen 1.5s ease-in-out infinite;
+}
+
+@keyframes signalPulseGreen {
+    0%, 100% {
+        text-shadow: 0 0 4px rgba(0,230,154,.25);
+    }
+
+    50% {
+        text-shadow: 0 0 18px rgba(0,230,154,.9);
+    }
+}
+
+/* ANIMACIÓN BAJISTA */
+
+.signal.red {
+    animation: signalPulseRed 1.5s ease-in-out infinite;
+}
+
+@keyframes signalPulseRed {
+    0%, 100% {
+        text-shadow: 0 0 4px rgba(255,83,107,.25);
+    }
+
+    50% {
+        text-shadow: 0 0 18px rgba(255,83,107,.9);
+    }
+}
+
 </style>
 </head>
 
@@ -1799,7 +1838,7 @@ button:disabled{
     <section class="card">
 
         <div class="label">
-            PRECIO ACTUAL · BRTI
+            PRECIO ACTUAL · COINBASE
         </div>
 
         <div class="price" id="brtiPrice">
@@ -1811,7 +1850,7 @@ button:disabled{
         </div>
 
     </section>
-        <section class="card" style="grid-column:1; grid-row:2;">
+        <section class="card target-card" style="grid-column:1; grid-row:2;">
 
         <div class="label">
             PRECIO OBJETIVO · KALSHI
@@ -1850,7 +1889,7 @@ button:disabled{
 <section class="card">
 
     <div class="section-title">
-        DIRECCIÓN ESTIMADA BRTI
+        PROBABILIDAD DEL MOTOR · 15 MIN
     </div>
 
     <div class="signal yellow" id="direction">
@@ -1972,7 +2011,7 @@ button:disabled{
 
 <!-- CONTINÚA LA GRÁFICA Y LOS INDICADORES -->
 
-<section class="card">
+<section class="card technical-card">
 
     <div class="section-title">
         INDICADORES TÉCNICOS
@@ -2655,7 +2694,7 @@ canvas.addEventListener(
 function updateRadar(d){
 
     $("brtiPrice").textContent =
-        money(d.brti_price);
+        money(d.coinbase_price);
 
     $("predictedPrice").textContent =
         money(d.predicted_price);
@@ -2676,10 +2715,10 @@ function updateRadar(d){
             || "Esperando contrato activo de Kalshi"
         );
 
-    $("brtiAge").textContent=
-        d.brti_age==null
-        ? "Esperando índice"
-        : "Dato actualizado hace "+d.brti_age+" s";
+     $("brtiAge").textContent=
+        d.coinbase_age==null
+        ? "Esperando Coinbase"
+        : "Coinbase actualizado hace "+d.coinbase_age+" s";
 
 
     const direction=d.direction || "RECOPILANDO";
