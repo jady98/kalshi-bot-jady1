@@ -78,7 +78,7 @@ def init_db():
                 ON btc_signal_snapshots(pattern, direction)
             """)
 
-             conn.execute("""
+            conn.execute("""
                 CREATE TABLE IF NOT EXISTS btc_official_market_results (
                 market_ticker TEXT PRIMARY KEY,
                 official_result TEXT NOT NULL
