@@ -103,7 +103,20 @@ def save_snapshot(data):
         if signal_ts <= 0 or price <= 0:
             return False
 
-        ticker = str(data.get("market_ticker") or "SIN_CONTRATO")
+        ticker = str(data.get("market_ticker") or "").strip()
+
+try:
+    market_close_ts = float(data.get("market_close_ts"))
+except (TypeError, ValueError):
+    return False
+
+if (
+    not ticker
+    or ticker == "SIN_CONTRATO"
+    or not math.isfinite(market_close_ts)
+    or market_close_ts <= signal_ts
+):
+    return False
         minute_bucket = int(signal_ts // 60)
         snapshot_key = f"{ticker}:{minute_bucket}"
 
