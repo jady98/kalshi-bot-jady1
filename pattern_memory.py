@@ -363,12 +363,14 @@ def record_market_close(market_ticker, closing_average, resolved_ts=None):
 
 
 def get_prediction_accuracy():
+    """Precisión conjunta de todas las fuentes con resultado de cierre verificable."""
     empty = {
         "predictions_evaluated": 0,
         "correct": 0,
         "incorrect": 0,
         "no_change": 0,
-        "accuracy_pct": None
+        "accuracy_pct": None,
+        "contracts_evaluated": 0
     }
 
     try:
@@ -391,16 +393,19 @@ def get_prediction_accuracy():
                     COUNT(*) FILTER (
                         WHERE s.direction IN ('ALCISTA', 'BAJISTA')
                           AND o.result = 'SIN CAMBIO'
+                    ),
+                    COUNT(DISTINCT s.market_ticker) FILTER (
+                        WHERE s.direction IN ('ALCISTA', 'BAJISTA')
+                          AND o.result IN ('ALCISTA', 'BAJISTA')
                     )
                 FROM btc_signal_outcomes AS o
                 JOIN btc_signal_snapshots AS s
                   ON s.id = o.snapshot_id
                 WHERE o.horizon_seconds = -1
                   AND o.future_price IS NOT NULL
-                  AND s.features->>'direction_method' = 'BRTI_PRIMARY_KALSHI_15M'
             """).fetchone()
 
-        evaluated, correct, incorrect, no_change = row
+        evaluated, correct, incorrect, no_change, contracts = row
         total = correct + incorrect
 
         return {
@@ -408,6 +413,7 @@ def get_prediction_accuracy():
             "correct": correct,
             "incorrect": incorrect,
             "no_change": no_change,
+            "contracts_evaluated": contracts,
             "accuracy_pct": round(correct * 100 / total, 1)
                 if total else None
         }
@@ -417,6 +423,72 @@ def get_prediction_accuracy():
             **empty,
             "error": str(exc)[:180]
         }
+
+
+def get_prediction_accuracy_by_source():
+    """Compara Coinbase y BRTI con el mismo resultado oficial de cierre."""
+    try:
+        with _connect() as conn:
+            rows = conn.execute("""
+                SELECT
+                    CASE
+                        WHEN UPPER(COALESCE(s.features->>'signal_source', ''))
+                             LIKE '%BRTI%' THEN 'BRTI'
+                        WHEN UPPER(COALESCE(s.features->>'signal_source', ''))
+                             LIKE '%COINBASE%' THEN 'COINBASE'
+                        WHEN s.features->>'direction_method'
+                             = 'BRTI_PRIMARY_KALSHI_15M' THEN 'BRTI'
+                        WHEN s.features->>'direction_method'
+                             = 'technical_only_v1' THEN 'COINBASE'
+                        ELSE 'DESCONOCIDA'
+                    END AS source,
+                    COUNT(*) FILTER (
+                        WHERE s.direction IN ('ALCISTA', 'BAJISTA')
+                          AND o.result IN ('ALCISTA', 'BAJISTA')
+                    ) AS evaluated,
+                    COUNT(*) FILTER (
+                        WHERE s.direction IN ('ALCISTA', 'BAJISTA')
+                          AND s.direction = o.result
+                    ) AS correct,
+                    COUNT(*) FILTER (
+                        WHERE s.direction IN ('ALCISTA', 'BAJISTA')
+                          AND o.result IN ('ALCISTA', 'BAJISTA')
+                          AND s.direction <> o.result
+                    ) AS incorrect,
+                    COUNT(*) FILTER (
+                        WHERE s.direction IN ('ALCISTA', 'BAJISTA')
+                          AND o.result = 'SIN CAMBIO'
+                    ) AS no_change,
+                    COUNT(DISTINCT s.market_ticker) FILTER (
+                        WHERE s.direction IN ('ALCISTA', 'BAJISTA')
+                          AND o.result IN ('ALCISTA', 'BAJISTA')
+                    ) AS contracts
+                FROM btc_signal_outcomes AS o
+                JOIN btc_signal_snapshots AS s
+                  ON s.id = o.snapshot_id
+                WHERE o.horizon_seconds = -1
+                  AND o.future_price IS NOT NULL
+                GROUP BY 1
+                ORDER BY 1
+            """).fetchall()
+
+        result = []
+        for source, evaluated, correct, incorrect, no_change, contracts in rows:
+            total = correct + incorrect
+            result.append({
+                "source": source,
+                "predictions_evaluated": evaluated,
+                "correct": correct,
+                "incorrect": incorrect,
+                "no_change": no_change,
+                "contracts_evaluated": contracts,
+                "accuracy_pct": round(correct * 100 / total, 1)
+                    if total else None
+            })
+        return {"sources": result, "error": None}
+
+    except Exception as exc:
+        return {"sources": [], "error": str(exc)[:180]}
 
 def get_recent_predictions(limit=50):
     """Devuelve señales recientes y su resultado real a 15 minutos."""
@@ -447,8 +519,6 @@ def get_recent_predictions(limit=50):
                 LEFT JOIN btc_signal_outcomes AS o
                   ON o.snapshot_id = s.id
                  AND o.horizon_seconds = -1
-                WHERE s.features->>'direction_method'
-                    = 'BRTI_PRIMARY_KALSHI_15M'
                 ORDER BY s.signal_ts DESC
                 LIMIT %s
             """, (limit,)).fetchall()
