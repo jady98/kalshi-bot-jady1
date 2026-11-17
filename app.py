@@ -886,14 +886,20 @@ def calculate_prediction(
 
     bearish = round(100 - bullish, 1)
 
-    # La dirección cambia solo cuando la señal suavizada se confirma.
+    # No mostrar una dirección que contradiga la probabilidad calculada.
+    # Durante la espera de confirmación de un giro, mostrar INDECISO.
+    display_direction = direction
+    if direction == "ALCISTA" and bullish < 50:
+        display_direction = "INDECISO"
+    elif direction == "BAJISTA" and bearish < 50:
+        display_direction = "INDECISO"
 
     # --------------------------------------
     # RESULTADO
     # --------------------------------------
 
     return {
-        "direction": direction,
+        "direction": display_direction,
         "predicted_price": round(predicted, 2),
         "bullish_score": bullish,
         "bearish_score": bearish,
