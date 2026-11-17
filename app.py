@@ -848,7 +848,7 @@ def calculate_prediction(
         ) * 100
 
         # El precio proyectado respecto al strike determina el lado
-        # probable del contrato. La técnica de Coinbase aporta contexto.
+        # probable del contrato. La técnica también se calcula con velas BRTI.
         target_normalized = max(
             -1.0,
             min(1.0, target_gap_pct / 0.05)
@@ -1683,12 +1683,15 @@ def get_data():
             ticks, queued_close - 60, queued_close
         )
         if closing_average is not None and closing_samples >= 45:
-            pattern_memory.record_market_close(queued_ticker, closing_average, now)
-            with lock:
-                market_resolution_queue = deque(
-                    (item for item in market_resolution_queue if item[0] != queued_ticker),
-                    maxlen=20
-                )
+            saved = pattern_memory.record_market_close(
+                queued_ticker, closing_average, now
+            )
+            if saved:
+                with lock:
+                    market_resolution_queue = deque(
+                        (item for item in market_resolution_queue if item[0] != queued_ticker),
+                        maxlen=20
+                    )
 
     indicators = calculate_prediction(
         bp if brti_live else None,
@@ -2030,7 +2033,7 @@ main{
 
 /* IDENTIDAD VISUAL DE LAS TRES TARJETAS */
 
-.coinbase-card{
+.brti-card{
     border:1px solid #278cff;
     background:linear-gradient(145deg,#10243c,#111827 75%);
     box-shadow:0 0 14px rgba(39,140,255,.13);
@@ -2061,7 +2064,7 @@ main{
     margin-bottom:9px;
 }
 
-.coinbase-card .brand-mark{
+.brti-card .brand-mark{
     color:#55aaff;
     background:#12365c;
 }
@@ -2076,7 +2079,7 @@ main{
     background:#43245e;
 }
 
-.coinbase-card .label{
+.brti-card .label{
     color:#69b7ff;
 }
 
@@ -2088,7 +2091,7 @@ main{
     color:#d4a2ff;
 }
 
-.coinbase-card .price{
+.brti-card .price{
     color:#70bdff;
 }
 
@@ -2398,9 +2401,9 @@ button:disabled{
 <div class="grid">
 
 
-    <section class="card coinbase-card">
+    <section class="card brti-card">
 
-        <div class="brand-mark">CB</div>
+        <div class="brand-mark">BR</div>
 
         <div class="label">
             PRECIO ACTUAL · BRTI
@@ -3382,7 +3385,7 @@ function updateRadar(d){
     $("signalStage").textContent=
         d.signal_stage || (
             direction==="RECOPILANDO"
-            ? "Esperando velas de Coinbase"
+            ? "Esperando velas BRTI"
             : (
                 d.kalshi_market_target != null
                 ? "BRTI principal · " + (
