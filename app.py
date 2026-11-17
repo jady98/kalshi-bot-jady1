@@ -1699,13 +1699,48 @@ def get_data():
                         maxlen=20
                     )
 
+    # Selección rápida de fuente: BRTI manda cuando tiene datos suficientes.
+    # Si BRTI no tiene al menos 3 velas, usar el historial Coinbase ya cargado.
+    if brti_live:
+        analysis_price = bp
+        signal_source = "BRTI"
+    elif coinbase_live:
+        analysis_price = cp
+        signal_source = "COINBASE"
+    else:
+        analysis_price = None
+        signal_source = "SIN DATOS"
+
+    if brti_live and len(candles) >= 3:
+        analysis_candles = candles
+        candle_source = "BRTI"
+    elif coinbase_live and len(coin_candles) >= 3:
+        analysis_candles = coin_candles
+        candle_source = "COINBASE"
+    elif len(candles) >= 3:
+        analysis_candles = candles
+        candle_source = "BRTI"
+    elif len(coin_candles) >= 3:
+        analysis_candles = coin_candles
+        candle_source = "COINBASE"
+    else:
+        analysis_candles = []
+        candle_source = "SIN VELAS"
+
     indicators = calculate_prediction(
-        bp if brti_live else None,
+        analysis_price,
         ticks,
         countdown,
         market_target,
-        candles if brti_live else None
+        analysis_candles
     )
+
+    indicators["signal_source"] = signal_source
+    indicators["candle_source"] = candle_source
+    if signal_source == "COINBASE":
+        indicators["direction_method"] = "COINBASE_FALLBACK_15M"
+    elif candle_source == "COINBASE":
+        indicators["direction_method"] = "BRTI_PRIMARY_COINBASE_TECHNICAL_FALLBACK"
     global last_pattern_snapshot_minute
 
     snapshot_minute = int(now // 60)
@@ -1743,7 +1778,8 @@ def get_data():
                     "target_influence": indicators.get("target_influence"),
                     "technical_strength": indicators.get("technical_strength"),
                     "direction_method": indicators.get("direction_method"),
-                    "signal_source": "BRTI",
+                    "signal_source": signal_source,
+                    "candle_source": candle_source,
                     "market_target": market_target
                 }
             })
@@ -1829,7 +1865,8 @@ def get_data():
         ),
 
         "brti_average_samples": average_count,
-        "signal_source": "BRTI" if brti_live else "SIN DATOS BRTI",
+        "signal_source": signal_source,
+        "candle_source": candle_source,
 
         **indicators
     }
