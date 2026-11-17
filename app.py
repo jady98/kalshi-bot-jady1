@@ -2742,7 +2742,7 @@ function drawChart(data){
     drawLine(e9,"#b98aff");
     drawLine(e21,"#45a9ff");
 
-    // OBJETIVO DEL CONTRATO KALSHI (no es la predicción del radar)
+    // OBJETIVO KALSHI: marcador en el margen derecho, sin cruzar las velas
     if(
         Number.isFinite(chartTargetValue)
         && chartTargetValue >= min
@@ -2750,18 +2750,27 @@ function drawChart(data){
     ){
         const targetY = y(chartTargetValue);
         ctx.save();
-        ctx.setLineDash([7,4]);
         ctx.strokeStyle="#00d995";
-        ctx.lineWidth=2;
-        ctx.beginPath();
-        ctx.moveTo(left,targetY);
-        ctx.lineTo(right,targetY);
-        ctx.stroke();
-        ctx.setLineDash([]);
         ctx.fillStyle="#00d995";
-        ctx.font="bold 10px Arial";
-        ctx.textAlign="right";
-        ctx.fillText("OBJETIVO KALSHI",right-5,Math.max(top+11,targetY-6));
+        ctx.lineWidth=2;
+
+        // Marca corta junto a la escala de precios; no invade el área de velas.
+        ctx.beginPath();
+        ctx.moveTo(right+2,targetY);
+        ctx.lineTo(right+11,targetY);
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo(right+2,targetY);
+        ctx.lineTo(right+7,targetY-4);
+        ctx.lineTo(right+7,targetY+4);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.font="bold 9px Arial";
+        ctx.textAlign="left";
+        ctx.textBaseline="middle";
+        ctx.fillText("KALSHI",right+13,Math.max(top+6,Math.min(bottom-6,targetY)));
         ctx.restore();
     }
 
