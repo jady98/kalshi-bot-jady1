@@ -2718,7 +2718,7 @@ button:disabled{
 
     </div>
 
-    <div class="small" id="coinbaseConnection"></div>
+    <div class="small" id="sourceConnection">Predicción y gráfica: BRTI</div>
 
     <div class="small" id="errors"></div>
 
@@ -3490,13 +3490,8 @@ function updateRadar(d){
         : "red";
 
 
-    $("coinbaseConnection").textContent=
-        "Coinbase WebSocket: "+
-        (
-            d.coinbase_connected
-            ? "CONECTADO"
-            : "DESCONECTADO"
-        );
+    $("sourceConnection").textContent =
+        "Fuente única de predicción y gráfica: BRTI";
 
 
     $("countdown").textContent=
@@ -3505,8 +3500,7 @@ function updateRadar(d){
 
     $("errors").textContent=
         [
-            d.kalshi_error,
-            d.coinbase_error
+            d.kalshi_error
         ]
         .filter(Boolean)
         .join(" | ");
