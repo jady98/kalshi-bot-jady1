@@ -1883,8 +1883,9 @@ def health():
         "database_status": pattern_memory.database_status(),
         "database_counts": pattern_memory.get_database_counts(),
         "prediction_accuracy": pattern_memory.get_prediction_accuracy(),
-"official_market_accuracy":
-    pattern_memory.get_official_market_accuracy()
+        "prediction_accuracy_by_source": pattern_memory.get_prediction_accuracy_by_source(),
+        "official_market_accuracy":
+            pattern_memory.get_official_market_accuracy()
 
     })
 
@@ -1903,6 +1904,9 @@ def stats():
 
          "prediction_accuracy":
             pattern_memory.get_prediction_accuracy(),
+
+         "prediction_accuracy_by_source":
+            pattern_memory.get_prediction_accuracy_by_source(),
 
          "official_market_accuracy":
             pattern_memory.get_official_market_accuracy()
