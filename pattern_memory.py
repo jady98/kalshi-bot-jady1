@@ -158,8 +158,7 @@ def save_snapshot(data):
 
             snapshot_id = row[0]
 
-                        for horizon in (60, 180, 300, 900):
-                    for horizon in (60, 180, 300, 900):
+            for horizon in (60, 180, 300, 900):
                 target_ts = signal_ts + horizon
 
                 if target_ts > market_close_ts:
@@ -176,7 +175,7 @@ def save_snapshot(data):
                     snapshot_id,
                     horizon,
                     target_ts
-                ))        
+                ))             
 
         _db_status = "CONECTADA"
         return True
