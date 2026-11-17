@@ -71,6 +71,7 @@ _alert_state = {
     "ticker": None,
     "previous_direction": None,
     "previous_bullish": None,
+    "peak_directional_probability": None,
     "last_alert_ts": 0.0,
     "last_alert_key": None,
     "alert": {
@@ -1451,6 +1452,7 @@ def update_alert_state(direction, bullish, ticker, divergence_pct,
             state["ticker"] = ticker
             state["previous_direction"] = None
             state["previous_bullish"] = None
+            state["peak_directional_probability"] = None
             state["last_alert_key"] = None
 
         previous_direction = state["previous_direction"]
@@ -1470,19 +1472,17 @@ def update_alert_state(direction, bullish, ticker, divergence_pct,
                     + ". Revisa el contrato y tu posición."
                 )
 
-            elif previous_direction == direction and previous_bullish is not None:
-                previous_side_probability = (
-                    previous_bullish
-                    if direction == "ALCISTA"
-                    else 100 - previous_bullish
-                )
+            elif previous_direction == direction:
                 current_side_probability = (
-                    bullish
-                    if direction == "ALCISTA"
+                    bullish if direction == "ALCISTA"
                     else 100 - bullish
                 )
-                drop = previous_side_probability - current_side_probability
+                peak = state["peak_directional_probability"]
+                if peak is None or current_side_probability > peak:
+                    state["peak_directional_probability"] = current_side_probability
+                    peak = current_side_probability
 
+                drop = peak - current_side_probability
                 if drop >= 8:
                     alert = (
                         "DEBILITAMIENTO",
@@ -1490,7 +1490,7 @@ def update_alert_state(direction, bullish, ticker, divergence_pct,
                         "SEÑAL DEBILITÁNDOSE",
                         "La probabilidad a favor de " + direction
                         + " cayó " + str(round(drop, 1))
-                        + " puntos. Revisa si la señal sigue respaldada."
+                        + " puntos desde su máximo reciente. Revisa si la señal sigue respaldada."
                     )
 
         if (
@@ -1521,6 +1521,24 @@ def update_alert_state(direction, bullish, ticker, divergence_pct,
                 }
                 state["last_alert_ts"] = now
                 state["last_alert_key"] = key
+
+        if direction in ("ALCISTA", "BAJISTA"):
+            if direction != previous_direction:
+                state["peak_directional_probability"] = (
+                    bullish if direction == "ALCISTA"
+                    else 100 - bullish
+                )
+            else:
+                current_side_probability = (
+                    bullish if direction == "ALCISTA"
+                    else 100 - bullish
+                )
+                peak = state["peak_directional_probability"]
+                state["peak_directional_probability"] = (
+                    current_side_probability
+                    if peak is None
+                    else max(peak, current_side_probability)
+                )
 
         state["previous_direction"] = (
             direction if direction in ("ALCISTA", "BAJISTA")
@@ -2390,7 +2408,7 @@ button:disabled{
     <div class="row">
 
         <span class="small">
-            FUERZA TÉCNICA
+            FUERZA DE SEÑAL
         </span>
 
         <strong id="strength" class="purple">
