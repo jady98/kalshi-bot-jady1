@@ -1895,6 +1895,11 @@ def health():
         "coinbase_connected": data["coinbase_connected"],
 
         "coinbase_candles": len(data["coinbase_candles"]),
+        "brti_candles": len(data["brti_candles"]),
+        "brti_ticks": len(data["brti_ticks"]),
+        "candle_source": data["candle_source"],
+        "direction_method": data["direction_method"],
+        "pattern": data["pattern"],
         "signal_source": data["signal_source"],
         "brti_average_60s": data["brti_average_60s"],
         "brti_average_samples": data["brti_average_samples"],
@@ -2416,8 +2421,8 @@ button:disabled{
         </div>
 
         <div>
-            <span id="coinDot" class="dot"></span>
-            <span id="coinStatus">COINBASE</span>
+            <span id="sourceDot" class="dot live"></span>
+            <span id="sourceStatus">BRTI · FUENTE ÚNICA</span>
         </div>
 
     </div>
@@ -2436,9 +2441,9 @@ button:disabled{
             PRECIO ACTUAL · BRTI
         </div>
 
-        <div class="price" id="coinbasePrice">--</div>
+        <div class="price" id="brtiPrice">--</div>
 
-        <div class="small" id="coinbaseAge">
+        <div class="small" id="brtiAgeLabel">
             Esperando índice
         </div>
 
@@ -2525,7 +2530,7 @@ button:disabled{
     </div>
 
     <div class="small" id="signalStage">
-        BRTI principal · Coinbase como confirmación
+        BRTI · FUENTE ÚNICA DE PREDICCIÓN
     </div>
 
 </section>
@@ -2549,7 +2554,7 @@ button:disabled{
             </div>
 
             <div class="small">
-                COINBASE · Velas de 1 minuto
+                BRTI · Velas de 1 minuto
             </div>
 
         </div>
@@ -2830,7 +2835,7 @@ function drawChart(data){
         ctx.textAlign="center";
 
         ctx.fillText(
-            "ESPERANDO VELAS COINBASE",
+            "ESPERANDO VELAS BRTI",
             W/2,
             H/2
         );
@@ -2987,7 +2992,7 @@ function drawChart(data){
     }
 
 
-    // VELAS COINBASE
+    // VELAS BRTI
 
     visible.forEach(item=>{
 
@@ -3120,7 +3125,7 @@ function drawChart(data){
         ctx.restore();
     }
 
-    // PRECIO DE LA ÚLTIMA VELA COINBASE
+    // PRECIO DE LA ÚLTIMA VELA BRTI
 
     if(chartOffset < 0.05){
 
@@ -3331,7 +3336,7 @@ canvas.addEventListener(
 
 function updateRadar(d){
 
-    $("coinbasePrice").textContent =
+    $("brtiPrice").textContent =
         money(d.brti_price);
 
     const direction=d.direction || "RECOPILANDO";
@@ -3369,11 +3374,10 @@ function updateRadar(d){
             || "Esperando contrato activo de Kalshi"
         );
 
-     $("coinbaseAge").textContent =
+     $("brtiAgeLabel").textContent =
         d.brti_age == null
-        ? "Esperando BRTI"
-        : "BRTI actualizado hace " + d.brti_age
-          + " s · Coinbase respaldo: " + money(d.coinbase_price);
+        ? "Esperando índice BRTI"
+        : "BRTI actualizado hace " + d.brti_age + " s";
 
 
     $("direction").textContent=direction;
@@ -3409,21 +3413,11 @@ function updateRadar(d){
     $("strength").textContent=
         Number(d.technical_strength ?? 0)+"%";
 
-    $("signalStage").textContent=
+    $("signalStage").textContent =
         d.signal_stage || (
             direction==="RECOPILANDO"
-            ? "Esperando velas BRTI"
-            : (
-                d.kalshi_market_target != null
-                ? "BRTI principal · " + (
-                    d.brti_confirmation === "CONFIRMA"
-                    ? "Coinbase confirma"
-                    : d.brti_confirmation === "DIVERGENCIA"
-                    ? "Coinbase diverge"
-                    : "Coinbase sin confirmación"
-                  )
-                : "BRTI principal · esperando objetivo de Kalshi"
-            )
+            ? "Esperando historial BRTI suficiente"
+            : "Predicción calculada exclusivamente con BRTI"
         );
 
     const alertData = d.alert || {};
@@ -3472,18 +3466,16 @@ function updateRadar(d){
     $("brtiDot").className=
         d.brti_live ? "dot live":"dot";
 
-    $("coinDot").className=
-        d.coinbase_live ? "dot live":"dot";
+    $("sourceDot").className=
+        d.brti_live ? "dot live":"dot";
 
     $("brtiStatus").textContent=
         d.brti_live
         ? "BRTI EN VIVO"
         : "BRTI SIN DATOS";
 
-    $("coinStatus").textContent=
-        d.coinbase_live
-        ? "COINBASE EN VIVO"
-        : "COINBASE SIN DATOS";
+    $("sourceStatus").textContent=
+        d.brti_live ? "BRTI · FUENTE ÚNICA" : "BRTI SIN DATOS";
 
 
     $("kalshiConnection").textContent=
@@ -3519,11 +3511,11 @@ function updateRadar(d){
         .join(" | ");
 
 
-    drawChart(d.coinbase_candles || []);
+    drawChart(d.brti_candles || []);
 
     $("candleCount").textContent=
-        (d.coinbase_candles || []).length+
-        " velas Coinbase";
+        (d.brti_candles || []).length+
+        " velas BRTI";
 
 }
 
