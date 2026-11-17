@@ -1782,7 +1782,12 @@ def get_data():
     signal_source = "BRTI" if brti_live else "SIN DATOS BRTI"
 
     analysis_candles = candles if brti_live else []
-    candle_source = "BRTI" if brti_live and len(candles) >= 3 else "SIN VELAS BRTI"
+    candle_source = (
+        "BRTI" if brti_live and len(candles) >= 3
+        else "BRTI TICKS (VELAS EN FORMACIÓN)"
+        if brti_live and len(ticks) >= 3
+        else "SIN VELAS BRTI"
+    )
 
     indicators = calculate_prediction(
         analysis_price,
@@ -1794,10 +1799,8 @@ def get_data():
 
     indicators["signal_source"] = signal_source
     indicators["candle_source"] = candle_source
-    indicators["direction_method"] = (
-        "BRTI_ONLY_15M" if brti_live and len(analysis_candles) >= 3
-        else "BRTI_WAITING_FOR_DATA"
-    )
+    if not brti_live:
+        indicators["direction_method"] = "BRTI_WAITING_FOR_DATA"
     global last_pattern_snapshot_minute
 
     snapshot_minute = int(now // 60)
