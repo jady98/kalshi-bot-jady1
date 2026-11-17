@@ -1966,8 +1966,6 @@ button:disabled{
 
 <div class="grid">
 
-    
-<div class="grid">
 
     <section class="card coinbase-card">
 
