@@ -363,6 +363,79 @@ def get_prediction_accuracy():
             "error": str(exc)[:180]
         }
 
+def get_recent_predictions(limit=50):
+    """Devuelve señales recientes y su resultado real a 15 minutos."""
+    try:
+        limit = max(1, min(int(limit), 100))
+
+        with _connect() as conn:
+            rows = conn.execute("""
+                SELECT
+                    s.id,
+                    s.signal_ts,
+                    s.market_ticker,
+                    s.price,
+                    s.direction,
+                    s.bullish_score,
+                    s.bearish_score,
+                    s.predicted_price,
+                    s.ema9,
+                    s.ema21,
+                    s.rsi,
+                    s.momentum_pct,
+                    s.pattern,
+                    s.features,
+                    o.future_price,
+                    o.change_pct,
+                    o.result
+                FROM btc_signal_snapshots AS s
+                LEFT JOIN btc_signal_outcomes AS o
+                  ON o.snapshot_id = s.id
+                 AND o.horizon_seconds = 900
+                WHERE s.features->>'direction_method'
+                    = 'technical_only_v1'
+                ORDER BY s.signal_ts DESC
+                LIMIT %s
+            """, (limit,)).fetchall()
+
+        items = []
+
+        for r in rows:
+            items.append({
+                "id": r[0],
+                "signal_ts": r[1],
+                "market_ticker": r[2],
+                "price": r[3],
+                "direction": r[4],
+                "bullish_score": r[5],
+                "bearish_score": r[6],
+                "predicted_price": r[7],
+                "ema9": r[8],
+                "ema21": r[9],
+                "rsi": r[10],
+                "momentum_pct": r[11],
+                "pattern": r[12],
+                "features": r[13],
+                "future_price_15m": r[14],
+                "change_pct_15m": r[15],
+                "result_15m": r[16]
+            })
+
+        return {
+            "items": items,
+            "count": len(items),
+            "error": None
+        }
+
+    except Exception as exc:
+        return {
+            "items": [],
+            "count": 0,
+            "error": str(exc)[:180]
+        }
+
+
+
 def database_status():
     return _db_status
 
