@@ -187,7 +187,17 @@ def save_snapshot(data):
                     snapshot_id,
                     horizon,
                     target_ts
-                ))             
+                ))
+
+            # Resultado principal: precio observado al cierre real del contrato.
+            conn.execute("""
+                INSERT INTO btc_signal_outcomes (
+                    snapshot_id, horizon_seconds, target_ts
+                )
+                VALUES (%s, -1, %s)
+                ON CONFLICT (snapshot_id, horizon_seconds)
+                DO NOTHING
+            """, (snapshot_id, market_close_ts))
 
         _db_status = "CONECTADA"
         return True
@@ -241,7 +251,7 @@ def record_price(price, timestamp=None):
                   AND o.target_ts <= %s
                   AND %s > s.signal_ts
                   AND s.market_close_ts IS NOT NULL
-                  AND %s <= s.market_close_ts + 5 
+                  AND %s <= o.target_ts + 60 
           """, (price, price, price, price, ts, ts, ts, ts))
 
         _db_status = "CONECTADA"
@@ -340,7 +350,7 @@ def get_prediction_accuracy():
                 FROM btc_signal_outcomes AS o
                 JOIN btc_signal_snapshots AS s
                   ON s.id = o.snapshot_id
-                WHERE o.horizon_seconds = 900
+                WHERE o.horizon_seconds = -1
                   AND o.future_price IS NOT NULL
                   AND s.features->>'direction_method' = 'technical_only_v1'
             """).fetchone()
@@ -391,7 +401,7 @@ def get_recent_predictions(limit=50):
                 FROM btc_signal_snapshots AS s
                 LEFT JOIN btc_signal_outcomes AS o
                   ON o.snapshot_id = s.id
-                 AND o.horizon_seconds = 900
+                 AND o.horizon_seconds = -1
                 WHERE s.features->>'direction_method'
                     = 'technical_only_v1'
                 ORDER BY s.signal_ts DESC
