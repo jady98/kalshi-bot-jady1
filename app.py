@@ -845,10 +845,17 @@ def calculate_prediction(
             min(1.0, target_gap_pct / 0.05)
         )
 
-        normalized = (
-            0.70 * target_normalized
-            + 0.30 * technical_normalized
-        )
+        if abs(target_gap_pct) > 0.005:
+            # El lado del strike manda; la técnica solo ajusta la fuerza.
+            normalized = math.copysign(
+                0.70 * abs(target_normalized)
+                + 0.30 * abs(technical_normalized),
+                target_gap_pct
+            )
+        else:
+            # Si la proyección está prácticamente sobre el strike,
+            # no se fuerza un lado: la técnica puede dejarlo indeciso.
+            normalized = 0.30 * technical_normalized
 
         tolerance_pct = 0.005
         if target_gap_pct > tolerance_pct:
@@ -3243,8 +3250,11 @@ function updateRadar(d){
     );
     if(!Number.isFinite(chartTargetValue)) chartTargetValue=null;
 
-        $("predictionLabel").textContent =
-        "Estimación del cierre del bloque de 15 minutos";
+    $("predictionLabel").textContent =
+        d.target_gap_pct == null
+        ? "Estimación 15 min · esperando objetivo de Kalshi"
+        : "Respecto al objetivo: " + d.target_direction
+          + " (" + Number(d.target_gap_pct).toFixed(3) + "%)";
 
     $("kalshiTarget").textContent =
         d.kalshi_market_target == null
@@ -3304,7 +3314,13 @@ function updateRadar(d){
             ? "Esperando velas de Coinbase"
             : (
                 d.kalshi_market_target != null
-                ? "Coinbase + objetivo oficial de Kalshi · BRTI confirma"
+                ? "Coinbase principal · " + (
+                    d.brti_confirmation === "CONFIRMA"
+                    ? "BRTI confirma"
+                    : d.brti_confirmation === "DIVERGENCIA"
+                    ? "BRTI diverge"
+                    : "BRTI sin confirmación"
+                  )
                 : "Coinbase principal · esperando objetivo de Kalshi"
             )
         );
