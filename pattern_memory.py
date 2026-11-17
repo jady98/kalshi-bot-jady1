@@ -402,3 +402,116 @@ def get_database_counts():
             **empty,
             "error": str(exc)[:180]
         }
+
+def record_official_market_result(
+    market_ticker,
+    official_result,
+    signal_direction,
+    source="confirmacion_manual"
+):
+    global _db_status
+
+    ticker = str(market_ticker or "").strip()
+    result = str(official_result or "").strip().upper()
+    direction = str(signal_direction or "").strip().upper()
+
+    if not ticker or result not in ("SI", "NO"):
+        return False
+
+    if direction not in ("ALCISTA", "BAJISTA"):
+        return False
+
+    try:
+        with _connect() as conn:
+            conn.execute("""
+                INSERT INTO btc_official_market_results (
+                    market_ticker,
+                    official_result,
+                    signal_direction,
+                    source,
+                    recorded_ts
+                )
+                VALUES (%s, %s, %s, %s, %s)
+                ON CONFLICT (market_ticker) DO UPDATE SET
+                    official_result = EXCLUDED.official_result,
+                    signal_direction = EXCLUDED.signal_direction,
+                    source = EXCLUDED.source,
+                    recorded_ts = EXCLUDED.recorded_ts
+            """, (
+                ticker,
+                result,
+                direction,
+                str(source or "confirmacion_manual")[:80],
+                time.time()
+            ))
+
+        _db_status = "CONECTADA"
+        return True
+
+    except Exception as exc:
+        _db_status = "ERROR: " + str(exc)[:180]
+        return False
+
+
+def get_official_market_accuracy():
+
+    empty = {
+        "contracts_evaluated": 0,
+        "correct": 0,
+        "incorrect": 0,
+        "accuracy_pct": None,
+        "results": []
+    }
+
+    try:
+        with _connect() as conn:
+            rows = conn.execute("""
+                SELECT
+                    market_ticker,
+                    official_result,
+                    signal_direction,
+                    CASE
+                        WHEN (
+                            official_result = 'SI'
+                            AND signal_direction = 'ALCISTA'
+                        )
+                        OR (
+                            official_result = 'NO'
+                            AND signal_direction = 'BAJISTA'
+                        )
+                        THEN TRUE
+                        ELSE FALSE
+                    END AS correct
+                FROM btc_official_market_results
+                ORDER BY recorded_ts DESC
+            """).fetchall()
+
+        correct = sum(1 for row in rows if row[3])
+        total = len(rows)
+
+        return {
+            "contracts_evaluated": total,
+            "correct": correct,
+            "incorrect": total - correct,
+            "accuracy_pct": (
+                round(correct * 100 / total, 1)
+                if total else None
+            ),
+            "results": [
+                {
+                    "market_ticker": row[0],
+                    "official_result": row[1],
+                    "signal_direction": row[2],
+                    "evaluation": (
+                        "ACIERTO" if row[3] else "FALLO"
+                    )
+                }
+                for row in rows[:20]
+            ]
+        }
+
+    except Exception as exc:
+        return {
+            **empty,
+            "error": str(exc)[:180]
+            }
