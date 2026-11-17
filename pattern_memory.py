@@ -229,7 +229,9 @@ def record_price(price, timestamp=None):
                   AND o.future_price IS NULL
                   AND o.target_ts <= %s
                   AND %s > s.signal_ts
-            """, (price, price, price, price, ts, ts, ts))
+                  AND s.market_close_ts IS NOT NULL
+                  AND %s <= s.market_close_ts + 5 
+          """, (price, price, price, price, ts, ts, ts, ts))
 
         _db_status = "CONECTADA"
         return True
