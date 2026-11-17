@@ -78,6 +78,18 @@ def init_db():
                 ON btc_signal_snapshots(pattern, direction)
             """)
 
+             conn.execute("""
+                CREATE TABLE IF NOT EXISTS btc_official_market_results (
+                market_ticker TEXT PRIMARY KEY,
+                official_result TEXT NOT NULL
+                CHECK (official_result IN ('SI', 'NO')),
+                signal_direction TEXT NOT NULL
+                CHECK (signal_direction IN ('ALCISTA', 'BAJISTA')),
+                source TEXT NOT NULL DEFAULT 'confirmacion_manual',
+                recorded_ts DOUBLE PRECISION NOT NULL
+                )
+            """)
+
         _db_status = "CONECTADA"
         return True
 
