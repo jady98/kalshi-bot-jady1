@@ -248,6 +248,7 @@ def record_price(price, timestamp=None):
                 FROM btc_signal_snapshots AS s
                 WHERE o.snapshot_id = s.id
                   AND o.future_price IS NULL
+                  AND o.horizon_seconds > 0
                   AND o.target_ts <= %s
                   AND %s > s.signal_ts
                   AND s.market_close_ts IS NOT NULL
@@ -317,6 +318,50 @@ def get_pattern_stats(pattern):
     except Exception as exc:
         _db_status = "ERROR: " + str(exc)[:180]
         return empty
+def record_market_close(market_ticker, closing_average, resolved_ts=None):
+    """Grade KXBTC15M with the BRTI average in the 60 seconds before close."""
+    global _db_status
+    ticker = str(market_ticker or "").strip()
+    try:
+        average = float(closing_average)
+        ts = float(resolved_ts if resolved_ts is not None else time.time())
+    except (TypeError, ValueError):
+        return False
+    if not ticker or not math.isfinite(average) or average <= 0 or not math.isfinite(ts):
+        return False
+    try:
+        with _connect() as conn:
+            conn.execute("""
+                UPDATE btc_signal_outcomes AS o
+                SET future_price = %s,
+                    change_pct = CASE
+                        WHEN NULLIF(s.features->>'market_target', '') IS NOT NULL
+                         AND (s.features->>'market_target')::DOUBLE PRECISION > 0
+                        THEN ((%s / (s.features->>'market_target')::DOUBLE PRECISION) - 1) * 100
+                        ELSE NULL
+                    END,
+                    result = CASE
+                        WHEN NULLIF(s.features->>'market_target', '') IS NULL
+                          OR (s.features->>'market_target')::DOUBLE PRECISION <= 0
+                        THEN 'SIN CAMBIO'
+                        WHEN %s >= (s.features->>'market_target')::DOUBLE PRECISION
+                        THEN 'ALCISTA'
+                        ELSE 'BAJISTA'
+                    END,
+                    resolved_ts = %s
+                FROM btc_signal_snapshots AS s
+                WHERE o.snapshot_id = s.id
+                  AND o.horizon_seconds = -1
+                  AND o.future_price IS NULL
+                  AND s.market_ticker = %s
+            """, (average, average, average, ts, ticker))
+        _db_status = "CONECTADA"
+        return True
+    except Exception as exc:
+        _db_status = "ERROR: " + str(exc)[:180]
+        return False
+
+
 def get_prediction_accuracy():
     empty = {
         "predictions_evaluated": 0,
@@ -352,7 +397,7 @@ def get_prediction_accuracy():
                   ON s.id = o.snapshot_id
                 WHERE o.horizon_seconds = -1
                   AND o.future_price IS NOT NULL
-                  AND s.features->>'direction_method' = 'technical_only_v1'
+                  AND s.features->>'direction_method' = 'BRTI_PRIMARY_KALSHI_15M'
             """).fetchone()
 
         evaluated, correct, incorrect, no_change = row
@@ -403,7 +448,7 @@ def get_recent_predictions(limit=50):
                   ON o.snapshot_id = s.id
                  AND o.horizon_seconds = -1
                 WHERE s.features->>'direction_method'
-                    = 'technical_only_v1'
+                    = 'BRTI_PRIMARY_KALSHI_15M'
                 ORDER BY s.signal_ts DESC
                 LIMIT %s
             """, (limit,)).fetchall()
