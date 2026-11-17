@@ -1858,36 +1858,48 @@ button:disabled{
     display: none !important;
 }
 
-/* Tres tarjetas en una sola fila, también en móvil */
+
+/* TRES TARJETAS GRANDES EN UNA FILA */
+
 @media(max-width:600px){
+
     .grid{
         grid-template-columns:repeat(3,minmax(0,1fr));
-        gap:5px;
+        gap:6px;
     }
 
     .grid .card{
-        padding:9px 6px;
+        padding:11px 7px;
         margin-bottom:8px;
-        border-radius:11px;
+        border-radius:12px;
+    }
+
+    .grid .brand-mark{
+        min-width:23px;
+        height:23px;
+        font-size:12px;
+        margin-bottom:8px;
     }
 
     .grid .label{
-        font-size:8px;
+        font-size:9px;
         letter-spacing:0;
-        line-height:1.25;
+        line-height:1.35;
     }
 
     .grid .price{
-        font-size:clamp(11px,3.5vw,17px);
-        margin:8px 0 4px;
+        font-size:clamp(12px,3.8vw,18px);
+        font-weight:950;
+        margin:9px 0 6px;
         overflow-wrap:anywhere;
     }
 
     .grid .small{
-        font-size:8px;
-        line-height:1.3;
+        font-size:9px;
+        line-height:1.35;
     }
 }
+
 
 /* ANIMACIÓN ALCISTA */
 
