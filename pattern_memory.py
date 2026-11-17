@@ -453,7 +453,9 @@ def get_database_counts():
     empty = {
         "signals_saved": 0,
         "outcomes_resolved_15m": 0,
-        "outcomes_pending_15m": 0
+        "outcomes_pending_15m": 0,
+        "close_outcomes_resolved": 0,
+        "close_outcomes_pending": 0
     }
 
     try:
@@ -471,13 +473,25 @@ def get_database_counts():
                     (SELECT COUNT(*)
                      FROM btc_signal_outcomes
                      WHERE horizon_seconds = 900
+                     AND future_price IS NULL),
+
+                    (SELECT COUNT(*)
+                     FROM btc_signal_outcomes
+                     WHERE horizon_seconds = -1
+                     AND future_price IS NOT NULL),
+
+                    (SELECT COUNT(*)
+                     FROM btc_signal_outcomes
+                     WHERE horizon_seconds = -1
                      AND future_price IS NULL)
             """).fetchone()
 
         return {
             "signals_saved": row[0],
             "outcomes_resolved_15m": row[1],
-            "outcomes_pending_15m": row[2]
+            "outcomes_pending_15m": row[2],
+            "close_outcomes_resolved": row[3],
+            "close_outcomes_pending": row[4]
         }
 
     except Exception as exc:
