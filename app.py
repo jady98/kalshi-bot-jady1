@@ -542,19 +542,96 @@ def calculate_prediction(
     ]
 
     if len(valid_candles) < 3:
+        # Arranque rápido: mientras se forman tres velas de 1 minuto,
+        # calcula una señal provisional con los ticks BRTI recientes.
+        now = time.time()
+        recent_ticks = []
+        for item in (ticks or []):
+            try:
+                ts, tick_price = float(item[0]), float(item[1])
+                if now - 60 <= ts <= now + 2 and valid_price(tick_price):
+                    recent_ticks.append((ts, tick_price))
+            except (TypeError, ValueError, IndexError):
+                continue
+        recent_ticks.sort(key=lambda item: item[0])
+
+        if len(recent_ticks) < 3:
+            return {
+                "direction": "RECOPILANDO",
+                "predicted_price": round(float(price), 2),
+                "bullish_score": 50,
+                "bearish_score": 50,
+                "technical_strength": 0,
+                "momentum_pct": 0,
+                "ema9": None,
+                "ema21": None,
+                "rsi": None,
+                "pattern": "ESPERANDO TICKS BRTI",
+                "target_influence": "PENDIENTE"
+            }
+
+        first_ts, first_price = recent_ticks[0]
+        last_ts, last_price = recent_ticks[-1]
+        cutoff_15 = last_ts - 15
+        older = [item for item in recent_ticks if item[0] <= cutoff_15]
+        reference_15 = older[-1][1] if older else first_price
+        change_60 = ((last_price / first_price) - 1) * 100
+        change_15 = ((last_price / reference_15) - 1) * 100
+        momentum = change_15 if older else change_60
+
+        elapsed_minutes = max(0.25, (last_ts - first_ts) / 60.0)
+        rate_per_minute = change_60 / elapsed_minutes if elapsed_minutes > 0 else 0.0
+        remaining_minutes = max(0.0, min(15.0, float(seconds_to_close or 0) / 60.0))
+        projected_change = max(-0.30, min(0.30, rate_per_minute * remaining_minutes * 0.20))
+        predicted = float(price) * (1 + projected_change / 100)
+
+        target_gap_pct = None
+        target_direction = "SIN OBJETIVO"
+        target_influence = "SIN OBJETIVO"
+        normalized = max(-1.0, min(1.0, momentum / 0.05)) * 0.55
+
+        if valid_price(market_target):
+            target_gap_pct = ((predicted - float(market_target)) / float(market_target)) * 100
+            target_normalized = max(-1.0, min(1.0, target_gap_pct / 0.05))
+            normalized = (
+                math.copysign(0.70 * abs(target_normalized) + 0.30 * abs(normalized), target_gap_pct)
+                if abs(target_gap_pct) > 0.005 else normalized * 0.30
+            )
+            target_direction = (
+                "ALCISTA" if target_gap_pct > 0.005
+                else "BAJISTA" if target_gap_pct < -0.005
+                else "CERCA DEL OBJETIVO"
+            )
+            target_influence = (
+                "PROYECCIÓN SOBRE OBJETIVO" if target_gap_pct > 0.005
+                else "PROYECCIÓN BAJO OBJETIVO" if target_gap_pct < -0.005
+                else "CERCA DEL OBJETIVO"
+            )
+
+        normalized, direction = stabilize_direction(normalized, seconds_to_close)
+        bullish = max(20, min(80, round(50 + normalized * 30, 1)))
+        bearish = round(100 - bullish, 1)
+        if direction == "ALCISTA" and bullish < 50:
+            direction = "INDECISO"
+        elif direction == "BAJISTA" and bearish < 50:
+            direction = "INDECISO"
 
         return {
-            "direction": "RECOPILANDO",
-            "predicted_price": round(float(price), 2),
-            "bullish_score": 50,
-            "bearish_score": 50,
-            "technical_strength": 0,
-            "momentum_pct": 0,
+            "direction": direction,
+            "predicted_price": round(predicted, 2),
+            "bullish_score": bullish,
+            "bearish_score": bearish,
+            "technical_strength": round(abs(normalized) * 100),
+            "momentum_pct": round(momentum, 5),
             "ema9": None,
             "ema21": None,
             "rsi": None,
-            "pattern": "RECOPILANDO VELAS",
-            "target_influence": "PENDIENTE"
+            "pattern": "SEÑAL INICIAL BRTI · TICKS",
+            "target_influence": target_influence,
+            "target_gap_pct": round(target_gap_pct, 5) if target_gap_pct is not None else None,
+            "target_direction": target_direction,
+            "technical_score": round(normalized, 4),
+            "direction_method": "BRTI_TICKS_BOOTSTRAP_15M"
         }
 
     # --------------------------------------
