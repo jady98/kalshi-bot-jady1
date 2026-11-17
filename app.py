@@ -1569,8 +1569,8 @@ main{
 
 .grid{
     display:grid;
-    grid-template-columns:1fr 1fr;
-    gap:9px;
+    grid-template-columns:repeat(3,minmax(0,1fr));
+    gap:8px;
 }
 
 .card{
@@ -1763,11 +1763,40 @@ button:disabled{
 
 }
 
-/* OCULTAR TARJETAS SECUNDARIAS */
-
-.target-card,
+/* Mantener oculto el panel técnico antiguo */
 .technical-card {
     display: none !important;
+}
+
+/* Tres tarjetas en una sola fila, también en móvil */
+@media(max-width:600px){
+    .grid{
+        grid-template-columns:repeat(3,minmax(0,1fr));
+        gap:5px;
+    }
+
+    .grid .card{
+        padding:9px 6px;
+        margin-bottom:8px;
+        border-radius:11px;
+    }
+
+    .grid .label{
+        font-size:8px;
+        letter-spacing:0;
+        line-height:1.25;
+    }
+
+    .grid .price{
+        font-size:clamp(11px,3.5vw,17px);
+        margin:8px 0 4px;
+        overflow-wrap:anywhere;
+    }
+
+    .grid .small{
+        font-size:8px;
+        line-height:1.3;
+    }
 }
 
 /* ANIMACIÓN ALCISTA */
