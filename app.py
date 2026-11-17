@@ -1362,11 +1362,17 @@ def get_data():
     snapshot_minute = int(now // 60)
     should_save_snapshot = False
 
-    if cp is not None and coinbase_live:
-        with lock:
-            if last_pattern_snapshot_minute != snapshot_minute:
-                last_pattern_snapshot_minute = snapshot_minute
-                should_save_snapshot = True
+    if (
+    cp is not None
+    and coinbase_live
+    and market_ticker
+    and market_close is not None
+    and market_close > now
+):
+    with lock:
+        if last_pattern_snapshot_minute != snapshot_minute:
+            last_pattern_snapshot_minute = snapshot_minute
+            should_save_snapshot = True
 
     if should_save_snapshot:
         pattern_memory.save_snapshot({
