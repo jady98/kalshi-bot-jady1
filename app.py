@@ -1966,30 +1966,34 @@ button:disabled{
 
 <div class="grid">
 
-    <section class="card">
+    
+<div class="grid">
+
+    <section class="card coinbase-card">
+
+        <div class="brand-mark">CB</div>
 
         <div class="label">
             PRECIO ACTUAL · COINBASE
         </div>
 
-        <div class="price" id="brtiPrice">
-            --
-        </div>
+        <div class="price" id="brtiPrice">--</div>
 
         <div class="small" id="brtiAge">
             Esperando índice
         </div>
 
     </section>
-        <section class="card target-card">
+
+    <section class="card target-card kalshi-card">
+
+        <div class="brand-mark">K</div>
 
         <div class="label">
             PRECIO OBJETIVO · KALSHI
         </div>
 
-        <div class="price" id="kalshiTarget">
-            --
-        </div>
+        <div class="price" id="kalshiTarget">--</div>
 
         <div class="small" id="kalshiTargetLabel">
             Esperando contrato activo
@@ -1997,16 +2001,15 @@ button:disabled{
 
     </section>
 
+    <section class="card forecast-card">
 
-    <section class="card">
+        <div class="brand-mark">15M</div>
 
         <div class="label">
             PREDICCIÓN · CIERRE 15 MIN
         </div>
 
-        <div class="price predicted" id="predictedPrice">
-            --
-        </div>
+        <div class="price predicted" id="predictedPrice">--</div>
 
         <div class="small" id="predictionLabel">
             Esperando objetivo de Kalshi
