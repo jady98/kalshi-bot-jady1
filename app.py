@@ -62,6 +62,7 @@ kalshi_market_target = None
 kalshi_market_ticker = ""
 kalshi_market_close = None
 kalshi_market_error = ""
+market_resolution_queue = deque(maxlen=20)
 
 started = False
 last_pattern_snapshot_minute = None
@@ -72,6 +73,7 @@ _alert_state = {
     "previous_direction": None,
     "previous_bullish": None,
     "previous_coinbase_live": None,
+    "previous_brti_live": None,
     "peak_directional_probability": None,
     "last_alert_ts": 0.0,
     "last_alert_key": None,
@@ -256,6 +258,8 @@ def set_brti(price, timestamp=None):
         brti_ticks.append((timestamp, price))
         update_candle(brti_candles, price, timestamp)
 
+    pattern_memory.record_price(price, timestamp)
+
 
 # ==========================================
 # REGISTRO COINBASE
@@ -280,9 +284,6 @@ def set_coinbase(price, timestamp=None):
             price,
             timestamp
         )
-
-    pattern_memory.record_price(price, timestamp)
-
 
 # ==========================================
 # INDICADORES
@@ -368,21 +369,27 @@ def calculate_vwap(history):
 # PROMEDIO LOCAL DE LOS ÚLTIMOS 60 SEGUNDOS
 # ==========================================
 
-def calculate_brti_average(ticks):
+def calculate_brti_window_average(ticks, start_ts, end_ts):
+    """Average within each second first, so faster message bursts cannot overweight a second."""
+    per_second = {}
+    for timestamp, price in ticks:
+        try:
+            timestamp = float(timestamp)
+            price = float(price)
+        except (TypeError, ValueError):
+            continue
+        if start_ts <= timestamp < end_ts and valid_price(price):
+            per_second.setdefault(int(timestamp), []).append(price)
 
-    now = time.time()
-
-    recent = [
-        price
-        for timestamp, price in ticks
-        if now - timestamp <= 60
-        and timestamp <= now + 1
-    ]
-
-    if not recent:
+    if not per_second:
         return None, 0
+    averages = [sum(values) / len(values) for values in per_second.values()]
+    return sum(averages) / len(averages), len(averages)
 
-    return sum(recent) / len(recent), len(recent)
+
+def calculate_brti_average(ticks):
+    now = time.time()
+    return calculate_brti_window_average(ticks, now - 60, now + 0.001)
 
 
 # ==========================================
@@ -787,19 +794,20 @@ def calculate_prediction(
             rate_per_minute = rates[0] * 0.65 + rates[1] * 0.35
         else:
             rate_per_minute = rates[0]
-
         projected_change = rate_per_minute * remaining_minutes * 0.25
     else:
+        rate_per_minute = 0.0
         projected_change = 0.0
 
-    projected_change = max(
-        -0.30,
-        min(0.30, projected_change)
-    )
+    projected_change = max(-0.30, min(0.30, projected_change))
 
-    predicted = float(price) * (
-        1 + projected_change / 100
-    )
+    # Kalshi compara promedios BRTI de 60 segundos, no el último tick.
+    # Proyecta el precio al cierre y corrige al punto medio de la ventana final.
+    projected_close_price = float(price) * (1 + projected_change / 100)
+    effective_rate = rate_per_minute * 0.25
+    closing_window_fraction = min(1.0, remaining / 60.0)
+    average_adjustment_pct = effective_rate * closing_window_fraction * 0.5
+    predicted = projected_close_price / (1 + average_adjustment_pct / 100)
 
     # --------------------------------------
     # INFLUENCIA DEL OBJETIVO KALSHI
@@ -847,7 +855,7 @@ def calculate_prediction(
         )
 
         if abs(target_gap_pct) > 0.005:
-            # El lado del strike manda; la técnica solo ajusta la fuerza.
+            # BRTI determina el lado frente al strike; Coinbase solo confirma.
             normalized = math.copysign(
                 0.70 * abs(target_normalized)
                 + 0.30 * abs(technical_normalized),
@@ -905,9 +913,9 @@ def calculate_prediction(
         "target_direction": target_direction,
         "technical_score": round(technical_normalized, 4),
         "direction_method": (
-            "COINBASE_TECHNICAL_PLUS_KALSHI_TARGET"
+            "BRTI_PRIMARY_KALSHI_15M"
             if valid_price(market_target)
-            else "COINBASE_TECHNICAL_ONLY_NO_TARGET"
+            else "BRTI_PRIMARY_NO_TARGET"
         )
     }
 
@@ -1375,6 +1383,15 @@ def kalshi_market_worker():
                 close_ts, ticker, target = found[0]
 
                 with lock:
+                    if (
+                        kalshi_market_ticker
+                        and kalshi_market_ticker != ticker
+                        and kalshi_market_close is not None
+                    ):
+                        market_resolution_queue.append((
+                            kalshi_market_ticker,
+                            kalshi_market_close
+                        ))
 
                     kalshi_market_target = target
                     kalshi_market_ticker = ticker
@@ -1466,13 +1483,22 @@ def update_alert_state(direction, bullish, ticker, divergence_pct,
         previous_direction = state["previous_direction"]
         previous_bullish = state["previous_bullish"]
         previous_coinbase_live = state["previous_coinbase_live"]
+        previous_brti_live = state["previous_brti_live"]
 
-        if previous_coinbase_live is True and not coinbase_live:
+        if previous_brti_live is True and not brti_live:
+            alert = (
+                "BRTI_DESCONECTADO",
+                "CRITICA",
+                "BRTI SIN DATOS",
+                "Se perdió el índice de liquidación de Kalshi. La predicción queda suspendida hasta recuperar BRTI."
+            )
+
+        if alert is None and previous_coinbase_live is True and not coinbase_live:
             alert = (
                 "COINBASE_DESCONECTADO",
-                "CRITICA",
+                "AVISO",
                 "COINBASE SIN DATOS",
-                "Se perdió la fuente principal. La predicción queda sin confirmación fiable hasta recuperar Coinbase."
+                "Se perdió la fuente secundaria de confirmación. BRTI sigue siendo la referencia principal si continúa en vivo."
             )
 
         if alert is None and direction in ("ALCISTA", "BAJISTA"):
@@ -1522,7 +1548,7 @@ def update_alert_state(direction, bullish, ticker, divergence_pct,
                 "AVISO",
                 "BRTI Y COINBASE DIVERGEN",
                 "Las fuentes difieren " + str(round(divergence_pct, 3))
-                + "%. Coinbase sigue siendo la fuente principal; confirma los datos."
+                + "%. BRTI es la referencia de liquidación; Coinbase es la confirmación secundaria."
             )
 
         if alert is not None:
@@ -1563,6 +1589,7 @@ def update_alert_state(direction, bullish, ticker, divergence_pct,
         )
         state["previous_bullish"] = bullish
         state["previous_coinbase_live"] = coinbase_live
+        state["previous_brti_live"] = brti_live
 
         current_alert = dict(state["alert"])
 
@@ -1586,6 +1613,8 @@ def update_alert_state(direction, bullish, ticker, divergence_pct,
 # ==========================================
 
 def get_data():
+
+    global market_resolution_queue
 
     with lock:
 
@@ -1642,12 +1671,31 @@ def get_data():
         and 0 <= coinbase_age <= STALE_SECONDS
     )
 
+    if market_ticker and market_close is not None and now >= market_close:
+        with lock:
+            if not any(item[0] == market_ticker for item in market_resolution_queue):
+                market_resolution_queue.append((market_ticker, market_close))
+
+    for queued_ticker, queued_close in list(market_resolution_queue):
+        if now < queued_close:
+            continue
+        closing_average, closing_samples = calculate_brti_window_average(
+            ticks, queued_close - 60, queued_close
+        )
+        if closing_average is not None and closing_samples >= 45:
+            pattern_memory.record_market_close(queued_ticker, closing_average, now)
+            with lock:
+                market_resolution_queue = deque(
+                    (item for item in market_resolution_queue if item[0] != queued_ticker),
+                    maxlen=20
+                )
+
     indicators = calculate_prediction(
-        cp,
-        [],
+        bp if brti_live else None,
+        ticks,
         countdown,
         market_target,
-        coin_candles
+        candles if brti_live else None
     )
     global last_pattern_snapshot_minute
 
@@ -1655,9 +1703,10 @@ def get_data():
     should_save_snapshot = False
 
     if (
-        cp is not None
-        and coinbase_live
+        bp is not None
+        and brti_live
         and market_ticker
+        and valid_price(market_target)
         and market_close is not None
         and market_close > now
     ):
@@ -1669,7 +1718,7 @@ def get_data():
         if should_save_snapshot:
             pattern_memory.save_snapshot({
                 "signal_ts": now,
-                "price": cp,
+                "price": bp,
                 "market_ticker": market_ticker,
                 "market_close_ts": market_close,
                 "direction": indicators.get("direction"),
@@ -1684,7 +1733,9 @@ def get_data():
                 "features": {
                     "target_influence": indicators.get("target_influence"),
                     "technical_strength": indicators.get("technical_strength"),
-                    "direction_method": indicators.get("direction_method")
+                    "direction_method": indicators.get("direction_method"),
+                    "signal_source": "BRTI",
+                    "market_target": market_target
                 }
             })
 
@@ -1769,6 +1820,7 @@ def get_data():
         ),
 
         "brti_average_samples": average_count,
+        "signal_source": "BRTI" if brti_live else "SIN DATOS BRTI",
 
         **indicators
     }
@@ -1817,6 +1869,13 @@ def health():
         "coinbase_connected": data["coinbase_connected"],
 
         "coinbase_candles": len(data["coinbase_candles"]),
+        "signal_source": data["signal_source"],
+        "brti_average_60s": data["brti_average_60s"],
+        "brti_average_samples": data["brti_average_samples"],
+        "direction": data["direction"],
+        "predicted_price": data["predicted_price"],
+        "kalshi_market_target": data["kalshi_market_target"],
+        "kalshi_market_ticker": data["kalshi_market_ticker"],
 
         "database_status": pattern_memory.database_status(),
         "database_counts": pattern_memory.get_database_counts(),
@@ -2344,7 +2403,7 @@ button:disabled{
         <div class="brand-mark">CB</div>
 
         <div class="label">
-            PRECIO ACTUAL · COINBASE
+            PRECIO ACTUAL · BRTI
         </div>
 
         <div class="price" id="coinbasePrice">--</div>
@@ -2436,7 +2495,7 @@ button:disabled{
     </div>
 
     <div class="small" id="signalStage">
-        Coinbase principal · BRTI como confirmación
+        BRTI principal · Coinbase como confirmación
     </div>
 
 </section>
@@ -3243,7 +3302,7 @@ canvas.addEventListener(
 function updateRadar(d){
 
     $("coinbasePrice").textContent =
-        money(d.coinbase_price);
+        money(d.brti_price);
 
     const direction=d.direction || "RECOPILANDO";
     const predictedElement=$("predictedPrice");
@@ -3280,10 +3339,11 @@ function updateRadar(d){
             || "Esperando contrato activo de Kalshi"
         );
 
-     $("coinbaseAge").textContent=
-        d.coinbase_age==null
-        ? "Esperando Coinbase"
-        : "Coinbase actualizado hace "+d.coinbase_age+" s";
+     $("coinbaseAge").textContent =
+        d.brti_age == null
+        ? "Esperando BRTI"
+        : "BRTI actualizado hace " + d.brti_age
+          + " s · Coinbase respaldo: " + money(d.coinbase_price);
 
 
     $("direction").textContent=direction;
@@ -3325,14 +3385,14 @@ function updateRadar(d){
             ? "Esperando velas de Coinbase"
             : (
                 d.kalshi_market_target != null
-                ? "Coinbase principal · " + (
+                ? "BRTI principal · " + (
                     d.brti_confirmation === "CONFIRMA"
-                    ? "BRTI confirma"
+                    ? "Coinbase confirma"
                     : d.brti_confirmation === "DIVERGENCIA"
-                    ? "BRTI diverge"
-                    : "BRTI sin confirmación"
+                    ? "Coinbase diverge"
+                    : "Coinbase sin confirmación"
                   )
-                : "Coinbase principal · esperando objetivo de Kalshi"
+                : "BRTI principal · esperando objetivo de Kalshi"
             )
         );
 
