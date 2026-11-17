@@ -1499,6 +1499,23 @@ def health():
 
     })
 
+@app.route("/stats")
+def stats():
+
+    start_services()
+
+    return jsonify({
+
+        "database_status":
+            pattern_memory.database_status(),
+
+        "database_counts":
+            pattern_memory.get_database_counts(),
+
+        "prediction_accuracy":
+            pattern_memory.get_prediction_accuracy()
+
+    })
 
 HTML = r"""
 <!DOCTYPE html>
