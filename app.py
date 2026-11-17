@@ -1845,6 +1845,7 @@ def get_data():
         ),
 
         "brti_average_samples": average_count,
+        "brti_tick_count": len(ticks),
         "signal_source": signal_source,
         "candle_source": candle_source,
 
@@ -1896,7 +1897,7 @@ def health():
 
         "coinbase_candles": len(data["coinbase_candles"]),
         "brti_candles": len(data["brti_candles"]),
-        "brti_ticks": len(data["brti_ticks"]),
+        "brti_ticks": data["brti_tick_count"],
         "candle_source": data["candle_source"],
         "direction_method": data["direction_method"],
         "pattern": data["pattern"],
