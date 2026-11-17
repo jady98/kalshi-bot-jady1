@@ -1548,8 +1548,21 @@ def start_services():
             restored = pattern_memory.get_brti_candles(MAX_CANDLES)
             if restored:
                 with lock:
+                    # Las velas BRTI en memoria tienen prioridad si llegaron
+                    # mientras se recuperaba PostgreSQL.
+                    merged = {
+                        int(row["time"]): dict(row)
+                        for row in restored
+                    }
+                    for row in brti_candles:
+                        merged[int(row["time"])] = dict(row)
                     brti_candles.clear()
-                    brti_candles.extend(restored[-MAX_CANDLES:])
+                    brti_candles.extend(
+                        sorted(
+                            merged.values(),
+                            key=lambda row: int(row["time"])
+                        )[-MAX_CANDLES:]
+                    )
                 print(
                     "BRTI: HISTORIAL RESTAURADO",
                     len(restored),
