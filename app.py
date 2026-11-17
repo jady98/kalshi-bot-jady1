@@ -1699,33 +1699,13 @@ def get_data():
                         maxlen=20
                     )
 
-    # Selección rápida de fuente: BRTI manda cuando tiene datos suficientes.
-    # Si BRTI no tiene al menos 3 velas, usar el historial Coinbase ya cargado.
-    if brti_live:
-        analysis_price = bp
-        signal_source = "BRTI"
-    elif coinbase_live:
-        analysis_price = cp
-        signal_source = "COINBASE"
-    else:
-        analysis_price = None
-        signal_source = "SIN DATOS"
+    # FUENTE UNICA DE PREDICCION: BRTI.
+    # Coinbase permanece conectado solo para diagnostico/comparacion.
+    analysis_price = bp if brti_live else None
+    signal_source = "BRTI" if brti_live else "SIN DATOS BRTI"
 
-    if brti_live and len(candles) >= 3:
-        analysis_candles = candles
-        candle_source = "BRTI"
-    elif coinbase_live and len(coin_candles) >= 3:
-        analysis_candles = coin_candles
-        candle_source = "COINBASE"
-    elif len(candles) >= 3:
-        analysis_candles = candles
-        candle_source = "BRTI"
-    elif len(coin_candles) >= 3:
-        analysis_candles = coin_candles
-        candle_source = "COINBASE"
-    else:
-        analysis_candles = []
-        candle_source = "SIN VELAS"
+    analysis_candles = candles if brti_live else []
+    candle_source = "BRTI" if brti_live and len(candles) >= 3 else "SIN VELAS BRTI"
 
     indicators = calculate_prediction(
         analysis_price,
@@ -1737,10 +1717,10 @@ def get_data():
 
     indicators["signal_source"] = signal_source
     indicators["candle_source"] = candle_source
-    if signal_source == "COINBASE":
-        indicators["direction_method"] = "COINBASE_FALLBACK_15M"
-    elif candle_source == "COINBASE":
-        indicators["direction_method"] = "BRTI_PRIMARY_COINBASE_TECHNICAL_FALLBACK"
+    indicators["direction_method"] = (
+        "BRTI_ONLY_15M" if brti_live and len(analysis_candles) >= 3
+        else "BRTI_WAITING_FOR_DATA"
+    )
     global last_pattern_snapshot_minute
 
     snapshot_minute = int(now // 60)
