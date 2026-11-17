@@ -1264,12 +1264,6 @@ def start_services():
             while not pattern_memory.init_db():
                 time.sleep(30)
 
-            pattern_memory.record_official_market_result(
-                "KXBTC15M-26NOV171045-45",
-                "NO",
-                "BAJISTA",
-                "confirmacion_usuario"
-            )
 
     threading.Thread(     
      
