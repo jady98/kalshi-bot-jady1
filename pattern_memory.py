@@ -283,7 +283,7 @@ def get_pattern_stats(pattern):
                 JOIN btc_signal_snapshots AS s
                   ON s.id = o.snapshot_id
                 WHERE s.pattern = %s
-                  AND o.horizon_seconds = 900
+                  AND o.horizon_seconds = -1
                   AND o.future_price IS NOT NULL
             """, (str(pattern),)).fetchone()
 
