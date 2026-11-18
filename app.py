@@ -1963,30 +1963,94 @@ def build_forward_guidance(
         else 100 - bullish if direction == "BAJISTA"
         else 50.0
     )
+    strength = float(indicators.get("technical_strength", 0) or 0)
+    ema9 = indicators.get("ema9")
+    ema21 = indicators.get("ema21")
+    rsi = indicators.get("rsi")
+
     def agrees(value):
         if value is None or direction not in ("ALCISTA", "BAJISTA"):
             return False
         return value > 0.001 if direction == "ALCISTA" else value < -0.001
+
     align_1m = agrees(change_1m)
     align_3m = agrees(change_3m)
-    # No dar entrada si quedan menos de 60 segundos: no hay margen operativo
-    # razonable y aumenta el riesgo de alertar justo al expirar el contrato.
+    opposite_1m = change_1m is not None and (
+        change_1m < -0.012 if direction == "ALCISTA" else change_1m > 0.012
+    )
+    opposite_3m = change_3m is not None and (
+        change_3m < -0.012 if direction == "ALCISTA" else change_3m > 0.012
+    )
+    ema_aligned = (
+        ema9 is not None and ema21 is not None
+        and (float(ema9) > float(ema21) if direction == "ALCISTA"
+             else float(ema9) < float(ema21))
+    ) if direction in ("ALCISTA", "BAJISTA") else False
+    rsi_blocked = (
+        rsi is not None and (
+            (direction == "ALCISTA" and float(rsi) >= 78)
+            or (direction == "BAJISTA" and float(rsi) <= 22)
+        )
+    )
+
     stage = "OBSERVAR"
-    enough_time = seconds_left >= 60
-    if enough_time and direction in ("ALCISTA", "BAJISTA"):
-        if side_probability >= 56 and (align_1m or align_3m):
-            stage = "PREALERTA"
-        if side_probability >= 64 and align_1m and align_3m:
-            stage = "ENTRADA"
-    if not enough_time:
+    note = "Sin coincidencia suficiente todavía. Espera confirmación en 1 y 3 minutos."
+    if not valid_price(price):
+        stage = "BRTI SIN DATOS"
+        note = "No se emite señal: el índice BRTI no está disponible."
+    elif seconds_left < 120:
         stage = "CIERRE PRÓXIMO · SIN ENTRADA"
-    elif change_1m is None and change_3m is None:
-        stage = "SIN CONFIRMACIÓN CORTA"
+        note = "Quedan menos de 2 minutos. Evita una entrada tardía en este contrato."
+    elif change_1m is None or change_3m is None:
+        stage = "RECOPILANDO CONFIRMACIÓN"
+        note = "Faltan datos completos de movimiento de 1 y 3 minutos."
+    elif direction not in ("ALCISTA", "BAJISTA"):
+        stage = "OBSERVAR · SIN DIRECCIÓN"
+        note = "La señal principal no tiene dirección definida; no se fuerza una alerta."
+    elif opposite_1m or opposite_3m:
+        stage = "OBSERVAR · MOVIMIENTOS EN CONFLICTO"
+        note = "El movimiento corto contradice la dirección principal. Espera que 1 y 3 minutos se alineen."
+    elif side_probability >= 58 and strength >= 25 and (align_1m or align_3m):
+        stage = "PREALERTA"
+        note = (
+            "Posible " + direction + " · " + str(round(side_probability, 1))
+            + "% a favor. " + ("1 min alineado" if align_1m else "1 min pendiente")
+            + " · " + ("3 min alineado" if align_3m else "3 min pendiente")
+            + " · EMA " + ("alineadas" if ema_aligned else "sin confirmar")
+            + ". Todavía no es entrada confirmada."
+        )
+        if side_probability >= 67 and strength >= 40 and align_1m and align_3m and ema_aligned and not rsi_blocked:
+            stage = "ENTRADA"
+            note = (
+                "CONFIRMACIÓN " + direction + " · " + str(round(side_probability, 1))
+                + "% a favor · fuerza " + str(round(strength))
+                + "% · 1 y 3 min alineados · EMA 9/21 alineadas"
+                + (" · RSI " + str(round(float(rsi), 1)) if rsi is not None else "")
+                + ". Verifica el precio del contrato y el riesgo antes de decidir."
+            )
+        elif rsi_blocked:
+            note += " RSI muy extendido: no perseguir el movimiento."
+        elif not ema_aligned:
+            note += " Falta confirmación de EMA 9/21."
+        elif strength < 40:
+            note += " La fuerza técnica aún es insuficiente."
+    elif side_probability < 58:
+        note = "Probabilidad direccional inferior al umbral de prealerta (58%)."
+    elif strength < 25:
+        note = "Fuerza técnica insuficiente para activar una prealerta."
+    elif not (align_1m or align_3m):
+        note = "El movimiento de 1 y 3 minutos todavía no acompaña la dirección."
     return {
         "short_change_1m_pct": round(change_1m, 5) if change_1m is not None else None,
         "short_change_3m_pct": round(change_3m, 5) if change_3m is not None else None,
         "short_predicted_price_1m": round(forecast_1m, 2) if forecast_1m is not None else None,
         "short_predicted_price_3m": round(forecast_3m, 2) if forecast_3m is not None else None,
+        "guidance_probability": round(side_probability, 1),
+        "guidance_strength": round(strength, 1),
+        "guidance_1m_aligned": align_1m,
+        "guidance_3m_aligned": align_3m,
+        "guidance_ema_aligned": ema_aligned,
+        "guidance_note": note,
         "short_direction": direction if stage in ("PREALERTA", "ENTRADA") else "INDECISO",
         "entry_stage": stage,
         "entry_direction": direction if stage in ("PREALERTA", "ENTRADA") else None,
@@ -1994,8 +2058,7 @@ def build_forward_guidance(
         "entry_seconds_remaining": seconds_left,
         "signal_stage": (
             stage + " · " + direction + " · " + str(round(side_probability, 1)) + "%"
-            if stage in ("PREALERTA", "ENTRADA")
-            else stage + " · confirmación de 1-3 min"
+            if stage in ("PREALERTA", "ENTRADA") else stage
         )
     }
 
@@ -2035,7 +2098,7 @@ def update_guidance_alert(guidance, ticker, contract_active=False):
                 "type": "PROTEGER",
                 "level": "CRITICA",
                 "message": "SEÑAL PERDIÓ CONFIRMACIÓN · VALORA SALIR",
-                "detail": "La señal del contrato " + str(ticker) + " perdió la confirmación de 1 y 3 minutos. Quedan " + str(seconds_left) + " segundos; vuelve a evaluar el riesgo.",
+                "detail": str(guidance.get("guidance_note") or "La señal perdió confirmación en los movimientos cortos.") + " Quedan " + str(seconds_left) + " segundos; reevalúa el riesgo.",
                 "ticker": str(ticker),
                 "seconds_remaining": seconds_left,
                 "timestamp": now
@@ -2047,7 +2110,7 @@ def update_guidance_alert(guidance, ticker, contract_active=False):
                 "type": "ENTRADA",
                 "level": "AVISO",
                 "message": "ENTRADA CONFIRMADA · " + str(direction),
-                "detail": "Contrato " + str(ticker) + ". Quedan " + str(seconds_left) + " segundos. Dirección principal y movimientos de 1 y 3 minutos alineados; verifica precio y riesgo antes de decidir.",
+                "detail": str(guidance.get("guidance_note") or "Dirección principal y movimientos cortos alineados.") + " Contrato " + str(ticker) + ". Quedan " + str(seconds_left) + " segundos.",
                 "ticker": str(ticker),
                 "seconds_remaining": seconds_left,
                 "timestamp": now
@@ -2057,7 +2120,7 @@ def update_guidance_alert(guidance, ticker, contract_active=False):
                 "type": "PREALERTA",
                 "level": "AVISO",
                 "message": "PREALERTA · POSIBLE " + str(direction),
-                "detail": "Contrato " + str(ticker) + ". Quedan " + str(seconds_left) + " segundos. Se está formando una dirección; todavía no es una entrada confirmada.",
+                "detail": str(guidance.get("guidance_note") or "Se está formando una dirección; todavía no es entrada confirmada.") + " Contrato " + str(ticker) + ". Quedan " + str(seconds_left) + " segundos.",
                 "ticker": str(ticker),
                 "seconds_remaining": seconds_left,
                 "timestamp": now
@@ -3472,11 +3535,9 @@ function updateRadar(d){
     const alertType = String(alertData.type || "").toUpperCase();
     const entryStage = String(d.entry_stage || "").toUpperCase();
     const alertDirection = String(d.entry_direction || d.direction || "").toUpperCase();
-    const activePrealert = alertType === "PREALERTA" ||
-        (!alertType && entryStage === "PREALERTA");
-    const activeEntry = alertType === "ENTRADA" ||
-        (!alertType && entryStage === "ENTRADA");
-    const activeProtect = alertType === "PROTEGER";
+    const activePrealert = entryStage === "PREALERTA";
+    const activeEntry = entryStage === "ENTRADA";
+    const activeProtect = alertType === "PROTEGER" && !activeEntry;
     $("prealertCard").classList.toggle("active", activePrealert);
     $("entryCard").classList.toggle("active", activeEntry);
     $("protectCard").classList.toggle("active", activeProtect);
@@ -3485,19 +3546,13 @@ function updateRadar(d){
     $("entryTitle").textContent = activeEntry
         ? "ENTRADA CONFIRMADA " + (alertDirection || "") : "ENTRADA CONFIRMADA";
     $("protectTitle").textContent = activeProtect
-        ? "PROTEGER TU ENTRADA" : "PROTEGER TU ENTRADA";
-    if (activePrealert) {
-        $("prealertDetail").textContent = alertData.detail ||
-            "Se está formando un movimiento " + (alertDirection || "direccional") + ". Todavía no es confirmación completa.";
-    }
-    if (activeEntry) {
-        $("entryDetail").textContent = alertData.detail ||
-            "La dirección principal y los movimientos de 1 y 3 minutos están alineados.";
-    }
-    if (activeProtect) {
-        $("protectDetail").textContent = alertData.detail ||
-            "La señal confirmada se debilitó. Revisa el contrato y el riesgo.";
-    }
+        ? "PROTEGER · SEÑAL DEBILITADA" : "PROTEGER TU ENTRADA";
+    const guidanceNote = d.guidance_note || "El radar comprueba dirección, fuerza y movimientos de 1 y 3 minutos.";
+    $("prealertDetail").textContent = guidanceNote;
+    $("entryDetail").textContent = guidanceNote;
+    $("protectDetail").textContent = activeProtect
+        ? (alertData.detail || "La señal perdió confirmación. Reevalúa el riesgo.")
+        : "Se activa cuando una entrada confirmada pierde alineación o cambia de dirección.";
 
 
     $("ema9").textContent=
