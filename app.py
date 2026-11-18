@@ -2324,6 +2324,12 @@ def stats():
          "prediction_accuracy_by_source":
             pattern_memory.get_prediction_accuracy_by_source(),
 
+         "prediction_accuracy_15m":
+            pattern_memory.get_15m_prediction_accuracy(),
+
+         "prediction_accuracy_15m_by_source":
+            pattern_memory.get_15m_prediction_accuracy_by_source(),
+
          "official_market_accuracy":
             pattern_memory.get_official_market_accuracy()
 
