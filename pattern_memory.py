@@ -615,6 +615,149 @@ def get_prediction_accuracy_by_source():
         return {"sources": [], "error": str(exc)[:180]}
 
 
+def get_15m_prediction_accuracy():
+    """Precisión direccional a 15 minutos, usando la última señal resuelta por contrato."""
+    empty = {
+        "predictions_evaluated": 0, "correct": 0, "incorrect": 0,
+        "no_change": 0, "indecisive_contracts": 0,
+        "contracts_evaluated": 0, "accuracy_pct": None,
+        "measurement": "ÚLTIMA SEÑAL RESUELTA POR CONTRATO · HORIZONTE 900S"
+    }
+    try:
+        with _connect() as conn:
+            row = conn.execute("""
+                WITH latest AS (
+                    SELECT DISTINCT ON (s.market_ticker)
+                        s.market_ticker, s.direction, o.result
+                    FROM btc_signal_snapshots AS s
+                    JOIN btc_signal_outcomes AS o
+                      ON o.snapshot_id = s.id
+                     AND o.horizon_seconds = 900
+                     AND o.future_price IS NOT NULL
+                    WHERE s.market_ticker IS NOT NULL
+                      AND s.signal_ts + 900 <= s.market_close_ts
+                    ORDER BY s.market_ticker, s.signal_ts DESC, s.id DESC
+                )
+                SELECT
+                    COUNT(*) FILTER (
+                        WHERE direction IN ('ALCISTA', 'BAJISTA')
+                          AND result IN ('ALCISTA', 'BAJISTA')
+                    ),
+                    COUNT(*) FILTER (
+                        WHERE direction IN ('ALCISTA', 'BAJISTA')
+                          AND direction = result
+                    ),
+                    COUNT(*) FILTER (
+                        WHERE direction IN ('ALCISTA', 'BAJISTA')
+                          AND result IN ('ALCISTA', 'BAJISTA')
+                          AND direction <> result
+                    ),
+                    COUNT(*) FILTER (
+                        WHERE direction IN ('ALCISTA', 'BAJISTA')
+                          AND result = 'SIN CAMBIO'
+                    ),
+                    COUNT(*) FILTER (
+                        WHERE direction IN ('INDECISO', 'RECOPILANDO')
+                           OR direction IS NULL
+                    )
+                FROM latest
+            """).fetchone()
+        evaluated, correct, incorrect, no_change, indecisive = row
+        total = correct + incorrect
+        return {
+            "predictions_evaluated": evaluated,
+            "correct": correct,
+            "incorrect": incorrect,
+            "no_change": no_change,
+            "indecisive_contracts": indecisive,
+            "contracts_evaluated": evaluated,
+            "accuracy_pct": round(correct * 100 / total, 1) if total else None,
+            "measurement": "ÚLTIMA SEÑAL RESUELTA POR CONTRATO · HORIZONTE 900S"
+        }
+    except Exception as exc:
+        return {**empty, "error": str(exc)[:180]}
+
+
+def get_15m_prediction_accuracy_by_source():
+    """Precisión a 15 minutos separada por fuente, una última señal por contrato y fuente."""
+    try:
+        with _connect() as conn:
+            rows = conn.execute("""
+                WITH candidates AS (
+                    SELECT DISTINCT ON (s.market_ticker, source.source)
+                        s.market_ticker, s.signal_ts, s.direction, o.result,
+                        source.source
+                    FROM btc_signal_snapshots AS s
+                    JOIN btc_signal_outcomes AS o
+                      ON o.snapshot_id = s.id
+                     AND o.horizon_seconds = 900
+                     AND o.future_price IS NOT NULL
+                    CROSS JOIN LATERAL (
+                        SELECT CASE
+                            WHEN UPPER(COALESCE(s.features->>'signal_source', '')) LIKE '%BRTI%'
+                              OR UPPER(COALESCE(s.features->>'direction_method', '')) LIKE '%BRTI%'
+                                THEN 'BRTI'
+                            WHEN UPPER(COALESCE(s.features->>'signal_source', '')) LIKE '%COINBASE%'
+                              OR UPPER(COALESCE(s.features->>'direction_method', '')) LIKE '%COINBASE%'
+                              OR s.features->>'direction_method' = 'technical_only_v1'
+                                THEN 'COINBASE'
+                            ELSE 'TECNICA_SIN_FUENTE'
+                        END AS source
+                    ) AS source
+                    WHERE s.market_ticker IS NOT NULL
+                      AND s.signal_ts + 900 <= s.market_close_ts
+                    ORDER BY s.market_ticker, source.source, s.signal_ts DESC, s.id DESC
+                )
+                SELECT
+                    source,
+                    COUNT(*) FILTER (
+                        WHERE direction IN ('ALCISTA', 'BAJISTA')
+                          AND result IN ('ALCISTA', 'BAJISTA')
+                    ),
+                    COUNT(*) FILTER (
+                        WHERE direction IN ('ALCISTA', 'BAJISTA')
+                          AND direction = result
+                    ),
+                    COUNT(*) FILTER (
+                        WHERE direction IN ('ALCISTA', 'BAJISTA')
+                          AND result IN ('ALCISTA', 'BAJISTA')
+                          AND direction <> result
+                    ),
+                    COUNT(*) FILTER (
+                        WHERE direction IN ('ALCISTA', 'BAJISTA')
+                          AND result = 'SIN CAMBIO'
+                    ),
+                    COUNT(*) FILTER (
+                        WHERE direction IN ('INDECISO', 'RECOPILANDO')
+                           OR direction IS NULL
+                    )
+                FROM candidates
+                GROUP BY source
+                ORDER BY source
+            """).fetchall()
+        result = []
+        for source, evaluated, correct, incorrect, no_change, indecisive in rows:
+            total = correct + incorrect
+            result.append({
+                "source": source,
+                "predictions_evaluated": evaluated,
+                "contracts_evaluated": evaluated,
+                "correct": correct,
+                "incorrect": incorrect,
+                "no_change": no_change,
+                "indecisive_contracts": indecisive,
+                "accuracy_pct": round(correct * 100 / total, 1) if total else None,
+                "measurement": "ÚLTIMA SEÑAL RESUELTA POR CONTRATO Y FUENTE · HORIZONTE 900S"
+            })
+        return {
+            "sources": result,
+            "error": None,
+            "measurement": "ÚLTIMA SEÑAL RESUELTA POR CONTRATO Y FUENTE · HORIZONTE 900S"
+        }
+    except Exception as exc:
+        return {"sources": [], "error": str(exc)[:180]}
+
+
 def get_recent_predictions(limit=50):
     """Devuelve señales recientes y su resultado real a 15 minutos."""
     try:
@@ -643,7 +786,7 @@ def get_recent_predictions(limit=50):
                 FROM btc_signal_snapshots AS s
                 LEFT JOIN btc_signal_outcomes AS o
                   ON o.snapshot_id = s.id
-                 AND o.horizon_seconds = -1
+                 AND o.horizon_seconds = 900
                 ORDER BY s.signal_ts DESC
                 LIMIT %s
             """, (limit,)).fetchall()
