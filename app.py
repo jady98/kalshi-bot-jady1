@@ -3135,8 +3135,9 @@ function initChart(){
             timeVisible:true,
             secondsVisible:false,
             rightOffset:5,
-            barSpacing:7,
-            minBarSpacing:2,
+            barSpacing:5,
+            minBarSpacing:1,
+            maxBarSpacing:14,
             lockVisibleTimeRangeOnResize:true
         },
         crosshair:{
@@ -3288,8 +3289,8 @@ function drawChart(data){
             to:rows.length+4
         });
     } else {
-        const from = Math.max(-5, Math.min(previousRange.from, rows.length-2));
-        const to = Math.max(from+10, Math.min(previousRange.to, rows.length+8));
+        const from = Math.max(-5, Math.min(previousRange.from, rows.length-1));
+        const to = Math.max(from+1, Math.min(previousRange.to, rows.length+8));
         chart.timeScale().setVisibleLogicalRange({from,to});
     }
     updateKalshiAxisTag();
