@@ -798,6 +798,42 @@ def calculate_prediction(
             pattern = "TRES VELAS BAJISTAS"
 
     # --------------------------------------
+    # ESTRUCTURA Y PATRONES DE VARIAS VELAS
+    # --------------------------------------
+
+    # Ruptura de rango: exige cierre fuera del máximo/mínimo de las
+    # cinco velas previas, no solo una mecha intravela.
+    if len(valid_candles) >= 6:
+        prior = valid_candles[-6:-1]
+        prior_high = max(c["high"] for c in prior)
+        prior_low = min(c["low"] for c in prior)
+        if last["close"] > prior_high and previous["close"] <= prior_high:
+            pattern = "RUPTURA ALCISTA DE RANGO"
+        elif last["close"] < prior_low and previous["close"] >= prior_low:
+            pattern = "RUPTURA BAJISTA DE RANGO"
+
+    # Estructura de mercado: máximos y mínimos crecientes/decrecientes.
+    if len(valid_candles) >= 3:
+        x, y, z = valid_candles[-3:]
+        if (
+            x["high"] < y["high"] < z["high"]
+            and x["low"] < y["low"] < z["low"]
+        ):
+            pattern = "ESTRUCTURA ALCISTA · HH/HL"
+        elif (
+            x["high"] > y["high"] > z["high"]
+            and x["low"] > y["low"] > z["low"]
+        ):
+            pattern = "ESTRUCTURA BAJISTA · LH/LL"
+
+    # Una vela dentro del rango anterior suele representar compresión.
+    if (
+        last["high"] <= previous["high"]
+        and last["low"] >= previous["low"]
+    ):
+        pattern = "VELA INTERNA · COMPRESIÓN"
+
+    # --------------------------------------
     # CÁLCULO DE FUERZA ALCISTA Y BAJISTA
     # --------------------------------------
 
@@ -850,13 +886,17 @@ def calculate_prediction(
 
     if pattern in (
         "ENVOLVENTE ALCISTA",
-        "TRES VELAS ALCISTAS"
+        "TRES VELAS ALCISTAS",
+        "RUPTURA ALCISTA DE RANGO",
+        "ESTRUCTURA ALCISTA · HH/HL"
     ):
         score += 2
 
     elif pattern in (
         "ENVOLVENTE BAJISTA",
-        "TRES VELAS BAJISTAS"
+        "TRES VELAS BAJISTAS",
+        "RUPTURA BAJISTA DE RANGO",
+        "ESTRUCTURA BAJISTA · LH/LL"
     ):
         score -= 2
 
@@ -2152,14 +2192,18 @@ def get_data():
     global last_pattern_snapshot_minute
 
     snapshot_minute = int(now // 60)
+    snapshot_slot = (
+        str(snapshot_minute) + ":" +
+        (market_ticker if contract_active else "GLOBAL")
+    )
     should_save_snapshot = False
 
     # Registrar una predicción BRTI por minuto aunque Kalshi no tenga
     # contrato activo. El cierre del contrato se guarda solo como dato adicional.
     if bp is not None and brti_live and valid_price(bp):
         with lock:
-            if last_pattern_snapshot_minute != snapshot_minute:
-                last_pattern_snapshot_minute = snapshot_minute
+            if last_pattern_snapshot_minute != snapshot_slot:
+                last_pattern_snapshot_minute = snapshot_slot
                 should_save_snapshot = True
 
         if should_save_snapshot:
