@@ -940,46 +940,104 @@ def calculate_prediction(
                 score -= 1
 
     # --------------------------------------
-    # PROYECCIÓN HASTA EL CIERRE
+    # PROYECCIÓN ADAPTATIVA HASTA EL CIERRE
     # --------------------------------------
 
     remaining = max(
         0,
         min(900, float(seconds_to_close or 0))
     )
+    remaining_minutes = remaining / 60.0
 
-    remaining_minutes = remaining / 60
+    # Combina ritmos de 1, 3, 5 y 15 minutos. Los plazos cortos
+    # reaccionan antes a los giros; los largos evitan perseguir ruido.
+    rate_windows = (
+        (1, 0.40),
+        (3, 0.30),
+        (5, 0.20),
+        (15, 0.10)
+    )
+    available_rates = []
+    for window, weight in rate_windows:
+        if len(closes) > window and closes[-(window + 1)] > 0:
+            change = (
+                (closes[-1] / closes[-(window + 1)]) - 1
+            ) * 100
+            available_rates.append((change / float(window), weight, window))
 
-    # Proyección prudente: combina el ritmo de 5 y 15 velas,
-    # reduce su influencia y limita el movimiento estimado.
-    rates = []
-
-    if len(closes) >= 6 and closes[-6] > 0:
-        change_5m = ((closes[-1] / closes[-6]) - 1) * 100
-        rates.append(change_5m / 5)
-
-    if len(closes) >= 16 and closes[-16] > 0:
-        change_15m = ((closes[-1] / closes[-16]) - 1) * 100
-        rates.append(change_15m / 15)
-
-    if rates:
-        if len(rates) == 2:
-            rate_per_minute = rates[0] * 0.65 + rates[1] * 0.35
-        else:
-            rate_per_minute = rates[0]
-        projected_change = rate_per_minute * remaining_minutes * 0.25
+    if available_rates:
+        weight_total = sum(item[1] for item in available_rates)
+        rate_per_minute = sum(
+            rate * weight for rate, weight, _ in available_rates
+        ) / max(weight_total, 0.000001)
     else:
         rate_per_minute = 0.0
-        projected_change = 0.0
 
-    projected_change = max(-0.30, min(0.30, projected_change))
+    # Si el último minuto se mueve contra la tendencia de 5/15m,
+    # se reduce la extrapolación para no proyectar tarde un giro.
+    short_rate = next(
+        (rate for rate, _, window in available_rates if window == 1),
+        None
+    )
+    long_rates = [
+        rate for rate, _, window in available_rates if window >= 5
+    ]
+    reversal_conflict = bool(
+        short_rate is not None
+        and long_rates
+        and short_rate * (sum(long_rates) / len(long_rates)) < 0
+    )
+    if reversal_conflict:
+        rate_per_minute *= 0.55
+
+    # La técnica puede confirmar o moderar el ritmo, nunca invertirlo
+    # por sí sola. Esto evita amplificar una proyección contradictoria.
+    pre_projection_technical = score / possible if possible > 0 else 0.0
+    if (
+        rate_per_minute != 0
+        and pre_projection_technical * rate_per_minute < 0
+        and abs(pre_projection_technical) >= 0.25
+    ):
+        rate_per_minute *= 0.70
+    elif (
+        rate_per_minute != 0
+        and pre_projection_technical * rate_per_minute > 0
+        and abs(pre_projection_technical) >= 0.45
+    ):
+        rate_per_minute *= 1.08
+
+    # Límite basado en el rango real reciente de las velas, no en un
+    # porcentaje fijo. La raíz del tiempo evita crecer linealmente sin control.
+    recent_ranges_pct = [
+        ((c["high"] - c["low"]) / c["close"]) * 100
+        for c in valid_candles[-15:]
+        if c["close"] > 0
+    ]
+    average_range_pct = (
+        sum(recent_ranges_pct) / len(recent_ranges_pct)
+        if recent_ranges_pct else 0.04
+    )
+    volatility_cap = max(
+        0.02,
+        min(0.45, average_range_pct * math.sqrt(max(1.0, remaining_minutes)) * 0.75)
+    )
+
+    projection_damping = 0.22
+    projected_change = (
+        rate_per_minute * remaining_minutes * projection_damping
+    )
+    projected_change = max(
+        -volatility_cap,
+        min(volatility_cap, projected_change)
+    )
 
     # Kalshi compara promedios BRTI de 60 segundos, no el último tick.
-    # Proyecta el precio al cierre y corrige al punto medio de la ventana final.
     projected_close_price = float(price) * (1 + projected_change / 100)
-    effective_rate = rate_per_minute * 0.25
+    effective_rate = rate_per_minute * projection_damping
     closing_window_fraction = min(1.0, remaining / 60.0)
-    average_adjustment_pct = effective_rate * closing_window_fraction * 0.5
+    average_adjustment_pct = (
+        effective_rate * closing_window_fraction * 0.5
+    )
     predicted = projected_close_price / (1 + average_adjustment_pct / 100)
 
     # --------------------------------------
