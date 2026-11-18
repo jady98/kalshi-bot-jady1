@@ -2530,621 +2530,99 @@ HTML = r"""
 <title>BTC USD Radar</title>
 
 <style>
-
-*{
-    box-sizing:border-box;
-}
-
-body{
-    margin:0;
-    padding:12px;
-    background:#080b14;
-    color:#f3f5ff;
-    font-family:Arial,sans-serif;
-}
-
-main{
-    max-width:750px;
-    margin:auto;
-}
-
-.header{
-    display:flex;
-    justify-content:space-between;
-    align-items:center;
-    margin:5px 0 16px;
-    gap:8px;
-}
-
-.logo{
-    font-size:22px;
-    font-weight:900;
-    letter-spacing:1px;
-}
-
-.purple{
-    color:#b88aff;
-}
-
-.status{
-    font-size:10px;
-    text-align:right;
-    color:#9ba9c4;
-}
-
-.dot{
-    display:inline-block;
-    width:7px;
-    height:7px;
-    border-radius:50%;
-    background:#ff536b;
-    margin-right:4px;
-}
-
-.dot.live{
-    background:#00e69a;
-    box-shadow:0 0 9px #00e69a;
-}
-
-.grid{
-    display:grid;
-    grid-template-columns:repeat(3,minmax(0,1fr));
-    gap:8px;
-}
-
-.card{
-    min-width:0;
-    background:#111827;
-    border:1px solid #26334b;
-    border-radius:15px;
-    padding:14px;
-    margin-bottom:10px;
-}
-
-.label{
-    color:#93a2bf;
-    font-size:10px;
-    letter-spacing:.5px;
-    font-weight:700;
-}
-
-.price{
-    font-size:clamp(19px,5.4vw,29px);
-    font-weight:900;
-    margin:10px 0 5px;
-    overflow-wrap:anywhere;
-}
-
-.predicted{
-    color:#f4c95d;
-}
-
-.forecast-card .price.predicted.bullish{
-    color:#00e69a;
-}
-
-.forecast-card .price.predicted.bearish{
-    color:#ff536b;
-}
-
-.forecast-card .price.predicted.uncertain{
-    color:#f4c95d;
-}
-
-
-/* IDENTIDAD VISUAL DE LAS TRES TARJETAS */
-
-.brti-card{
-    border:1px solid #278cff;
-    background:linear-gradient(145deg,#10243c,#111827 75%);
-    box-shadow:0 0 14px rgba(39,140,255,.13);
-}
-
-.kalshi-card{
-    border:1px solid #00d995;
-    background:linear-gradient(145deg,#103329,#111827 75%);
-    box-shadow:0 0 14px rgba(0,217,149,.13);
-}
-
-.forecast-card{
-    border:1px solid #bd75ff;
-    background:linear-gradient(145deg,#29183f,#111827 75%);
-    box-shadow:0 0 14px rgba(189,117,255,.16);
-}
-
-.brand-mark{
-    display:inline-flex;
-    align-items:center;
-    justify-content:center;
-    min-width:25px;
-    height:25px;
-    padding:0 7px;
-    border-radius:7px;
-    font-size:12px;
-    font-weight:900;
-    margin-bottom:9px;
-}
-
-.brti-card .brand-mark{
-    color:#55aaff;
-    background:#12365c;
-}
-
-.kalshi-card .brand-mark{
-    color:#00e6a0;
-    background:#104b38;
-}
-
-.forecast-card .brand-mark{
-    color:#d4a2ff;
-    background:#43245e;
-}
-
-.brti-card .label{
-    color:#69b7ff;
-}
-
-.kalshi-card .label{
-    color:#49e9b1;
-}
-
-.forecast-card .label{
-    color:#d4a2ff;
-}
-
-.brti-card .price{
-    color:#70bdff;
-}
-
-.kalshi-card .price{
-    color:#4af0b3;
-}
-
-.forecast-card .price{
-    color:#d5a5ff;
-}
-
-.small{
-    font-size:10px;
-    color:#8d9bb6;
-    line-height:1.6;
-}
-
-.green{
-    color:#00e69a;
-}
-
-.red{
-    color:#ff536b;
-}
-
-.yellow{
-    color:#f4c95d;
-}
-
-.signal{
-    font-size:27px;
-    font-weight:900;
-    margin:12px 0;
-}
-
-.bar{
-    height:13px;
-    display:flex;
-    border-radius:20px;
-    overflow:hidden;
-    background:#29344a;
-    margin:12px 0 8px;
-}
-
-.bull{
-    background:#00d995;
-    width:50%;
-}
-
-.bear{
-    background:#ff5269;
-    width:50%;
-}
-
-.row{
-    display:flex;
-    justify-content:space-between;
-    align-items:center;
-    gap:8px;
-}
-
-.section-title{
-    color:#a1afca;
-    font-size:11px;
-    font-weight:800;
-    margin-bottom:12px;
-}
-
-.metrics{
-    display:grid;
-    grid-template-columns:repeat(3,1fr);
-    gap:8px;
-}
-
-.metric{
-    background:#0b1220;
-    border:1px solid #202d43;
-    padding:10px 5px;
-    border-radius:10px;
-    text-align:center;
-    min-width:0;
-}
-
-.metric-name{
-    font-size:9px;
-    color:#8292af;
-}
-
-.metric-value{
-    font-size:13px;
-    font-weight:800;
-    margin-top:7px;
-    overflow-wrap:anywhere;
-}
-
-.chart-wrap{
-    width:100%;
-    height:300px;
-    min-height:180px;
-    position:relative;
-    overflow:hidden;
-}
-
-#chart{
-    display:block;
-    width:100%;
-    height:100%;
-    touch-action:pan-y;
-}
-
-.chart-legend{
-    display:flex;
-    gap:13px;
-    flex-wrap:wrap;
-    margin:8px 0;
-    font-size:10px;
-    color:#9aa9c4;
-}
-
-.legend-dot{
-    display:inline-block;
-    width:8px;
-    height:8px;
-    border-radius:50%;
-    margin-right:4px;
-}
-
-button{
-    border:1px solid #35476b;
-    background:#182640;
-    color:white;
-    border-radius:9px;
-    padding:10px 12px;
-    font-size:10px;
-    font-weight:800;
-}
-
-button:active{
-    opacity:.7;
-}
-
-button:disabled{
-    opacity:.5;
-}
-
-.footer{
-    text-align:center;
-    color:#66758f;
-    font-size:9px;
-    padding:12px 0 20px;
-}
-
-@media(max-width:380px){
-
-    body{
-        padding:8px;
-    }
-
-    .card{
-        padding:11px;
-    }
-
-    .logo{
-        font-size:19px;
-    }
-
-    .chart-wrap{
-        height:250px;
-    }
-
-    .metrics{
-        gap:5px;
-    }
-
-}
-
-/* Mantener oculto el panel técnico antiguo */
-.technical-card {
-    display: none !important;
-}
-
-
-/* TRES TARJETAS GRANDES EN UNA FILA */
-
+*{box-sizing:border-box}
+html{background:#080b14}
+body{margin:0;padding:12px;background:#080b14;color:#f3f5ff;font-family:Arial,sans-serif}
+main{width:100%;max-width:760px;margin:0 auto}
+.header{display:flex;justify-content:space-between;align-items:center;gap:10px;margin:5px 0 14px}
+.logo{font-size:22px;font-weight:900;letter-spacing:1px}
+.purple{color:#b88aff}
+.status{font-size:10px;line-height:1.6;text-align:right;color:#9ba9c4}
+.dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:#ff536b;margin-right:4px}
+.dot.live{background:#00e69a;box-shadow:0 0 9px #00e69a}
+.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px;margin-bottom:10px}
+.card{min-width:0;background:#111827;border:1px solid #26334b;border-radius:15px;padding:14px;margin-bottom:10px}
+.label{color:#93a2bf;font-size:10px;letter-spacing:.4px;font-weight:700;line-height:1.35}
+.price{font-size:clamp(18px,4.8vw,28px);font-weight:900;margin:9px 0 5px;overflow-wrap:anywhere}
+.brti-card{border:1px solid #278cff;background:linear-gradient(145deg,#10243c,#111827 75%);box-shadow:0 0 14px rgba(39,140,255,.13)}
+.kalshi-card{border:1px solid #00d995;background:linear-gradient(145deg,#103329,#111827 75%);box-shadow:0 0 14px rgba(0,217,149,.13)}
+.forecast-card{border:1px solid #bd75ff;background:linear-gradient(145deg,#29183f,#111827 75%);box-shadow:0 0 14px rgba(189,117,255,.16)}
+.brand-mark{display:inline-flex;align-items:center;justify-content:center;min-width:25px;height:25px;padding:0 7px;border-radius:7px;font-size:12px;font-weight:900;margin-bottom:8px}
+.brti-card .brand-mark{color:#55aaff;background:#12365c}
+.kalshi-card .brand-mark{color:#00e6a0;background:#104b38}
+.forecast-card .brand-mark{color:#d4a2ff;background:#43245e}
+.brti-card .label{color:#69b7ff}.kalshi-card .label{color:#49e9b1}.forecast-card .label{color:#d4a2ff}
+.brti-card .price{color:#70bdff}.kalshi-card .price{color:#4af0b3}.forecast-card .price{color:#d5a5ff}
+.forecast-card .price.predicted.bullish{color:#00e69a}
+.forecast-card .price.predicted.bearish{color:#ff536b}
+.forecast-card .price.predicted.uncertain{color:#f4c95d}
+.small{font-size:10px;color:#8d9bb6;line-height:1.5}
+.green{color:#00e69a}.red{color:#ff536b}.yellow{color:#f4c95d}
+.signal{font-size:27px;font-weight:900;margin:10px 0}
+.bar{height:12px;display:flex;border-radius:20px;overflow:hidden;background:#29344a;margin:10px 0 8px}
+.bull{background:#00d995;width:50%}.bear{background:#ff5269;width:50%}
+.row{display:flex;justify-content:space-between;align-items:center;gap:8px;min-width:0}
+.section-title{color:#a1afca;font-size:11px;font-weight:800;margin-bottom:10px;letter-spacing:.35px}
+.chart-wrap{width:100%;height:330px;min-height:220px;position:relative;overflow:hidden}
+#chart{display:block;width:100%;height:100%;touch-action:pan-y}
+.chart-legend{display:flex;gap:13px;flex-wrap:wrap;margin:8px 0;font-size:10px;color:#9aa9c4}
+.legend-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:4px}
+button{border:1px solid #35476b;background:#182640;color:white;border-radius:9px;padding:10px 12px;font-size:10px;font-weight:800}
+button:active{opacity:.7}button:disabled{opacity:.5}
+.alert-stack{display:grid;grid-template-columns:1fr;gap:7px;margin:10px 0}
+.alert-card{display:flex;align-items:center;gap:11px;min-height:66px;padding:10px 12px;border:1px solid #34425b;border-radius:13px;background:rgba(8,12,28,.88);opacity:.42;filter:saturate(.55);transition:opacity .2s ease,box-shadow .2s ease}
+.alert-card.active{opacity:1;filter:none}
+.alert-card .alert-icon{flex:0 0 34px;width:34px;height:34px;display:grid;place-items:center;border-radius:50%;font-size:20px;font-weight:1000}
+.alert-card .alert-copy{min-width:0}
+.alert-card .alert-title{font-size:13px;font-weight:900;line-height:1.15;margin-bottom:4px}
+.alert-card .alert-detail{color:#dce4f4;font-size:11px;line-height:1.3;font-weight:500;overflow-wrap:anywhere}
+.alert-card.prealert{border-color:#8e7620}.alert-card.prealert .alert-icon{color:#111;background:#ffd21f}
+.alert-card.prealert.active{box-shadow:0 0 15px rgba(255,210,31,.18)}
+.alert-card.entry{border-color:#167c50}.alert-card.entry .alert-icon{color:#042112;background:#25ed77}
+.alert-card.entry.active{box-shadow:0 0 15px rgba(37,237,119,.18)}
+.alert-card.protect{border-color:#8c3041}.alert-card.protect .alert-icon{color:white;background:#ff405b}
+.alert-card.protect.active{box-shadow:0 0 15px rgba(255,64,91,.2)}
+.technical-card{display:none!important}
+.footer{text-align:center;color:#66758f;font-size:9px;padding:12px 0 20px}
+.signal.green{animation:signalPulseGreen 1.5s ease-in-out infinite}
+.signal.red{animation:signalPulseRed 1.5s ease-in-out infinite}
+@keyframes signalPulseGreen{0%,100%{text-shadow:0 0 4px rgba(0,230,154,.25)}50%{text-shadow:0 0 18px rgba(0,230,154,.75)}}
+@keyframes signalPulseRed{0%,100%{text-shadow:0 0 4px rgba(255,83,107,.25)}50%{text-shadow:0 0 18px rgba(255,83,107,.75)}}
 @media(max-width:600px){
-
-    .grid{
-        grid-template-columns:repeat(3,minmax(0,1fr));
-        gap:6px;
-    }
-
-    .grid .card{
-        padding:11px 7px;
-        margin-bottom:8px;
-        border-radius:12px;
-    }
-
-    .grid .brand-mark{
-        min-width:23px;
-        height:23px;
-        font-size:12px;
-        margin-bottom:8px;
-    }
-
-    .grid .label{
-        font-size:9px;
-        letter-spacing:0;
-        line-height:1.35;
-    }
-
-    .grid .price{
-        font-size:clamp(12px,3.8vw,18px);
-        font-weight:950;
-        margin:9px 0 6px;
-        overflow-wrap:anywhere;
-    }
-
-    .grid .small{
-        font-size:9px;
-        line-height:1.35;
-    }
+ body{padding:8px}
+ main{max-width:100%;padding:0}
+ .header{margin:3px 2px 9px}
+ .logo{font-size:20px}
+ .status{font-size:9px}
+ .grid{grid-template-columns:repeat(2,minmax(0,1fr));grid-template-areas:"current forecast" "target target";gap:7px;margin-bottom:8px}
+ .grid .card{margin:0;padding:11px 10px;border-radius:13px;min-width:0}
+ .brti-card{grid-area:current}.forecast-card{grid-area:forecast}.target-card{grid-area:target}
+ .grid .brand-mark{display:none}
+ .grid .label{font-size:9px;line-height:1.25}
+ .grid .price{font-size:clamp(16px,4.8vw,22px);line-height:1.1;margin:7px 0 4px}
+ .grid .small{font-size:9px;line-height:1.3}
+ main>section.card{padding:12px;margin-bottom:8px;border-radius:13px}
+ .section-title{font-size:10px;margin-bottom:8px}
+ .signal{font-size:25px;margin:8px 0}
+ .bar{height:10px;margin:8px 0 6px}
+ .chart-wrap{height:310px;min-height:260px}
+ .chart-legend{gap:10px;font-size:9px;margin:7px 0}
+ .alert-stack{gap:6px;margin:8px 0}
+ .alert-card{min-height:62px;padding:9px 10px;gap:9px;border-radius:11px}
+ .alert-card .alert-icon{flex-basis:30px;width:30px;height:30px;font-size:18px}
+ .alert-card .alert-title{font-size:12px;margin-bottom:3px}
+ .alert-card .alert-detail{font-size:10px;line-height:1.25}
+ button{padding:9px 10px;font-size:9px}
 }
-
-
-/* ANIMACIÓN ALCISTA */
-
-.signal.green {
-    animation: signalPulseGreen 1.5s ease-in-out infinite;
+@media(max-width:360px){
+ body{padding:6px}
+ .grid .card{padding:9px 7px}
+ .grid .label{font-size:8px}
+ .grid .price{font-size:15px}
+ .chart-wrap{height:280px;min-height:240px}
+ .alert-card .alert-title{font-size:11px}
+ .alert-card .alert-detail{font-size:9px}
 }
-
-@keyframes signalPulseGreen {
-    0%, 100% {
-        text-shadow: 0 0 4px rgba(0,230,154,.25);
-    }
-
-    50% {
-        text-shadow: 0 0 18px rgba(0,230,154,.9);
-    }
-}
-
-/* ANIMACIÓN BAJISTA */
-
-.signal.red {
-    animation: signalPulseRed 1.5s ease-in-out infinite;
-}
-
-@keyframes signalPulseRed {
-    0%, 100% {
-        text-shadow: 0 0 4px rgba(255,83,107,.25);
-    }
-
-    50% {
-        text-shadow: 0 0 18px rgba(255,83,107,.9);
-    }
-}
-
-.alert-stack {
-    display: grid;
-    gap: 12px;
-    margin: 14px 0;
-}
-.alert-card {
-    display: flex;
-    align-items: center;
-    gap: 14px;
-    min-height: 104px;
-    padding: 16px 18px;
-    border: 2px solid #34425b;
-    border-radius: 18px;
-    background: rgba(8,12,28,.88);
-    opacity: .38;
-    filter: saturate(.55);
-    transition: opacity .2s ease, box-shadow .2s ease, transform .2s ease;
-}
-.alert-card.active {
-    opacity: 1;
-    filter: none;
-    transform: scale(1.01);
-}
-.alert-card .alert-icon {
-    flex: 0 0 58px;
-    width: 58px;
-    height: 58px;
-    display: grid;
-    place-items: center;
-    border-radius: 50%;
-    font-size: 36px;
-    font-weight: 1000;
-}
-.alert-card .alert-copy { min-width: 0; }
-.alert-card .alert-title {
-    font-size: clamp(21px, 5.5vw, 30px);
-    font-weight: 1000;
-    line-height: 1.05;
-    letter-spacing: .2px;
-    margin-bottom: 7px;
-}
-.alert-card .alert-detail {
-    color: #f2f5ff;
-    font-size: clamp(14px, 3.8vw, 18px);
-    line-height: 1.3;
-    font-weight: 650;
-}
-.alert-card.prealert { border-color: #ffd21f; }
-.alert-card.prealert .alert-icon { color: #111; background: #ffd21f; }
-.alert-card.prealert.active { box-shadow: 0 0 22px rgba(255,210,31,.28); }
-.alert-card.entry { border-color: #25ed77; }
-.alert-card.entry .alert-icon { color: #042112; background: #25ed77; }
-.alert-card.entry.active { box-shadow: 0 0 22px rgba(37,237,119,.28); }
-.alert-card.protect { border-color: #ff405b; }
-.alert-card.protect .alert-icon { color: white; background: #ff405b; }
-.alert-card.protect.active { box-shadow: 0 0 22px rgba(255,64,91,.32); }
-@media (max-width: 420px) {
-    .alert-card { min-height: 92px; padding: 13px 12px; gap: 11px; }
-    .alert-card .alert-icon { flex-basis: 48px; width: 48px; height: 48px; font-size: 29px; }
-}
-
-/* AJUSTE MOVIL: radar completo al ancho del telefono */
-@media (max-width: 600px) {
-    html, body {
-        width: 100%;
-        max-width: 100%;
-        overflow-x: hidden;
-    }
-    body {
-        padding: 6px !important;
-    }
-    .container, main, .dashboard {
-        width: 100%;
-        max-width: 100%;
-        min-width: 0;
-    }
-    .card {
-        min-width: 0;
-        padding: 9px !important;
-        margin-bottom: 8px;
-    }
-    .chart-wrap {
-        height: 190px !important;
-    }
-    .alert-stack {
-        display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-        gap: 6px;
-        width: 100%;
-        margin: 8px 0;
-        min-width: 0;
-    }
-    .alert-card {
-        box-sizing: border-box;
-        min-width: 0;
-        min-height: 0;
-        height: 148px;
-        padding: 8px 5px;
-        border-width: 1.5px;
-        border-radius: 12px;
-        display: flex;
-        flex-direction: column;
-        justify-content: flex-start;
-        align-items: center;
-        gap: 6px;
-        text-align: center;
-        overflow: hidden;
-    }
-    .alert-card.active {
-        transform: none;
-    }
-    .alert-card .alert-icon {
-        flex: 0 0 30px;
-        width: 30px;
-        height: 30px;
-        font-size: 20px;
-    }
-    .alert-card .alert-copy {
-        width: 100%;
-        min-width: 0;
-    }
-    .alert-card .alert-title {
-        font-size: clamp(10px, 2.8vw, 14px);
-        line-height: 1.12;
-        letter-spacing: 0;
-        overflow-wrap: anywhere;
-        margin: 0 0 5px;
-    }
-    .alert-card .alert-detail {
-        font-size: clamp(8px, 2.25vw, 11px);
-        line-height: 1.2;
-        overflow-wrap: anywhere;
-    }
-}
-@media (max-width: 360px) {
-    .alert-card { height: 142px; padding: 7px 3px; }
-    .alert-card .alert-title { font-size: 10px; }
-    .alert-card .alert-detail { font-size: 8px; }
-    .chart-wrap { height: 165px !important; }
-}
-
-
-/* RADAR COMPLETO EN UNA SOLA PANTALLA MOVIL */
-@media (max-width: 600px) {
-    *, *::before, *::after { box-sizing: border-box; }
-    html, body { width:100%; height:100%; min-height:0; margin:0; overflow:hidden !important; }
-    body { padding:0 !important; }
-    main {
-        width:100%; max-width:none; height:100vh; height:100dvh; min-height:0;
-        padding:5px; margin:0; display:grid;
-        grid-template-rows:auto auto auto auto minmax(100px,1fr) auto;
-        gap:5px; overflow:hidden;
-    }
-    .header { min-height:25px; margin:0; padding:0 3px; }
-    .logo { font-size:clamp(16px,4.5vw,21px); }
-    .status { font-size:8px; gap:3px; }
-    .grid { min-height:0; margin:0; grid-template-columns:repeat(3,minmax(0,1fr)); gap:5px; }
-    .grid .card { min-width:0; margin:0; padding:7px 4px !important; border-radius:10px; }
-    .grid .brand-mark { display:none; }
-    .grid .label { font-size:clamp(7px,2vw,9px); line-height:1.1; overflow-wrap:anywhere; }
-    .grid .price { font-size:clamp(11px,3.5vw,16px); line-height:1.1; margin:6px 0 3px; overflow-wrap:anywhere; }
-    .grid .small { font-size:7px; line-height:1.15; }
-    main > section.card:nth-of-type(1) { min-height:0; margin:0; padding:7px 9px !important; }
-    main > section.card:nth-of-type(1) .section-title { font-size:8px; margin:0 0 3px; }
-    main > section.card:nth-of-type(1) .signal { font-size:clamp(16px,4vw,20px); margin:2px 0 4px; line-height:1.05; }
-    main > section.card:nth-of-type(1) .price { font-size:clamp(13px,3.5vw,17px); margin:1px 0; }
-    main > section.card:nth-of-type(1) .bar { height:7px; margin:4px 0; }
-    main > section.card:nth-of-type(1) .small { font-size:7px; line-height:1.15; }
-    .alert-stack { min-height:0; margin:0; gap:5px; grid-template-columns:repeat(3,minmax(0,1fr)); }
-    .alert-card { height:92px; min-height:0; padding:5px 3px; gap:3px; border-radius:10px; border-width:1px; }
-    .alert-card .alert-icon { flex:0 0 22px; width:22px; height:22px; font-size:15px; }
-    .alert-card .alert-title { font-size:clamp(8px,2.4vw,11px); line-height:1.08; margin:0 0 3px; }
-    .alert-card .alert-detail { font-size:clamp(7px,1.9vw,9px); line-height:1.12; }
-    main > section.card:nth-of-type(3) {
-        min-height:0; height:100%; margin:0; padding:6px !important;
-        display:flex; flex-direction:column; overflow:hidden;
-    }
-    main > section.card:nth-of-type(3) .row { flex:0 0 auto; }
-    main > section.card:nth-of-type(3) .section-title { font-size:8px; margin:0 0 2px; }
-    main > section.card:nth-of-type(3) .chart-legend { margin:3px 0; gap:7px; font-size:8px; }
-    main > section.card:nth-of-type(3) .chart-wrap { flex:1 1 auto; min-height:0; height:auto !important; }
-    main > section.card:nth-of-type(3) .row:last-of-type { flex:0 0 auto; }
-    main > section.card:nth-of-type(3) > .small { font-size:7px; flex:0 0 auto; }
-    main > section.card:nth-of-type(5) { min-height:0; margin:0; padding:5px 8px !important; }
-    main > section.card:nth-of-type(5) .signal { font-size:clamp(15px,4vw,19px); margin:2px 0; }
-    main > section.card:nth-of-type(5) .label,
-    main > section.card:nth-of-type(5) .small { font-size:7px; }
-    .technical-card, .footer { display:none !important; }
-}
-@media (max-width: 380px) {
-    main { padding:4px; gap:4px; }
-    .alert-card { height:84px; }
-    .alert-card .alert-title { font-size:8px; }
-    .alert-card .alert-detail { font-size:7px; }
-}
-
 </style>
 </head>
 
