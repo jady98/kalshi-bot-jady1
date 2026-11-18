@@ -1524,24 +1524,25 @@ def kalshi_market_worker():
                     market.get("close_time")
                     or market.get("expiration_time")
                 )
+                if not close_value:
+                    # Sin cierre oficial no se puede emitir una señal de entrada.
+                    continue
+                close_ts = normalize_timestamp(close_value)
+                open_value = market.get("open_time")
+                open_ts = normalize_timestamp(open_value) if open_value else None
+                ticker_value = str(market.get("ticker", "")).strip()
 
-                close_ts = (
-                    normalize_timestamp(close_value)
-                    if close_value else now + 3600
-                )
-
-                if close_ts >= now - 30:
-
-                    found.append((
-                        close_ts,
-                        str(market.get("ticker", "")),
-                        target
-                    ))
+                # Solo contratos realmente vigentes: nunca aceptar uno vencido
+                # ni uno cuyo horario de apertura todavía no haya llegado.
+                if (
+                    ticker_value
+                    and close_ts > now + 1
+                    and (open_ts is None or open_ts <= now + 1)
+                ):
+                    found.append((close_ts, ticker_value, target))
 
             if found:
-
                 found.sort(key=lambda item: item[0])
-
                 close_ts, ticker, target = found[0]
 
                 with lock:
@@ -1554,20 +1555,22 @@ def kalshi_market_worker():
                             kalshi_market_ticker,
                             kalshi_market_close
                         ))
-
                     kalshi_market_target = target
                     kalshi_market_ticker = ticker
                     kalshi_market_close = close_ts
                     kalshi_market_error = ""
-
             else:
-
                 with lock:
-
-                    kalshi_market_error = (
-                        "No se encontró floor_strike "
-                        "en el contrato abierto."
-                    )
+                    # No conservar un strike/ticker antiguo como si siguiera activo.
+                    if kalshi_market_ticker and kalshi_market_close is not None:
+                        market_resolution_queue.append((
+                            kalshi_market_ticker,
+                            kalshi_market_close
+                        ))
+                    kalshi_market_target = None
+                    kalshi_market_ticker = ""
+                    kalshi_market_close = None
+                    kalshi_market_error = "No hay contrato KXBTC15M activo con objetivo y cierre válidos."
 
         except Exception as exc:
 
@@ -1859,9 +1862,26 @@ def _candle_change_over_seconds(candles, price, seconds, now):
     return ((float(price) / reference_price) - 1.0) * 100.0
 
 
-def build_forward_guidance(ticks, price, indicators, candles=None):
+def build_forward_guidance(
+    ticks, price, indicators, candles=None,
+    contract_active=False, ticker=None, close_ts=None
+):
     """Proyección corta separada del pronóstico principal al cierre de 15 minutos."""
     now = time.time()
+    seconds_left = max(0, int(float(close_ts) - now)) if close_ts else 0
+    if not contract_active or not ticker or not close_ts or seconds_left <= 0:
+        return {
+            "short_change_1m_pct": None,
+            "short_change_3m_pct": None,
+            "short_predicted_price_1m": None,
+            "short_predicted_price_3m": None,
+            "short_direction": "INDECISO",
+            "entry_stage": "SIN CONTRATO ACTIVO",
+            "entry_direction": None,
+            "entry_ticker": None,
+            "entry_seconds_remaining": 0,
+            "signal_stage": "SIN CONTRATO ACTIVO · análisis predictivo sin entrada"
+        }
     change_1m = _tick_change_over_seconds(ticks, 60, now)
     change_3m = _tick_change_over_seconds(ticks, 180, now)
     # Tras un reinicio de Render, los ticks empiezan vacíos. Usar velas BRTI
@@ -1897,13 +1917,18 @@ def build_forward_guidance(ticks, price, indicators, candles=None):
         return value > 0.001 if direction == "ALCISTA" else value < -0.001
     align_1m = agrees(change_1m)
     align_3m = agrees(change_3m)
+    # No dar entrada si quedan menos de 60 segundos: no hay margen operativo
+    # razonable y aumenta el riesgo de alertar justo al expirar el contrato.
     stage = "OBSERVAR"
-    if direction in ("ALCISTA", "BAJISTA"):
+    enough_time = seconds_left >= 60
+    if enough_time and direction in ("ALCISTA", "BAJISTA"):
         if side_probability >= 56 and (align_1m or align_3m):
             stage = "PREALERTA"
         if side_probability >= 64 and align_1m and align_3m:
             stage = "ENTRADA"
-    if change_1m is None and change_3m is None:
+    if not enough_time:
+        stage = "CIERRE PRÓXIMO · SIN ENTRADA"
+    elif change_1m is None and change_3m is None:
         stage = "SIN CONFIRMACIÓN CORTA"
     return {
         "short_change_1m_pct": round(change_1m, 5) if change_1m is not None else None,
@@ -1913,6 +1938,8 @@ def build_forward_guidance(ticks, price, indicators, candles=None):
         "short_direction": direction if stage in ("PREALERTA", "ENTRADA") else "INDECISO",
         "entry_stage": stage,
         "entry_direction": direction if stage in ("PREALERTA", "ENTRADA") else None,
+        "entry_ticker": ticker,
+        "entry_seconds_remaining": seconds_left,
         "signal_stage": (
             stage + " · " + direction + " · " + str(round(side_probability, 1)) + "%"
             if stage in ("PREALERTA", "ENTRADA")
@@ -1921,14 +1948,24 @@ def build_forward_guidance(ticks, price, indicators, candles=None):
     }
 
 
-def update_guidance_alert(guidance, ticker):
-    """Avisa en los cambios de etapa; no ejecuta órdenes ni conoce la posición del usuario."""
+def update_guidance_alert(guidance, ticker, contract_active=False):
+    """Solo alerta entradas ligadas al contrato vigente; nunca ejecuta órdenes."""
     now = time.time()
     stage = guidance.get("entry_stage")
     direction = guidance.get("entry_direction")
+    seconds_left = int(guidance.get("entry_seconds_remaining") or 0)
     alert = None
     with lock:
         state = _guidance_state
+        if not contract_active or not ticker or seconds_left <= 0:
+            state.update({
+                "ticker": None,
+                "stage": "SIN_CONTRATO",
+                "direction": None,
+                "last_alert_ts": 0.0,
+                "alert": None
+            })
+            return None
         if state["ticker"] != ticker:
             state.update({
                 "ticker": ticker,
@@ -1956,7 +1993,9 @@ def update_guidance_alert(guidance, ticker):
                 "type": "ENTRADA",
                 "level": "AVISO",
                 "message": "ENTRADA CONFIRMADA · " + str(direction),
-                "detail": "La dirección principal y los movimientos recientes de 1 y 3 minutos están alineados. Comprueba el precio del contrato y el tiempo restante antes de decidir.",
+                "detail": "Contrato " + str(ticker) + ". Quedan " + str(seconds_left) + " segundos. Dirección principal y movimientos de 1 y 3 minutos alineados; verifica precio y riesgo antes de decidir.",
+                "ticker": str(ticker),
+                "seconds_remaining": seconds_left,
                 "timestamp": now
             }
         elif stage == "PREALERTA" and previous_stage not in ("PREALERTA", "ENTRADA"):
@@ -1964,7 +2003,9 @@ def update_guidance_alert(guidance, ticker):
                 "type": "PREALERTA",
                 "level": "AVISO",
                 "message": "PREALERTA · POSIBLE " + str(direction),
-                "detail": "Se está formando una dirección y el movimiento corto empieza a acompañarla. Todavía no es una entrada confirmada.",
+                "detail": "Contrato " + str(ticker) + ". Quedan " + str(seconds_left) + " segundos. Se está formando una dirección; todavía no es una entrada confirmada.",
+                "ticker": str(ticker),
+                "seconds_remaining": seconds_left,
                 "timestamp": now
             }
         state["stage"] = stage
@@ -1980,6 +2021,8 @@ def update_guidance_alert(guidance, ticker):
         saved_alert = state.get("alert")
         if (
             saved_alert
+            and saved_alert.get("ticker") == ticker
+            and saved_alert.get("seconds_remaining", 0) > 0
             and saved_alert.get("timestamp") is not None
             and now - float(saved_alert["timestamp"]) <= 300
         ):
@@ -2025,7 +2068,17 @@ def get_data():
 
     now = time.time()
 
-    countdown = max(0, int(market_close - now)) if market_close else 0
+    contract_active = bool(
+        market_ticker
+        and valid_price(market_target)
+        and market_close is not None
+        and float(market_close) > now
+    )
+    if not contract_active:
+        market_ticker = ""
+        market_target = None
+        market_close = None
+    countdown = max(0, int(market_close - now)) if contract_active else 0
 
     brti_age = (
         round(now - bt, 1)
@@ -2088,7 +2141,7 @@ def get_data():
         analysis_price,
         ticks,
         countdown,
-        market_target,
+        market_target if contract_active else None,
         analysis_candles
     )
 
@@ -2113,8 +2166,8 @@ def get_data():
             pattern_memory.save_snapshot({
                 "signal_ts": now,
                 "price": bp,
-                "market_ticker": market_ticker,
-                "market_close_ts": market_close,
+                "market_ticker": market_ticker if contract_active else None,
+                "market_close_ts": market_close if contract_active else None,
                 "direction": indicators.get("direction"),
                 "bullish_score": indicators.get("bullish_score"),
                 "bearish_score": indicators.get("bearish_score"),
@@ -2154,15 +2207,21 @@ def get_data():
     alert_data = update_alert_state(
         indicators.get("direction"),
         float(indicators.get("bullish_score", 50)),
-        market_ticker,
+        market_ticker if contract_active else None,
         divergence_pct,
         brti_live,
         coinbase_live
     )
     guidance = build_forward_guidance(
-        ticks, bp if brti_live else None, indicators, candles
+        ticks, bp if brti_live else None, indicators, candles,
+        contract_active=contract_active,
+        ticker=market_ticker if contract_active else None,
+        close_ts=market_close if contract_active else None
     )
-    guidance_alert = update_guidance_alert(guidance, market_ticker)
+    guidance_alert = update_guidance_alert(
+        guidance, market_ticker if contract_active else None,
+        contract_active=contract_active
+    )
     if guidance_alert is not None:
         alert_data = guidance_alert
     indicators.update(guidance)
@@ -2209,9 +2268,11 @@ def get_data():
         "brti_candles": candles,
         "coinbase_candles": coin_candles,
 
+        "kalshi_market_active": contract_active,
         "kalshi_market_target": market_target,
-        "kalshi_market_ticker": market_ticker,
+        "kalshi_market_ticker": market_ticker if contract_active else None,
         "kalshi_market_close": market_close,
+        "seconds_to_close": countdown,
         "kalshi_market_error": market_error,
 
         "countdown": countdown,
