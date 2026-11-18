@@ -494,12 +494,7 @@ def get_prediction_accuracy():
                     COUNT(*) FILTER (
                         WHERE direction = 'INDECISO'
                     )
-                FROM btc_signal_snapshots AS s
-                JOIN btc_signal_outcomes AS o
-                  ON o.snapshot_id = s.id
-                 AND o.horizon_seconds = 900
-                 AND o.future_price IS NOT NULL
-                WHERE s.market_ticker IS NOT NULL
+                FROM latest
             """).fetchone()
 
         evaluated, correct, incorrect, no_change, indecisive = row
@@ -652,7 +647,12 @@ def get_15m_prediction_accuracy():
                         WHERE direction IN ('INDECISO', 'RECOPILANDO')
                            OR direction IS NULL
                     )
-                FROM latest
+                FROM btc_signal_snapshots AS s
+                JOIN btc_signal_outcomes AS o
+                  ON o.snapshot_id = s.id
+                 AND o.horizon_seconds = 900
+                 AND o.future_price IS NOT NULL
+                WHERE s.market_ticker IS NOT NULL
             """).fetchone()
         evaluated, correct, incorrect, no_change, indecisive = row
         total = correct + incorrect
