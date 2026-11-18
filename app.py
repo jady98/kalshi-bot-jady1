@@ -1051,16 +1051,28 @@ def calculate_prediction(
     historical_bullish_pct = pattern_stats.get("bullish_pct")
     historical_bearish_pct = pattern_stats.get("bearish_pct")
     # El historial solo pesa 15% y requiere al menos 20 resultados reales.
-    if (
+    pattern_learning_used = bool(
         pattern_samples >= 20
         and historical_bullish_pct is not None
         and historical_bearish_pct is not None
-    ):
+    )
+    if pattern_learning_used:
         historical_bias = max(
             -1.0,
             min(1.0, (float(historical_bullish_pct) - float(historical_bearish_pct)) / 100.0)
         )
         normalized = (normalized * 0.85) + (historical_bias * 0.15)
+
+    # El aprendizaje histórico puede modular la confianza, pero no invertir
+    # el lado del contrato cuando la proyección ya está claramente sobre/bajo
+    # el objetivo vigente de Kalshi.
+    target_side_locked = bool(
+        valid_price(market_target)
+        and target_gap_pct is not None
+        and abs(target_gap_pct) > 0.005
+    )
+    if target_side_locked:
+        normalized = math.copysign(abs(normalized), target_gap_pct)
 
     normalized, direction = stabilize_direction(
         normalized,
@@ -1109,11 +1121,10 @@ def calculate_prediction(
         "pattern_samples": pattern_samples,
         "pattern_historical_bullish_pct": historical_bullish_pct,
         "pattern_historical_bearish_pct": historical_bearish_pct,
-        "pattern_learning_used": bool(
-            pattern_samples >= 20
-            and historical_bullish_pct is not None
-            and historical_bearish_pct is not None
-        ),
+        "pattern_learning_used": pattern_learning_used,
+        "target_side_locked": target_side_locked,
+        "contract_yes_probability": bullish if valid_price(market_target) else None,
+        "contract_no_probability": bearish if valid_price(market_target) else None,
         "direction_method": (
             "BRTI_PRIMARY_KALSHI_15M"
             if valid_price(market_target)
@@ -2372,6 +2383,15 @@ def health():
 
         "kalshi_connected": data["kalshi_connected"],
         "kalshi_error": data["kalshi_error"],
+        "kalshi_market_active": data.get("kalshi_market_active", False),
+        "kalshi_market_ticker": data.get("kalshi_market_ticker"),
+        "kalshi_market_target": data.get("kalshi_market_target"),
+        "seconds_to_close": data.get("seconds_to_close", 0),
+        "entry_stage": data.get("entry_stage"),
+        "entry_ticker": data.get("entry_ticker"),
+        "pattern": data.get("pattern"),
+        "pattern_samples": data.get("pattern_samples", 0),
+        "pattern_learning_used": data.get("pattern_learning_used", False),
 
         "coinbase_live": data["coinbase_live"],
         "coinbase_price": data["coinbase_price"],
