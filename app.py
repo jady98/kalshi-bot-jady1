@@ -3430,27 +3430,19 @@ function drawChart(data){
     }
 
     const lastIndex = candles.length - 1;
-    const lastCandleTime = Number(candles[lastIndex].time);
-    const firstCandleTime = Number(candles[0].time);
-    const maxTimeOffset = Math.max(
-        0,
-        (lastCandleTime - firstCandleTime) / 60
-    );
 
-    // Ajustar el encuadre inicial para incluir todo el historial disponible.
-    // La escala temporal conserva los huecos cuando faltan minutos.
+    // Cada vela ocupa un espacio consecutivo de 1 minuto.
+    // Los cuerpos mantienen separación visual uniforme y no se forman
+    // grupos aislados por saltos grandes en las marcas de tiempo.
     const count = Math.max(
         10,
         Math.min(
             1200,
-            Math.ceil((maxTimeOffset + 4) / chartScale)
+            Math.ceil((candles.length + 4) / chartScale)
         )
     );
 
-    const center = Math.min(
-        count - 2,
-        maxTimeOffset + 1
-    );
+    const maxTimeOffset = Math.max(0, candles.length - 1);
 
     const left = 12;
     const right = W - 66;
@@ -3474,15 +3466,8 @@ function drawChart(data){
 
     function candleX(index){
 
-        const candleTime = Number(candles[index].time);
-        const distanceFromLast = Math.max(
-            0,
-            (lastCandleTime - candleTime) / 60
-        );
-
         return left + (
-            center
-            - distanceFromLast
+            index
             + 0.5
             + chartOffset
         ) * step;
@@ -3871,8 +3856,8 @@ canvas.addEventListener(
             const count=Math.max(
                 10,
                 Math.min(
-                    100,
-                    Math.floor(65/chartScale)
+                    1200,
+                    Math.ceil((candles.length+4)/chartScale)
                 )
             );
 
