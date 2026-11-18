@@ -2628,7 +2628,7 @@ main{width:100%;max-width:760px;margin:0 auto}
 .bar{height:12px;display:flex;border-radius:20px;overflow:hidden;background:#29344a;margin:10px 0 8px}.bull{background:#00d995;width:50%}.bear{background:#ff5269;width:50%}
 .row{display:flex;justify-content:space-between;align-items:center;gap:8px;min-width:0}
 .section-title{color:#a1afca;font-size:11px;font-weight:800;margin-bottom:10px;letter-spacing:.35px}
-.chart-wrap{width:100%;height:330px;min-height:220px;position:relative;overflow:hidden}#chart{display:block;width:100%;height:100%;touch-action:pan-y}.kalshi-axis-tag{display:none;position:absolute;right:0;z-index:5;transform:translateY(-50%);width:82px;min-height:31px;box-sizing:border-box;padding:3px 4px;border:1px solid #00d995;border-radius:5px;background:#0b241e;color:#49e9b1;text-align:center;line-height:1.05;pointer-events:none;box-shadow:0 0 8px rgba(0,217,149,.22)}.kalshi-axis-name{font-size:8px;font-weight:900;letter-spacing:.6px}.kalshi-axis-value{font-size:10px;font-weight:900;margin-top:3px;white-space:nowrap}
+.chart-wrap{width:100%;height:330px;min-height:220px;position:relative;overflow:hidden}#chart{display:block;width:100%;height:100%;touch-action:pan-y}.kalshi-axis-tag{display:none;position:absolute;right:0;z-index:5;transform:translateY(-50%);width:82px;min-height:31px;box-sizing:border-box;padding:3px 4px;border:1px solid #00d995;border-radius:5px;background:#0b241e;color:#49e9b1;text-align:center;line-height:1.05;pointer-events:none;box-shadow:0 0 8px rgba(0,217,149,.22)}.kalshi-axis-name{font-size:8px;font-weight:900;letter-spacing:.6px}.kalshi-axis-value{font-size:10px;font-weight:900;margin-top:3px;white-space:nowrap}.current-axis-tag{border-color:#45a9ff;background:#10243a;color:#78c5ff;box-shadow:0 0 8px rgba(69,169,255,.24)}
 .chart-legend{display:flex;gap:13px;flex-wrap:wrap;margin:8px 0;font-size:10px;color:#9aa9c4}.legend-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:4px}
 .pattern-guide{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px 10px;align-items:center;width:100%;box-sizing:border-box;margin:7px 0 9px;padding:12px 14px;border:1px solid #465777;border-left:5px solid #b98aff;border-radius:12px;background:linear-gradient(100deg,rgba(185,138,255,.2),rgba(17,24,39,.96));box-shadow:0 3px 14px rgba(0,0,0,.24)}
 .pattern-guide.none{border-left-color:#9aa9c4}.pattern-guide.bull{border-left-color:#00e6a0;background:linear-gradient(100deg,rgba(0,217,149,.17),rgba(17,24,39,.97))}.pattern-guide.bear{border-left-color:#ff5269;background:linear-gradient(100deg,rgba(255,82,105,.17),rgba(17,24,39,.97))}.pattern-name{font-size:16px;font-weight:1000;line-height:1.2;overflow-wrap:anywhere;color:#fff;letter-spacing:.25px}.pattern-state{font-size:10px;font-weight:950;letter-spacing:.45px;color:#ffe078;text-align:right;max-width:145px}.pattern-description{grid-column:1/-1;color:#f0f4ff;font-size:13px;line-height:1.4;font-weight:600}.pattern-history{grid-column:1/-1;color:#b8c6df;font-size:10px;line-height:1.3}.pattern-guide.conflict{border-color:#ffd34e;box-shadow:0 0 0 1px rgba(244,201,93,.22),0 3px 14px rgba(0,0,0,.24)}
@@ -2925,6 +2925,7 @@ button{border:1px solid #35476b;background:#182640;color:white;border-radius:9px
 
         <div id="chart" role="img" aria-label="Gráfica de velas BTC/USD con patrones señalados"></div>
         <div class="kalshi-axis-tag" id="kalshiAxisTag"><div class="kalshi-axis-name">KALSHI</div><div class="kalshi-axis-value" id="kalshiAxisValue">--</div></div>
+        <div class="kalshi-axis-tag current-axis-tag" id="currentAxisTag"><div class="kalshi-axis-name">PRECIO ACTUAL</div><div class="kalshi-axis-value" id="currentAxisValue">--</div></div>
 
     </div>
 
@@ -3065,6 +3066,7 @@ const $ = id => document.getElementById(id);
 
 let candles = [];
 let chartTargetValue = null;
+let chartCurrentPrice = null;
 let chart = null;
 let candleSeries = null;
 let ema9Line = null;
@@ -3173,7 +3175,7 @@ function initChart(){
         wickDownColor:"#ff5269",
         priceLineColor:"#45a9ff",
         priceLineVisible:true,
-        lastValueVisible:true
+        lastValueVisible:false
     });
 
     ema9Line = chart.addLineSeries({
@@ -3294,6 +3296,7 @@ function drawChart(data){
         chart.timeScale().setVisibleLogicalRange({from,to});
     }
     updateKalshiAxisTag();
+    updateCurrentPriceAxisTag();
 }
 
 function updateKalshiAxisTag(){
@@ -3310,6 +3313,24 @@ function updateKalshiAxisTag(){
         return;
     }
     value.textContent=money(chartTargetValue);
+    tag.style.top=y+"px";
+    tag.style.display="block";
+}
+
+function updateCurrentPriceAxisTag(){
+    const tag=$("currentAxisTag");
+    const value=$("currentAxisValue");
+    if(!tag || !value || !chart || !candleSeries || !Number.isFinite(chartCurrentPrice) || chartCurrentPrice<=0){
+        if(tag) tag.style.display="none";
+        return;
+    }
+    const y=candleSeries.priceToCoordinate(chartCurrentPrice);
+    const height=$("chart")?.clientHeight || 0;
+    if(y==null || !Number.isFinite(y) || y<0 || y>height){
+        tag.style.display="none";
+        return;
+    }
+    value.textContent=money(chartCurrentPrice);
     tag.style.top=y+"px";
     tag.style.display="block";
 }
@@ -3442,6 +3463,9 @@ function updateRadar(d){
 
     $("brtiPrice").textContent =
         money(d.brti_price);
+    chartCurrentPrice = Number(d.brti_price);
+    if(!Number.isFinite(chartCurrentPrice) || chartCurrentPrice<=0) chartCurrentPrice=null;
+    updateCurrentPriceAxisTag();
 
     const direction=d.direction || "RECOPILANDO";
     const predictedElement=$("predictedPrice");
