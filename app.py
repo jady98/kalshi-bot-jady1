@@ -2567,6 +2567,8 @@ main{width:100%;max-width:760px;margin:0 auto}
 .section-title{color:#a1afca;font-size:11px;font-weight:800;margin-bottom:10px;letter-spacing:.35px}
 .chart-wrap{width:100%;height:330px;min-height:220px;position:relative;overflow:hidden}#chart{display:block;width:100%;height:100%;touch-action:pan-y}
 .chart-legend{display:flex;gap:13px;flex-wrap:wrap;margin:8px 0;font-size:10px;color:#9aa9c4}.legend-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:4px}
+.pattern-guide{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:3px 8px;align-items:center;margin:5px 0 7px;padding:7px 9px;border:1px solid #35415d;border-left:3px solid #b98aff;border-radius:9px;background:linear-gradient(100deg,rgba(185,138,255,.12),rgba(17,24,39,.7))}
+.pattern-guide.none{border-left-color:#7c8ba5}.pattern-guide.bull{border-left-color:#00d995}.pattern-guide.bear{border-left-color:#ff5269}.pattern-name{font-size:11px;font-weight:900;line-height:1.2;overflow-wrap:anywhere}.pattern-state{font-size:8px;font-weight:900;letter-spacing:.45px;color:#f4c95d;text-align:right}.pattern-description{grid-column:1/-1;color:#b9c6dc;font-size:9px;line-height:1.25}
 button{border:1px solid #35476b;background:#182640;color:white;border-radius:9px;padding:10px 12px;font-size:10px;font-weight:800}button:active{opacity:.7}button:disabled{opacity:.5}
 .alert-stack{display:grid;grid-template-columns:1fr;gap:7px;margin:10px 0}
 .alert-card{display:flex;align-items:center;gap:11px;min-height:66px;padding:10px 12px;border:1px solid #34425b;border-radius:13px;background:rgba(8,12,28,.88);opacity:.42;filter:saturate(.55);transition:opacity .2s ease,box-shadow .2s ease}
@@ -2605,6 +2607,10 @@ button{border:1px solid #35476b;background:#182640;color:white;border-radius:9px
  main>section.card:nth-of-type(3) .row{flex:0 0 auto}
  main>section.card:nth-of-type(3) .section-title{font-size:8px;margin:0 0 2px}
  main>section.card:nth-of-type(3) .chart-legend{margin:3px 0;gap:7px;font-size:8px}
+ main>section.card:nth-of-type(3) .pattern-guide{margin:2px 0 4px;padding:5px 7px;gap:2px 6px}
+ main>section.card:nth-of-type(3) .pattern-name{font-size:9px}
+ main>section.card:nth-of-type(3) .pattern-state{font-size:7px}
+ main>section.card:nth-of-type(3) .pattern-description{font-size:8px;line-height:1.15}
  main>section.card:nth-of-type(3) .chart-wrap{flex:1 1 auto;min-height:0;height:auto}
  main>section.card:nth-of-type(3) .row:last-of-type{flex:0 0 auto}
  main>section.card:nth-of-type(3)>.small{font-size:7px;flex:0 0 auto}
@@ -2843,9 +2849,15 @@ button{border:1px solid #35476b;background:#182640;color:white;border-radius:9px
 
     </div>
 
+    <div class="pattern-guide none" id="patternGuide">
+        <div class="pattern-name" id="patternName">PATRÓN: ANALIZANDO VELAS</div>
+        <div class="pattern-state" id="patternState">ESPERANDO</div>
+        <div class="pattern-description" id="patternDescription">El radar señalará aquí las velas que forman el patrón y explicará qué puede indicar.</div>
+    </div>
+
     <div class="chart-wrap">
 
-        <div id="chart" role="img" aria-label="Gráfica de velas BTC/USD"></div>
+        <div id="chart" role="img" aria-label="Gráfica de velas BTC/USD con patrones señalados"></div>
 
     </div>
 
@@ -2991,6 +3003,7 @@ let candleSeries = null;
 let ema9Line = null;
 let ema21Line = null;
 let chartTargetLine = null;
+let patternMarkers = [];
 let chartFollowLive = true;
 let chartInitialized = false;
 let busy = false;
@@ -3174,6 +3187,7 @@ function drawChart(data){
     }
 
     candleSeries.setData(rows);
+    candleSeries.setMarkers(patternMarkers);
 
     const closes = rows.map(c=>c.close);
     const e9 = emaSeries(closes,9);
@@ -3207,6 +3221,107 @@ function drawChart(data){
         const to = Math.max(from+10, Math.min(previousRange.to, rows.length+8));
         chart.timeScale().setVisibleLogicalRange({from,to});
     }
+}
+
+
+function describePattern(pattern){
+    const key=String(pattern || "SIN PATRÓN CLARO").toUpperCase();
+    const lessons={
+        "ENVOLVENTE ALCISTA":{
+            direction:"bull",bars:2,label:"ENV",
+            text:"Una vela verde cubre el cuerpo de la roja anterior. Puede indicar que los compradores están tomando el control; gana fuerza si aparece tras una caída."
+        },
+        "ENVOLVENTE BAJISTA":{
+            direction:"bear",bars:2,label:"ENV",
+            text:"Una vela roja cubre el cuerpo de la verde anterior. Puede indicar presión vendedora; necesita continuidad para confirmar el giro."
+        },
+        "POSIBLE MARTILLO":{
+            direction:"bull",bars:1,label:"MART",
+            text:"Tiene una mecha inferior larga y un cuerpo pequeño. Muestra rechazo de precios bajos; es más útil después de una caída y con confirmación alcista."
+        },
+        "POSIBLE ESTRELLA FUGAZ":{
+            direction:"bear",bars:1,label:"EST",
+            text:"Tiene una mecha superior larga y un cuerpo pequeño. Muestra rechazo de precios altos; es más útil después de una subida y con confirmación bajista."
+        },
+        "DOJI":{
+            direction:"none",bars:1,label:"DOJI",
+            text:"Apertura y cierre casi iguales: hay indecisión. Por sí solo no indica compra ni venta; espera la vela siguiente."
+        },
+        "TRES VELAS ALCISTAS":{
+            direction:"bull",bars:3,label:"3 VELAS",
+            text:"Tres velas verdes consecutivas con cierres crecientes. Sugiere impulso comprador, aunque puede agotarse si llega a una resistencia."
+        },
+        "TRES VELAS BAJISTAS":{
+            direction:"bear",bars:3,label:"3 VELAS",
+            text:"Tres velas rojas consecutivas con cierres decrecientes. Sugiere impulso vendedor, aunque puede frenarse en un soporte."
+        },
+        "RUPTURA ALCISTA DE RANGO":{
+            direction:"bull",bars:1,label:"RUPTURA",
+            text:"El cierre supera el máximo del rango de las cinco velas anteriores. Puede iniciar un tramo alcista; vigila que el precio no vuelva al rango."
+        },
+        "RUPTURA BAJISTA DE RANGO":{
+            direction:"bear",bars:1,label:"RUPTURA",
+            text:"El cierre cae bajo el mínimo del rango de las cinco velas anteriores. Puede iniciar un tramo bajista; vigila que el precio no recupere el rango."
+        },
+        "ESTRUCTURA ALCISTA · HH/HL":{
+            direction:"bull",bars:3,label:"HH / HL",
+            text:"Los máximos y mínimos van subiendo: HH = máximo más alto, HL = mínimo más alto. Es una estructura de tendencia alcista."
+        },
+        "ESTRUCTURA BAJISTA · LH/LL":{
+            direction:"bear",bars:3,label:"LH / LL",
+            text:"Los máximos y mínimos van bajando: LH = máximo más bajo, LL = mínimo más bajo. Es una estructura de tendencia bajista."
+        },
+        "VELA INTERNA · COMPRESIÓN":{
+            direction:"none",bars:2,label:"INTERNA",
+            text:"La última vela queda dentro del máximo y mínimo de la anterior. El precio se está comprimiendo; espera una ruptura del rango para conocer el lado."
+        }
+    };
+    return lessons[key] || {
+        direction:"none",bars:0,label:"",
+        text:"Todavía no hay una figura reconocible con suficiente claridad. El radar seguirá observando las velas."
+    };
+}
+
+function updatePatternGuide(pattern, candleRows){
+    const guide=$("patternGuide");
+    const name=$("patternName");
+    const state=$("patternState");
+    const description=$("patternDescription");
+    if(!guide || !name || !state || !description) return;
+
+    const key=String(pattern || "SIN PATRÓN CLARO").toUpperCase();
+    const lesson=describePattern(key);
+    const isNone=lesson.bars===0;
+    guide.className="pattern-guide "+(isNone?"none":lesson.direction);
+    name.textContent=isNone?"PATRÓN: SIN PATRÓN CLARO":key;
+    description.textContent=lesson.text;
+
+    const rows=Array.isArray(candleRows)?candleRows:[];
+    const latest=rows.length?Number(rows[rows.length-1].time):0;
+    const currentMinute=Math.floor(Date.now()/60000)*60;
+    const forming=latest>0 && latest>=currentMinute;
+    state.textContent=isNone?"OBSERVANDO":(forming?"EN FORMACIÓN":"VELA CERRADA");
+
+    patternMarkers=[];
+    if(!isNone && rows.length){
+        const selected=rows.slice(-lesson.bars);
+        const color=lesson.direction==="bull"?"#00d995":
+            lesson.direction==="bear"?"#ff5269":"#f4c95d";
+        selected.forEach((c,index)=>{
+            const bullish=lesson.direction==="bull";
+            const position=bullish?"belowBar":
+                lesson.direction==="bear"?"aboveBar":
+                (Number(c.close)>=Number(c.open)?"belowBar":"aboveBar");
+            patternMarkers.push({
+                time:Number(c.time),
+                position:position,
+                color:color,
+                shape:bullish?"arrowUp":lesson.direction==="bear"?"arrowDown":"circle",
+                text:index===selected.length-1?lesson.label:String(index+1)
+            });
+        });
+    }
+    if(chart && candleSeries) candleSeries.setMarkers(patternMarkers);
 }
 
 function goLive(){
@@ -3419,6 +3534,7 @@ function updateRadar(d){
 
 
     drawChart(d.brti_candles || []);
+    updatePatternGuide(d.pattern, d.brti_candles || []);
 
     $("candleCount").textContent=
         (d.brti_candles || []).length+
