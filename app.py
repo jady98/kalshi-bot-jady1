@@ -97,6 +97,14 @@ _signal_state = {
     "candidate_since": 0.0
 }
 
+_pattern_stats_cache = {}
+_guidance_state = {
+    "ticker": None,
+    "stage": "SIN_SEÑAL",
+    "direction": None,
+    "last_alert_ts": 0.0
+}
+
 session = requests.Session()
 session.headers.update({
     "User-Agent": "BitcoinRadar/7.0"
@@ -416,6 +424,26 @@ def calculate_brti_window_average(ticks, start_ts, end_ts):
 def calculate_brti_average(ticks):
     now = time.time()
     return calculate_brti_window_average(ticks, now - 60, now + 0.001)
+
+
+def get_cached_pattern_stats(pattern):
+    """Consulta el historial de patrones como máximo una vez por minuto."""
+    if not pattern or pattern == "SIN PATRÓN CLARO":
+        return {"samples": 0, "bullish_pct": None, "bearish_pct": None}
+    now = time.monotonic()
+    with lock:
+        cached = _pattern_stats_cache.get(pattern)
+        if cached and now - cached[0] < 60:
+            return dict(cached[1])
+    try:
+        stats = pattern_memory.get_pattern_stats(pattern)
+        if not isinstance(stats, dict):
+            stats = {"samples": 0, "bullish_pct": None, "bearish_pct": None}
+    except Exception:
+        stats = {"samples": 0, "bullish_pct": None, "bearish_pct": None}
+    with lock:
+        _pattern_stats_cache[pattern] = (now, dict(stats))
+    return stats
 
 
 # ==========================================
@@ -977,6 +1005,22 @@ def calculate_prediction(
         else:
             target_direction = "CERCA DEL OBJETIVO"
 
+    pattern_stats = get_cached_pattern_stats(pattern)
+    pattern_samples = int(pattern_stats.get("samples") or 0)
+    historical_bullish_pct = pattern_stats.get("bullish_pct")
+    historical_bearish_pct = pattern_stats.get("bearish_pct")
+    # El historial solo pesa 15% y requiere al menos 20 resultados reales.
+    if (
+        pattern_samples >= 20
+        and historical_bullish_pct is not None
+        and historical_bearish_pct is not None
+    ):
+        historical_bias = max(
+            -1.0,
+            min(1.0, (float(historical_bullish_pct) - float(historical_bearish_pct)) / 100.0)
+        )
+        normalized = (normalized * 0.85) + (historical_bias * 0.15)
+
     normalized, direction = stabilize_direction(
         normalized,
         remaining
@@ -1021,6 +1065,14 @@ def calculate_prediction(
         ),
         "target_direction": target_direction,
         "technical_score": round(technical_normalized, 4),
+        "pattern_samples": pattern_samples,
+        "pattern_historical_bullish_pct": historical_bullish_pct,
+        "pattern_historical_bearish_pct": historical_bearish_pct,
+        "pattern_learning_used": bool(
+            pattern_samples >= 20
+            and historical_bullish_pct is not None
+            and historical_bearish_pct is not None
+        ),
         "direction_method": (
             "BRTI_PRIMARY_KALSHI_15M"
             if valid_price(market_target)
@@ -1750,6 +1802,144 @@ def update_alert_state(direction, bullish, ticker, divergence_pct,
 
 
 # ==========================================
+def _tick_change_over_seconds(ticks, seconds, now):
+    """Cambio observado contra el último tick anterior al horizonte solicitado."""
+    valid = []
+    for item in ticks or []:
+        try:
+            ts, value = float(item[0]), float(item[1])
+            if math.isfinite(ts) and valid_price(value) and ts <= now + 2:
+                valid.append((ts, value))
+        except (TypeError, ValueError, IndexError):
+            continue
+    if len(valid) < 2:
+        return None
+    valid.sort(key=lambda row: row[0])
+    current_ts, current_price = valid[-1]
+    cutoff = current_ts - float(seconds)
+    reference = None
+    for ts, value in valid:
+        if ts <= cutoff:
+            reference = (ts, value)
+        else:
+            break
+    if reference is None:
+        return None
+    age = current_ts - reference[0]
+    if age < seconds * 0.65 or age > seconds + 45:
+        return None
+    return ((current_price / reference[1]) - 1.0) * 100.0
+
+
+def build_forward_guidance(ticks, price, indicators):
+    """Proyección corta separada del pronóstico principal al cierre de 15 minutos."""
+    now = time.time()
+    change_1m = _tick_change_over_seconds(ticks, 60, now)
+    change_3m = _tick_change_over_seconds(ticks, 180, now)
+    forecast_1m = (
+        float(price) * (1 + change_1m / 100)
+        if valid_price(price) and change_1m is not None else None
+    )
+    if change_3m is not None:
+        projected_3m_change = max(-0.18, min(0.18, change_3m))
+    elif change_1m is not None:
+        projected_3m_change = max(-0.18, min(0.18, change_1m * 2.2))
+    else:
+        projected_3m_change = None
+    forecast_3m = (
+        float(price) * (1 + projected_3m_change / 100)
+        if valid_price(price) and projected_3m_change is not None else None
+    )
+    direction = indicators.get("direction", "INDECISO")
+    bullish = float(indicators.get("bullish_score", 50) or 50)
+    side_probability = (
+        bullish if direction == "ALCISTA"
+        else 100 - bullish if direction == "BAJISTA"
+        else 50.0
+    )
+    def agrees(value):
+        if value is None or direction not in ("ALCISTA", "BAJISTA"):
+            return False
+        return value > 0.001 if direction == "ALCISTA" else value < -0.001
+    align_1m = agrees(change_1m)
+    align_3m = agrees(change_3m)
+    stage = "OBSERVAR"
+    if direction in ("ALCISTA", "BAJISTA"):
+        if side_probability >= 56 and (align_1m or align_3m):
+            stage = "PREALERTA"
+        if side_probability >= 64 and align_1m and align_3m:
+            stage = "ENTRADA"
+    if change_1m is None and change_3m is None:
+        stage = "SIN CONFIRMACIÓN CORTA"
+    return {
+        "short_change_1m_pct": round(change_1m, 5) if change_1m is not None else None,
+        "short_change_3m_pct": round(change_3m, 5) if change_3m is not None else None,
+        "short_predicted_price_1m": round(forecast_1m, 2) if forecast_1m is not None else None,
+        "short_predicted_price_3m": round(forecast_3m, 2) if forecast_3m is not None else None,
+        "short_direction": direction if stage in ("PREALERTA", "ENTRADA") else "INDECISO",
+        "entry_stage": stage,
+        "entry_direction": direction if stage in ("PREALERTA", "ENTRADA") else None,
+        "signal_stage": (
+            stage + " · " + direction + " · " + str(round(side_probability, 1)) + "%"
+            if stage in ("PREALERTA", "ENTRADA")
+            else stage + " · confirmación de 1-3 min"
+        )
+    }
+
+
+def update_guidance_alert(guidance, ticker):
+    """Avisa en los cambios de etapa; no ejecuta órdenes ni conoce la posición del usuario."""
+    now = time.time()
+    stage = guidance.get("entry_stage")
+    direction = guidance.get("entry_direction")
+    alert = None
+    with lock:
+        state = _guidance_state
+        if state["ticker"] != ticker:
+            state.update({
+                "ticker": ticker,
+                "stage": "SIN_SEÑAL",
+                "direction": None,
+                "last_alert_ts": 0.0
+            })
+        previous_stage = state["stage"]
+        previous_direction = state["direction"]
+        if previous_stage == "ENTRADA" and (
+            stage != "ENTRADA" or direction != previous_direction
+        ):
+            alert = {
+                "type": "PROTEGER",
+                "level": "CRITICA",
+                "message": "SEÑAL PERDIÓ CONFIRMACIÓN · VALORA SALIR",
+                "detail": "La entrada anterior ya no mantiene la confirmación conjunta de 1 y 3 minutos. Revisa el contrato y el riesgo antes de mantener la posición.",
+                "timestamp": now
+            }
+        elif stage == "ENTRADA" and (
+            previous_stage != "ENTRADA" or direction != previous_direction
+        ):
+            alert = {
+                "type": "ENTRADA",
+                "level": "AVISO",
+                "message": "ENTRADA CONFIRMADA · " + str(direction),
+                "detail": "La dirección principal y los movimientos recientes de 1 y 3 minutos están alineados. Comprueba el precio del contrato y el tiempo restante antes de decidir.",
+                "timestamp": now
+            }
+        elif stage == "PREALERTA" and previous_stage not in ("PREALERTA", "ENTRADA"):
+            alert = {
+                "type": "PREALERTA",
+                "level": "AVISO",
+                "message": "PREALERTA · POSIBLE " + str(direction),
+                "detail": "Se está formando una dirección y el movimiento corto empieza a acompañarla. Todavía no es una entrada confirmada.",
+                "timestamp": now
+            }
+        state["stage"] = stage
+        state["direction"] = direction
+        if alert and now - state["last_alert_ts"] >= 20:
+            state["last_alert_ts"] = now
+            return alert
+    return None
+
+
 # DATOS PRINCIPALES
 # ==========================================
 
@@ -1927,6 +2117,11 @@ def get_data():
         brti_live,
         coinbase_live
     )
+    guidance = build_forward_guidance(ticks, bp if brti_live else None, indicators)
+    guidance_alert = update_guidance_alert(guidance, market_ticker)
+    if guidance_alert is not None:
+        alert_data = guidance_alert
+    indicators.update(guidance)
 
     return {
 
@@ -2039,6 +2234,11 @@ def health():
         "candle_source": data["candle_source"],
         "direction_method": data["direction_method"],
         "pattern": data["pattern"],
+        "pattern_samples": data.get("pattern_samples", 0),
+        "pattern_learning_used": data.get("pattern_learning_used", False),
+        "short_change_1m_pct": data.get("short_change_1m_pct"),
+        "short_change_3m_pct": data.get("short_change_3m_pct"),
+        "entry_stage": data.get("entry_stage"),
         "signal_source": data["signal_source"],
         "brti_average_60s": data["brti_average_60s"],
         "brti_average_samples": data["brti_average_samples"],
@@ -3553,11 +3753,20 @@ function updateRadar(d){
         Number(d.technical_strength ?? 0)+"%";
 
     $("signalStage").textContent =
-        d.signal_stage || (
+        (d.signal_stage || (
             direction==="RECOPILANDO"
             ? "Esperando historial BRTI suficiente"
             : "Predicción calculada exclusivamente con BRTI"
-        );
+        )) +
+        (d.short_predicted_price_1m != null
+            ? " · 1 min: " + money(d.short_predicted_price_1m)
+            : "") +
+        (d.short_predicted_price_3m != null
+            ? " · 3 min: " + money(d.short_predicted_price_3m)
+            : "") +
+        (d.pattern_learning_used
+            ? " · patrón validado con " + d.pattern_samples + " resultados"
+            : " · aprendizaje histórico en recopilación");
 
     const alertData = d.alert || {};
     $("alertTitle").textContent =
