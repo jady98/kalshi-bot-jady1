@@ -3455,18 +3455,25 @@ function drawChart(data){
     );
 
     const lastIndex = candles.length - 1;
+    const lastCandleTime = Number(candles[lastIndex].time);
+    const firstCandleTime = Number(candles[0].time);
+    const maxTimeOffset = Math.max(
+        0,
+        (lastCandleTime - firstCandleTime) / 60
+    );
 
     chartOffset = Math.max(
         0,
-        Math.min(
-            chartOffset,
-            Math.max(0, candles.length - 1)
-        )
+        Math.min(chartOffset, maxTimeOffset)
     );
 
     function candleX(index){
 
-        const distanceFromLast = lastIndex - index;
+        const candleTime = Number(candles[index].time);
+        const distanceFromLast = Math.max(
+            0,
+            (lastCandleTime - candleTime) / 60
+        );
 
         return left + (
             center
@@ -3648,27 +3655,35 @@ function drawChart(data){
         ctx.lineCap="round";
 
         let startedLine = false;
+        let previousTime = null;
 
         visible.forEach(item=>{
 
             const value = series[item.index];
+            const currentTime = Number(item.candle.time);
 
-            if(!Number.isFinite(value)) return;
+            if(!Number.isFinite(value) || !Number.isFinite(currentTime)){
+                startedLine = false;
+                previousTime = null;
+                return;
+            }
+
+            // No dibujar una EMA atravesando minutos sin datos BRTI.
+            if(previousTime !== null && currentTime - previousTime > 60){
+                startedLine = false;
+            }
 
             const x = item.x;
             const yy = y(value);
 
             if(!startedLine){
-
                 ctx.moveTo(x,yy);
                 startedLine = true;
-
             }else{
-
                 ctx.lineTo(x,yy);
-
             }
 
+            previousTime = currentTime;
         });
 
         if(startedLine){
