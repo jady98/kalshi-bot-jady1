@@ -337,9 +337,9 @@ def record_price(price, timestamp=None):
 
 def get_pattern_stats(pattern):
     """
-    Estadística del resultado REAL de contratos Kalshi para este patrón.
-    Solo cuenta cierres de contrato resueltos contra su objetivo (horizon -1);
-    no mezcla la dirección genérica del precio a +15 minutos.
+    Aprendizaje por patrón usando exclusivamente resultados oficiales YES/NO
+    recuperados de Kalshi. Se toma el último snapshot direccional de cada
+    contrato para asociar el patrón con el resultado real de ese contrato.
     """
     global _db_status
 
@@ -355,23 +355,35 @@ def get_pattern_stats(pattern):
 
         with _connect() as conn:
             row = conn.execute("""
+                WITH last_pattern_signal AS (
+                    SELECT DISTINCT ON (s.market_ticker)
+                        s.market_ticker,
+                        s.pattern
+                    FROM btc_signal_snapshots AS s
+                    JOIN btc_official_market_results AS official
+                      ON official.market_ticker = s.market_ticker
+                    WHERE s.pattern = %s
+                      AND s.market_ticker IS NOT NULL
+                      AND s.market_close_ts IS NOT NULL
+                      AND s.direction IN ('ALCISTA', 'BAJISTA')
+                      AND s.signal_ts <= s.market_close_ts
+                      AND official.source = 'kalshi_api'
+                      AND official.official_result IN ('SI', 'NO')
+                    ORDER BY s.market_ticker, s.signal_ts DESC, s.id DESC
+                )
                 SELECT
                     COUNT(*) AS total,
                     COUNT(*) FILTER (
-                        WHERE o.result = 'ALCISTA'
+                        WHERE official.official_result = 'SI'
                     ) AS bullish,
                     COUNT(*) FILTER (
-                        WHERE o.result = 'BAJISTA'
+                        WHERE official.official_result = 'NO'
                     ) AS bearish
-                FROM btc_signal_outcomes AS o
-                JOIN btc_signal_snapshots AS s
-                  ON s.id = o.snapshot_id
-                WHERE s.pattern = %s
-                  AND s.market_ticker IS NOT NULL
-                  AND s.market_close_ts IS NOT NULL
-                  AND o.horizon_seconds = -1
-                  AND o.future_price IS NOT NULL
-                  AND o.result IN ('ALCISTA', 'BAJISTA')
+                FROM last_pattern_signal AS pattern_signal
+                JOIN btc_official_market_results AS official
+                  ON official.market_ticker = pattern_signal.market_ticker
+                WHERE official.source = 'kalshi_api'
+                  AND official.official_result IN ('SI', 'NO')
             """, (str(pattern),)).fetchone()
 
         total, bullish, bearish = row
