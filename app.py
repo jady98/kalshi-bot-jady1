@@ -2122,6 +2122,19 @@ def get_data():
 
     now = time.time()
 
+    # Encolar el contrato vencido ANTES de limpiar sus datos locales.
+    # Si se borran primero ticker/cierre, el bloque de resolución nunca puede
+    # detectar el vencimiento y el resultado oficial de Kalshi no se registra.
+    if (
+        market_ticker
+        and market_close is not None
+        and float(market_close) > 0
+        and now >= float(market_close)
+    ):
+        with lock:
+            if not any(item[0] == market_ticker for item in market_resolution_queue):
+                market_resolution_queue.append((market_ticker, float(market_close)))
+
     contract_active = bool(
         market_ticker
         and valid_price(market_target)
@@ -2155,11 +2168,6 @@ def get_data():
         and coinbase_age is not None
         and 0 <= coinbase_age <= STALE_SECONDS
     )
-
-    if market_ticker and market_close is not None and now >= market_close:
-        with lock:
-            if not any(item[0] == market_ticker for item in market_resolution_queue):
-                market_resolution_queue.append((market_ticker, market_close))
 
     for queued_ticker, queued_close in list(market_resolution_queue):
         if now < queued_close:
