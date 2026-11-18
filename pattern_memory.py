@@ -396,9 +396,10 @@ def get_pattern_learning_diagnostics():
             """).fetchone()
 
             patterns = conn.execute("""
-                WITH last_contract_signal AS (
-                    SELECT DISTINCT ON (s.market_ticker)
-                        s.market_ticker, s.pattern
+                WITH contract_patterns AS (
+                    SELECT DISTINCT ON (s.market_ticker, BTRIM(COALESCE(s.pattern, '')))
+                        s.market_ticker,
+                        BTRIM(COALESCE(s.pattern, '')) AS pattern
                     FROM btc_signal_snapshots AS s
                     JOIN btc_official_market_results AS o
                       ON o.market_ticker = s.market_ticker
@@ -406,14 +407,15 @@ def get_pattern_learning_diagnostics():
                       AND s.market_close_ts IS NOT NULL
                       AND s.direction IN ('ALCISTA', 'BAJISTA')
                       AND s.signal_ts <= s.market_close_ts
+                      AND BTRIM(COALESCE(s.pattern, '')) <> ''
                       AND o.source = 'kalshi_api'
                       AND o.official_result IN ('SI', 'NO')
-                    ORDER BY s.market_ticker, s.signal_ts DESC, s.id DESC
+                    ORDER BY s.market_ticker, BTRIM(COALESCE(s.pattern, '')),
+                             s.signal_ts DESC, s.id DESC
                 )
-                SELECT COALESCE(NULLIF(BTRIM(pattern), ''), '(SIN PATRÓN)'),
-                       COUNT(*)
-                FROM last_contract_signal
-                GROUP BY 1
+                SELECT pattern, COUNT(*)
+                FROM contract_patterns
+                GROUP BY pattern
                 ORDER BY COUNT(*) DESC
                 LIMIT 10
             """).fetchall()
@@ -458,10 +460,10 @@ def get_pattern_stats(pattern):
 
         with _connect() as conn:
             row = conn.execute("""
-                WITH last_contract_signal AS (
-                    SELECT DISTINCT ON (s.market_ticker)
+                WITH contract_patterns AS (
+                    SELECT DISTINCT ON (s.market_ticker, BTRIM(COALESCE(s.pattern, '')))
                         s.market_ticker,
-                        s.pattern
+                        BTRIM(COALESCE(s.pattern, '')) AS pattern
                     FROM btc_signal_snapshots AS s
                     JOIN btc_official_market_results AS official
                       ON official.market_ticker = s.market_ticker
@@ -469,9 +471,11 @@ def get_pattern_stats(pattern):
                       AND s.market_close_ts IS NOT NULL
                       AND s.direction IN ('ALCISTA', 'BAJISTA')
                       AND s.signal_ts <= s.market_close_ts
+                      AND BTRIM(COALESCE(s.pattern, '')) <> ''
                       AND official.source = 'kalshi_api'
                       AND official.official_result IN ('SI', 'NO')
-                    ORDER BY s.market_ticker, s.signal_ts DESC, s.id DESC
+                    ORDER BY s.market_ticker, BTRIM(COALESCE(s.pattern, '')),
+                             s.signal_ts DESC, s.id DESC
                 )
                 SELECT
                     COUNT(*) AS total,
@@ -481,7 +485,7 @@ def get_pattern_stats(pattern):
                     COUNT(*) FILTER (
                         WHERE official.official_result = 'NO'
                     ) AS bearish
-                FROM last_contract_signal AS contract_signal
+                FROM contract_patterns AS contract_signal
                 JOIN btc_official_market_results AS official
                   ON official.market_ticker = contract_signal.market_ticker
                 WHERE BTRIM(COALESCE(contract_signal.pattern, '')) = BTRIM(%s)
