@@ -348,6 +348,8 @@ def get_pattern_learning_diagnostics():
         "eligible_with_pattern": 0,
         "eligible_without_pattern": 0,
         "patterns": [],
+        "pattern_learning_source": "BRTI_OUTCOME_900S",
+        "pattern_outcomes_15m": 0,
         "error": None
     }
     try:
@@ -397,28 +399,41 @@ def get_pattern_learning_diagnostics():
 
             patterns = conn.execute("""
                 WITH contract_patterns AS (
-                    SELECT DISTINCT ON (s.market_ticker, BTRIM(COALESCE(s.pattern, '')))
+                    SELECT DISTINCT ON (
                         s.market_ticker,
-                        BTRIM(COALESCE(s.pattern, '')) AS pattern
+                        BTRIM(COALESCE(s.pattern, ''))
+                    )
+                        s.market_ticker,
+                        BTRIM(COALESCE(s.pattern, '')) AS pattern,
+                        o.result
                     FROM btc_signal_snapshots AS s
-                    JOIN btc_official_market_results AS o
-                      ON o.market_ticker = s.market_ticker
+                    JOIN btc_signal_outcomes AS o
+                      ON o.snapshot_id = s.id
+                     AND o.horizon_seconds = 900
+                     AND o.future_price IS NOT NULL
                     WHERE s.market_ticker IS NOT NULL
-                      AND s.market_close_ts IS NOT NULL
-                      AND s.direction IN ('ALCISTA', 'BAJISTA')
-                      AND s.signal_ts <= s.market_close_ts
                       AND BTRIM(COALESCE(s.pattern, '')) <> ''
-                      AND o.source = 'kalshi_api'
-                      AND o.official_result IN ('SI', 'NO')
-                    ORDER BY s.market_ticker, BTRIM(COALESCE(s.pattern, '')),
+                      AND o.result IN ('ALCISTA', 'BAJISTA', 'SIN CAMBIO')
+                    ORDER BY s.market_ticker,
+                             BTRIM(COALESCE(s.pattern, '')),
                              s.signal_ts DESC, s.id DESC
                 )
-                SELECT pattern, COUNT(*)
+                SELECT pattern, COUNT(*) FILTER (
+                    WHERE result IN ('ALCISTA', 'BAJISTA')
+                )
                 FROM contract_patterns
                 GROUP BY pattern
-                ORDER BY COUNT(*) DESC
+                ORDER BY COUNT(*) FILTER (
+                    WHERE result IN ('ALCISTA', 'BAJISTA')
+                ) DESC
                 LIMIT 10
             """).fetchall()
+            pattern_outcomes_15m = conn.execute("""
+                SELECT COUNT(*)
+                FROM btc_signal_outcomes
+                WHERE horizon_seconds = 900
+                  AND future_price IS NOT NULL
+            """).fetchone()[0]
 
         return {
             "official_total": int(totals[0] or 0),
@@ -434,6 +449,8 @@ def get_pattern_learning_diagnostics():
                 {"pattern": str(row[0]), "samples": int(row[1])}
                 for row in patterns
             ],
+            "pattern_learning_source": "BRTI_OUTCOME_900S",
+            "pattern_outcomes_15m": int(pattern_outcomes_15m or 0),
             "error": None
         }
     except Exception as exc:
@@ -442,80 +459,68 @@ def get_pattern_learning_diagnostics():
 
 def get_pattern_stats(pattern):
     """
-    Aprendizaje por patrón usando exclusivamente resultados oficiales YES/NO
-    recuperados de Kalshi. Cada contrato aporta como máximo una muestra por
-    cada patrón distinto que apareció en sus snapshots direccionales.
+    Aprende la relación entre cada patrón y el movimiento BRTI posterior
+    a 15 minutos. Cada contrato aporta como máximo una muestra por patrón,
+    usando la última aparición cuyo horizonte +900s ya esté resuelto.
     """
     global _db_status
-
     empty = {
         "samples": 0,
         "bullish_pct": None,
-        "bearish_pct": None
+        "bearish_pct": None,
+        "source": "BRTI_OUTCOME_900S"
     }
-
     try:
         if not pattern:
             return empty
-
         with _connect() as conn:
             row = conn.execute("""
                 WITH contract_patterns AS (
-                    SELECT DISTINCT ON (s.market_ticker, BTRIM(COALESCE(s.pattern, '')))
+                    SELECT DISTINCT ON (
                         s.market_ticker,
-                        BTRIM(COALESCE(s.pattern, '')) AS pattern
+                        BTRIM(COALESCE(s.pattern, ''))
+                    )
+                        s.market_ticker,
+                        BTRIM(COALESCE(s.pattern, '')) AS pattern,
+                        o.result
                     FROM btc_signal_snapshots AS s
-                    JOIN btc_official_market_results AS official
-                      ON official.market_ticker = s.market_ticker
+                    JOIN btc_signal_outcomes AS o
+                      ON o.snapshot_id = s.id
+                     AND o.horizon_seconds = 900
+                     AND o.future_price IS NOT NULL
                     WHERE s.market_ticker IS NOT NULL
-                      AND s.market_close_ts IS NOT NULL
-                      AND s.direction IN ('ALCISTA', 'BAJISTA')
-                      AND s.signal_ts <= s.market_close_ts
                       AND BTRIM(COALESCE(s.pattern, '')) <> ''
-                      AND official.source = 'kalshi_api'
-                      AND official.official_result IN ('SI', 'NO')
-                    ORDER BY s.market_ticker, BTRIM(COALESCE(s.pattern, '')),
+                      AND o.result IN ('ALCISTA', 'BAJISTA', 'SIN CAMBIO')
+                    ORDER BY s.market_ticker,
+                             BTRIM(COALESCE(s.pattern, '')),
                              s.signal_ts DESC, s.id DESC
                 )
                 SELECT
-                    COUNT(*) AS total,
                     COUNT(*) FILTER (
-                        WHERE official.official_result = 'SI'
-                    ) AS bullish,
-                    COUNT(*) FILTER (
-                        WHERE official.official_result = 'NO'
-                    ) AS bearish
-                FROM contract_patterns AS contract_signal
-                JOIN btc_official_market_results AS official
-                  ON official.market_ticker = contract_signal.market_ticker
-                WHERE BTRIM(COALESCE(contract_signal.pattern, '')) = BTRIM(%s)
-                  AND official.source = 'kalshi_api'
-                  AND official.official_result IN ('SI', 'NO')
+                        WHERE result IN ('ALCISTA', 'BAJISTA')
+                    ),
+                    COUNT(*) FILTER (WHERE result = 'ALCISTA'),
+                    COUNT(*) FILTER (WHERE result = 'BAJISTA')
+                FROM contract_patterns
+                WHERE pattern = BTRIM(%s)
             """, (str(pattern),)).fetchone()
-
         total, bullish, bearish = row
         total = int(total or 0)
         bullish = int(bullish or 0)
         bearish = int(bearish or 0)
-
         _db_status = "CONECTADA"
-
-        if total < 10:
-            return {
-                "samples": total,
-                "bullish_pct": None,
-                "bearish_pct": None
-            }
-
+        if total == 0:
+            return empty
         return {
             "samples": total,
             "bullish_pct": round(bullish * 100 / total, 1),
-            "bearish_pct": round(bearish * 100 / total, 1)
+            "bearish_pct": round(bearish * 100 / total, 1),
+            "source": "BRTI_OUTCOME_900S"
         }
-
     except Exception as exc:
         _db_status = "ERROR: " + str(exc)[:180]
         return empty
+
 def record_market_close(market_ticker, closing_average, resolved_ts=None):
     """Grade KXBTC15M with the BRTI average in the 60 seconds before close."""
     global _db_status
