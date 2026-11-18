@@ -249,11 +249,10 @@ def save_snapshot(data):
 
             snapshot_id = row[0]
 
+            # Cada horizonte se mide desde la señal, aunque el contrato
+            # de Kalshi cierre antes. Así 15m significa siempre +900 segundos.
             for horizon in (60, 180, 300, 900):
                 target_ts = signal_ts + horizon
-
-                if target_ts > market_close_ts:
-                    continue
 
                 conn.execute("""
                     INSERT INTO btc_signal_outcomes (
@@ -288,8 +287,8 @@ def save_snapshot(data):
 
 def record_price(price, timestamp=None):
     """
-    Resuelve objetivos solo con un precio de Coinbase cuyo
-    timestamp sea igual o posterior al momento objetivo.
+    Resuelve objetivos con el precio BRTI observado igual o después
+    del momento objetivo. BRTI es la fuente única de evaluación.
     Guarda como máximo una muestra por segundo.
     """
     global _last_tick_second, _db_status
@@ -635,7 +634,6 @@ def get_15m_prediction_accuracy():
                      AND o.horizon_seconds = 900
                      AND o.future_price IS NOT NULL
                     WHERE s.market_ticker IS NOT NULL
-                      AND s.signal_ts + 900 <= s.market_close_ts
                     ORDER BY s.market_ticker, s.signal_ts DESC, s.id DESC
                 )
                 SELECT
@@ -705,7 +703,6 @@ def get_15m_prediction_accuracy_by_source():
                         END AS source
                     ) AS source
                     WHERE s.market_ticker IS NOT NULL
-                      AND s.signal_ts + 900 <= s.market_close_ts
                     ORDER BY s.market_ticker, source.source, s.signal_ts DESC, s.id DESC
                 )
                 SELECT
