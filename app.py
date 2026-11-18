@@ -2826,6 +2826,87 @@ button:disabled{
     .alert-card { min-height: 92px; padding: 13px 12px; gap: 11px; }
     .alert-card .alert-icon { flex-basis: 48px; width: 48px; height: 48px; font-size: 29px; }
 }
+
+/* AJUSTE MOVIL: radar completo al ancho del telefono */
+@media (max-width: 600px) {
+    html, body {
+        width: 100%;
+        max-width: 100%;
+        overflow-x: hidden;
+    }
+    body {
+        padding: 6px !important;
+    }
+    .container, main, .dashboard {
+        width: 100%;
+        max-width: 100%;
+        min-width: 0;
+    }
+    .card {
+        min-width: 0;
+        padding: 9px !important;
+        margin-bottom: 8px;
+    }
+    .chart-wrap {
+        height: 190px !important;
+    }
+    .alert-stack {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 6px;
+        width: 100%;
+        margin: 8px 0;
+        min-width: 0;
+    }
+    .alert-card {
+        box-sizing: border-box;
+        min-width: 0;
+        min-height: 0;
+        height: 148px;
+        padding: 8px 5px;
+        border-width: 1.5px;
+        border-radius: 12px;
+        display: flex;
+        flex-direction: column;
+        justify-content: flex-start;
+        align-items: center;
+        gap: 6px;
+        text-align: center;
+        overflow: hidden;
+    }
+    .alert-card.active {
+        transform: none;
+    }
+    .alert-card .alert-icon {
+        flex: 0 0 30px;
+        width: 30px;
+        height: 30px;
+        font-size: 20px;
+    }
+    .alert-card .alert-copy {
+        width: 100%;
+        min-width: 0;
+    }
+    .alert-card .alert-title {
+        font-size: clamp(10px, 2.8vw, 14px);
+        line-height: 1.12;
+        letter-spacing: 0;
+        overflow-wrap: anywhere;
+        margin: 0 0 5px;
+    }
+    .alert-card .alert-detail {
+        font-size: clamp(8px, 2.25vw, 11px);
+        line-height: 1.2;
+        overflow-wrap: anywhere;
+    }
+}
+@media (max-width: 360px) {
+    .alert-card { height: 142px; padding: 7px 3px; }
+    .alert-card .alert-title { font-size: 10px; }
+    .alert-card .alert-detail { font-size: 8px; }
+    .chart-wrap { height: 165px !important; }
+}
+
 </style>
 </head>
 
