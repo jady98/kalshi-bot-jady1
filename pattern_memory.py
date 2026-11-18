@@ -348,7 +348,7 @@ def get_pattern_learning_diagnostics():
         "eligible_with_pattern": 0,
         "eligible_without_pattern": 0,
         "patterns": [],
-        "pattern_learning_source": "BRTI_OUTCOME_900S",
+        "pattern_learning_source": "KALSHI_CONTRACT_CLOSE_BRTI_AVERAGE",
         "pattern_outcomes_15m": 0,
         "error": None
     }
@@ -409,7 +409,7 @@ def get_pattern_learning_diagnostics():
                     FROM btc_signal_snapshots AS s
                     JOIN btc_signal_outcomes AS o
                       ON o.snapshot_id = s.id
-                     AND o.horizon_seconds = 900
+                     AND o.horizon_seconds = -1
                      AND o.future_price IS NOT NULL
                     WHERE s.market_ticker IS NOT NULL
                       AND BTRIM(COALESCE(s.pattern, '')) <> ''
@@ -449,8 +449,8 @@ def get_pattern_learning_diagnostics():
                 {"pattern": str(row[0]), "samples": int(row[1])}
                 for row in patterns
             ],
-            "pattern_learning_source": "BRTI_OUTCOME_900S",
-            "pattern_outcomes_15m": int(pattern_outcomes_15m or 0),
+            "pattern_learning_source": "KALSHI_CONTRACT_CLOSE_BRTI_AVERAGE",
+            "pattern_contract_close_outcomes": int(pattern_outcomes_15m or 0),
             "error": None
         }
     except Exception as exc:
@@ -468,7 +468,7 @@ def get_pattern_stats(pattern):
         "samples": 0,
         "bullish_pct": None,
         "bearish_pct": None,
-        "source": "BRTI_OUTCOME_900S"
+        "source": "KALSHI_CONTRACT_CLOSE_BRTI_AVERAGE"
     }
     try:
         if not pattern:
@@ -486,7 +486,7 @@ def get_pattern_stats(pattern):
                     FROM btc_signal_snapshots AS s
                     JOIN btc_signal_outcomes AS o
                       ON o.snapshot_id = s.id
-                     AND o.horizon_seconds = 900
+                     AND o.horizon_seconds = -1
                      AND o.future_price IS NOT NULL
                     WHERE s.market_ticker IS NOT NULL
                       AND BTRIM(COALESCE(s.pattern, '')) <> ''
@@ -515,7 +515,7 @@ def get_pattern_stats(pattern):
             "samples": total,
             "bullish_pct": round(bullish * 100 / total, 1),
             "bearish_pct": round(bearish * 100 / total, 1),
-            "source": "BRTI_OUTCOME_900S"
+            "source": "KALSHI_CONTRACT_CLOSE_BRTI_AVERAGE"
         }
     except Exception as exc:
         _db_status = "ERROR: " + str(exc)[:180]
@@ -775,7 +775,7 @@ def get_15m_prediction_accuracy():
                 FROM btc_signal_snapshots AS s
                 JOIN btc_signal_outcomes AS o
                   ON o.snapshot_id = s.id
-                 AND o.horizon_seconds = 900
+                 AND o.horizon_seconds = -1
                  AND o.future_price IS NOT NULL
             """).fetchone()
         evaluated, correct, incorrect, no_change, indecisive = row
@@ -805,7 +805,7 @@ def get_15m_prediction_accuracy_by_source():
                     FROM btc_signal_snapshots AS s
                     JOIN btc_signal_outcomes AS o
                       ON o.snapshot_id = s.id
-                     AND o.horizon_seconds = 900
+                     AND o.horizon_seconds = -1
                      AND o.future_price IS NOT NULL
                     CROSS JOIN LATERAL (
                         SELECT CASE
@@ -898,7 +898,7 @@ def get_recent_predictions(limit=50):
                 FROM btc_signal_snapshots AS s
                 LEFT JOIN btc_signal_outcomes AS o
                   ON o.snapshot_id = s.id
-                 AND o.horizon_seconds = 900
+                 AND o.horizon_seconds = -1
                 ORDER BY s.signal_ts DESC
                 LIMIT %s
             """, (limit,)).fetchall()
