@@ -2535,93 +2535,91 @@ html{background:#080b14}
 body{margin:0;padding:12px;background:#080b14;color:#f3f5ff;font-family:Arial,sans-serif}
 main{width:100%;max-width:760px;margin:0 auto}
 .header{display:flex;justify-content:space-between;align-items:center;gap:10px;margin:5px 0 14px}
-.logo{font-size:22px;font-weight:900;letter-spacing:1px}
-.purple{color:#b88aff}
+.logo{font-size:22px;font-weight:900;letter-spacing:1px}.purple{color:#b88aff}
 .status{font-size:10px;line-height:1.6;text-align:right;color:#9ba9c4}
-.dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:#ff536b;margin-right:4px}
-.dot.live{background:#00e69a;box-shadow:0 0 9px #00e69a}
+.dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:#ff536b;margin-right:4px}.dot.live{background:#00e69a;box-shadow:0 0 9px #00e69a}
 .grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px;margin-bottom:10px}
 .card{min-width:0;background:#111827;border:1px solid #26334b;border-radius:15px;padding:14px;margin-bottom:10px}
-.label{color:#93a2bf;font-size:10px;letter-spacing:.4px;font-weight:700;line-height:1.35}
+.label{color:#93a2bf;font-size:10px;letter-spacing:.4px;font-weight:700;line-height:1.3}
 .price{font-size:clamp(18px,4.8vw,28px);font-weight:900;margin:9px 0 5px;overflow-wrap:anywhere}
 .brti-card{border:1px solid #278cff;background:linear-gradient(145deg,#10243c,#111827 75%);box-shadow:0 0 14px rgba(39,140,255,.13)}
 .kalshi-card{border:1px solid #00d995;background:linear-gradient(145deg,#103329,#111827 75%);box-shadow:0 0 14px rgba(0,217,149,.13)}
 .forecast-card{border:1px solid #bd75ff;background:linear-gradient(145deg,#29183f,#111827 75%);box-shadow:0 0 14px rgba(189,117,255,.16)}
 .brand-mark{display:inline-flex;align-items:center;justify-content:center;min-width:25px;height:25px;padding:0 7px;border-radius:7px;font-size:12px;font-weight:900;margin-bottom:8px}
-.brti-card .brand-mark{color:#55aaff;background:#12365c}
-.kalshi-card .brand-mark{color:#00e6a0;background:#104b38}
-.forecast-card .brand-mark{color:#d4a2ff;background:#43245e}
+.brti-card .brand-mark{color:#55aaff;background:#12365c}.kalshi-card .brand-mark{color:#00e6a0;background:#104b38}.forecast-card .brand-mark{color:#d4a2ff;background:#43245e}
 .brti-card .label{color:#69b7ff}.kalshi-card .label{color:#49e9b1}.forecast-card .label{color:#d4a2ff}
 .brti-card .price{color:#70bdff}.kalshi-card .price{color:#4af0b3}.forecast-card .price{color:#d5a5ff}
-.forecast-card .price.predicted.bullish{color:#00e69a}
-.forecast-card .price.predicted.bearish{color:#ff536b}
-.forecast-card .price.predicted.uncertain{color:#f4c95d}
-.small{font-size:10px;color:#8d9bb6;line-height:1.5}
-.green{color:#00e69a}.red{color:#ff536b}.yellow{color:#f4c95d}
+.forecast-card .price.predicted.bullish{color:#00e69a}.forecast-card .price.predicted.bearish{color:#ff536b}.forecast-card .price.predicted.uncertain{color:#f4c95d}
+.small{font-size:10px;color:#8d9bb6;line-height:1.5}.green{color:#00e69a}.red{color:#ff536b}.yellow{color:#f4c95d}
 .signal{font-size:27px;font-weight:900;margin:10px 0}
-.bar{height:12px;display:flex;border-radius:20px;overflow:hidden;background:#29344a;margin:10px 0 8px}
-.bull{background:#00d995;width:50%}.bear{background:#ff5269;width:50%}
+.bar{height:12px;display:flex;border-radius:20px;overflow:hidden;background:#29344a;margin:10px 0 8px}.bull{background:#00d995;width:50%}.bear{background:#ff5269;width:50%}
 .row{display:flex;justify-content:space-between;align-items:center;gap:8px;min-width:0}
 .section-title{color:#a1afca;font-size:11px;font-weight:800;margin-bottom:10px;letter-spacing:.35px}
-.chart-wrap{width:100%;height:330px;min-height:220px;position:relative;overflow:hidden}
-#chart{display:block;width:100%;height:100%;touch-action:pan-y}
-.chart-legend{display:flex;gap:13px;flex-wrap:wrap;margin:8px 0;font-size:10px;color:#9aa9c4}
-.legend-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:4px}
-button{border:1px solid #35476b;background:#182640;color:white;border-radius:9px;padding:10px 12px;font-size:10px;font-weight:800}
-button:active{opacity:.7}button:disabled{opacity:.5}
+.chart-wrap{width:100%;height:330px;min-height:220px;position:relative;overflow:hidden}#chart{display:block;width:100%;height:100%;touch-action:pan-y}
+.chart-legend{display:flex;gap:13px;flex-wrap:wrap;margin:8px 0;font-size:10px;color:#9aa9c4}.legend-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:4px}
+button{border:1px solid #35476b;background:#182640;color:white;border-radius:9px;padding:10px 12px;font-size:10px;font-weight:800}button:active{opacity:.7}button:disabled{opacity:.5}
 .alert-stack{display:grid;grid-template-columns:1fr;gap:7px;margin:10px 0}
 .alert-card{display:flex;align-items:center;gap:11px;min-height:66px;padding:10px 12px;border:1px solid #34425b;border-radius:13px;background:rgba(8,12,28,.88);opacity:.42;filter:saturate(.55);transition:opacity .2s ease,box-shadow .2s ease}
-.alert-card.active{opacity:1;filter:none}
-.alert-card .alert-icon{flex:0 0 34px;width:34px;height:34px;display:grid;place-items:center;border-radius:50%;font-size:20px;font-weight:1000}
-.alert-card .alert-copy{min-width:0}
-.alert-card .alert-title{font-size:13px;font-weight:900;line-height:1.15;margin-bottom:4px}
+.alert-card.active{opacity:1;filter:none}.alert-card .alert-icon{flex:0 0 34px;width:34px;height:34px;display:grid;place-items:center;border-radius:50%;font-size:20px;font-weight:1000}
+.alert-card .alert-copy{min-width:0}.alert-card .alert-title{font-size:13px;font-weight:900;line-height:1.15;margin-bottom:4px}
 .alert-card .alert-detail{color:#dce4f4;font-size:11px;line-height:1.3;font-weight:500;overflow-wrap:anywhere}
-.alert-card.prealert{border-color:#8e7620}.alert-card.prealert .alert-icon{color:#111;background:#ffd21f}
-.alert-card.prealert.active{box-shadow:0 0 15px rgba(255,210,31,.18)}
-.alert-card.entry{border-color:#167c50}.alert-card.entry .alert-icon{color:#042112;background:#25ed77}
-.alert-card.entry.active{box-shadow:0 0 15px rgba(37,237,119,.18)}
-.alert-card.protect{border-color:#8c3041}.alert-card.protect .alert-icon{color:white;background:#ff405b}
-.alert-card.protect.active{box-shadow:0 0 15px rgba(255,64,91,.2)}
-.technical-card{display:none!important}
-.footer{text-align:center;color:#66758f;font-size:9px;padding:12px 0 20px}
-.signal.green{animation:signalPulseGreen 1.5s ease-in-out infinite}
-.signal.red{animation:signalPulseRed 1.5s ease-in-out infinite}
+.alert-card.prealert{border-color:#8e7620}.alert-card.prealert .alert-icon{color:#111;background:#ffd21f}.alert-card.prealert.active{box-shadow:0 0 15px rgba(255,210,31,.18)}
+.alert-card.entry{border-color:#167c50}.alert-card.entry .alert-icon{color:#042112;background:#25ed77}.alert-card.entry.active{box-shadow:0 0 15px rgba(37,237,119,.18)}
+.alert-card.protect{border-color:#8c3041}.alert-card.protect .alert-icon{color:white;background:#ff405b}.alert-card.protect.active{box-shadow:0 0 15px rgba(255,64,91,.2)}
+.technical-card{display:none!important}.footer{text-align:center;color:#66758f;font-size:9px;padding:12px 0 20px}
+.signal.green{animation:signalPulseGreen 1.5s ease-in-out infinite}.signal.red{animation:signalPulseRed 1.5s ease-in-out infinite}
 @keyframes signalPulseGreen{0%,100%{text-shadow:0 0 4px rgba(0,230,154,.25)}50%{text-shadow:0 0 18px rgba(0,230,154,.75)}}
 @keyframes signalPulseRed{0%,100%{text-shadow:0 0 4px rgba(255,83,107,.25)}50%{text-shadow:0 0 18px rgba(255,83,107,.75)}}
 @media(max-width:600px){
- body{padding:8px}
- main{max-width:100%;padding:0}
- .header{margin:3px 2px 9px}
- .logo{font-size:20px}
- .status{font-size:9px}
- .grid{grid-template-columns:repeat(2,minmax(0,1fr));grid-template-areas:"current forecast" "target target";gap:7px;margin-bottom:8px}
- .grid .card{margin:0;padding:11px 10px;border-radius:13px;min-width:0}
- .brti-card{grid-area:current}.forecast-card{grid-area:forecast}.target-card{grid-area:target}
- .grid .brand-mark{display:none}
- .grid .label{font-size:9px;line-height:1.25}
- .grid .price{font-size:clamp(16px,4.8vw,22px);line-height:1.1;margin:7px 0 4px}
- .grid .small{font-size:9px;line-height:1.3}
- main>section.card{padding:12px;margin-bottom:8px;border-radius:13px}
- .section-title{font-size:10px;margin-bottom:8px}
- .signal{font-size:25px;margin:8px 0}
- .bar{height:10px;margin:8px 0 6px}
- .chart-wrap{height:310px;min-height:260px}
- .chart-legend{gap:10px;font-size:9px;margin:7px 0}
- .alert-stack{gap:6px;margin:8px 0}
- .alert-card{min-height:62px;padding:9px 10px;gap:9px;border-radius:11px}
- .alert-card .alert-icon{flex-basis:30px;width:30px;height:30px;font-size:18px}
- .alert-card .alert-title{font-size:12px;margin-bottom:3px}
- .alert-card .alert-detail{font-size:10px;line-height:1.25}
- button{padding:9px 10px;font-size:9px}
+ html,body{width:100%;height:100%;min-height:0;overflow:hidden}
+ body{padding:0}
+ main{width:100%;max-width:none;height:100vh;height:100dvh;min-height:0;margin:0;padding:5px;display:grid;grid-template-rows:auto auto auto auto minmax(150px,1fr) auto;gap:5px;overflow:hidden}
+ .header{min-height:24px;margin:0;padding:0 2px}.logo{font-size:19px}.status{font-size:8px}
+ .grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:5px;margin:0;min-height:0}
+ .grid .card{min-width:0;margin:0;padding:7px 5px;border-radius:10px}
+ .grid .brand-mark{display:none}.grid .label{font-size:clamp(7px,2vw,9px);line-height:1.12;overflow-wrap:anywhere}
+ .grid .price{font-size:clamp(11px,3.5vw,16px);line-height:1.1;margin:6px 0 3px;overflow-wrap:anywhere}
+ .grid .small{font-size:7px;line-height:1.15}
+ main>section.card{min-height:0;margin:0;padding:7px 9px;border-radius:11px}
+ main>section.card:nth-of-type(1) .section-title{font-size:8px;margin:0 0 3px}
+ main>section.card:nth-of-type(1) .signal{font-size:clamp(16px,4vw,20px);margin:2px 0 4px;line-height:1.05}
+ main>section.card:nth-of-type(1) .price{font-size:clamp(13px,3.5vw,17px);margin:1px 0}
+ main>section.card:nth-of-type(1) .bar{height:7px;margin:4px 0}
+ main>section.card:nth-of-type(1) .small{font-size:7px;line-height:1.12}
+ .alert-stack{min-height:0;margin:0;gap:4px;grid-template-columns:repeat(3,minmax(0,1fr))}
+ .alert-card{height:72px;min-height:0;padding:5px 3px;gap:3px;border-radius:9px;border-width:1px;display:flex;flex-direction:column;justify-content:flex-start;align-items:center;text-align:center;overflow:hidden}
+ .alert-card.active{transform:none}.alert-card .alert-icon{flex:0 0 20px;width:20px;height:20px;font-size:13px}
+ .alert-card .alert-copy{width:100%;min-width:0}.alert-card .alert-title{font-size:clamp(8px,2.3vw,10px);line-height:1.08;margin:0 0 2px;overflow-wrap:anywhere}
+ .alert-card .alert-detail{font-size:clamp(7px,1.8vw,8px);line-height:1.1;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+ main>section.card:nth-of-type(3){height:100%;display:flex;flex-direction:column;overflow:hidden;padding:6px}
+ main>section.card:nth-of-type(3) .row{flex:0 0 auto}
+ main>section.card:nth-of-type(3) .section-title{font-size:8px;margin:0 0 2px}
+ main>section.card:nth-of-type(3) .chart-legend{margin:3px 0;gap:7px;font-size:8px}
+ main>section.card:nth-of-type(3) .chart-wrap{flex:1 1 auto;min-height:0;height:auto}
+ main>section.card:nth-of-type(3) .row:last-of-type{flex:0 0 auto}
+ main>section.card:nth-of-type(3)>.small{font-size:7px;flex:0 0 auto}
+ main>section.card:nth-of-type(5){padding:5px 8px}
+ main>section.card:nth-of-type(5) .signal{font-size:clamp(15px,4vw,18px);margin:1px 0}
+ main>section.card:nth-of-type(5) .label,main>section.card:nth-of-type(5) .small{font-size:7px}
+ .technical-card,.footer{display:none!important}
+ button{padding:7px 8px;font-size:8px}
 }
-@media(max-width:360px){
- body{padding:6px}
- .grid .card{padding:9px 7px}
- .grid .label{font-size:8px}
- .grid .price{font-size:15px}
- .chart-wrap{height:280px;min-height:240px}
- .alert-card .alert-title{font-size:11px}
- .alert-card .alert-detail{font-size:9px}
+@media(max-width:380px){
+ main{padding:4px;gap:4px}
+ .grid .card{padding:6px 3px}
+ .grid .label{font-size:7px}
+ .grid .price{font-size:11px}
+ .alert-card{height:66px}
+ .alert-card .alert-title{font-size:8px}
+ .alert-card .alert-detail{font-size:7px}
+}
+@media(max-height:720px) and (max-width:600px){
+ main{grid-template-rows:auto auto auto auto minmax(120px,1fr) auto;gap:3px;padding:4px}
+ .header{min-height:21px}
+ .grid .card{padding:5px 3px}
+ main>section.card{padding:5px 7px}
+ .alert-card{height:58px;padding:3px 2px}
+ .chart-legend{margin:2px 0!important}
 }
 </style>
 </head>
