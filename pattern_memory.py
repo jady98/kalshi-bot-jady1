@@ -739,6 +739,60 @@ def get_prediction_accuracy_by_source():
         return {"sources": [], "error": str(exc)[:180]}
 
 
+def get_15m_probability_calibration():
+    """
+    Precisión empírica por bandas de confianza, usando una sola señal BRTI
+    por contrato y únicamente pronósticos guardados con horizonte real de 900s.
+    """
+    try:
+        with _connect() as conn:
+            rows = conn.execute("""
+                WITH one_per_contract AS (
+                    SELECT DISTINCT ON (s.market_ticker)
+                        s.market_ticker,
+                        s.direction,
+                        s.bullish_score,
+                        s.bearish_score,
+                        o.result
+                    FROM btc_signal_snapshots AS s
+                    JOIN btc_signal_outcomes AS o
+                      ON o.snapshot_id = s.id
+                     AND o.horizon_seconds = 900
+                     AND o.future_price IS NOT NULL
+                    WHERE s.market_ticker IS NOT NULL
+                      AND s.direction IN ('ALCISTA', 'BAJISTA')
+                      AND s.features->>'forecast_horizon_seconds' = '900'
+                      AND (
+                        UPPER(COALESCE(s.features->>'signal_source', '')) LIKE '%BRTI%'
+                        OR UPPER(COALESCE(s.features->>'direction_method', '')) LIKE '%BRTI%'
+                      )
+                      AND o.result IN ('ALCISTA', 'BAJISTA')
+                    ORDER BY s.market_ticker, s.signal_ts ASC, s.id ASC
+                ),
+                scored AS (
+                    SELECT
+                        (FLOOR((GREATEST(bullish_score, bearish_score) - 50) / 5.0) * 5 + 50)::INTEGER AS band_floor,
+                        CASE WHEN direction = result THEN 1 ELSE 0 END AS correct
+                    FROM one_per_contract
+                    WHERE bullish_score IS NOT NULL AND bearish_score IS NOT NULL
+                )
+                SELECT band_floor, COUNT(*) AS samples, SUM(correct) AS correct
+                FROM scored
+                GROUP BY band_floor
+                ORDER BY band_floor
+            """).fetchall()
+        return [
+            {
+                "band_floor": int(row[0]),
+                "samples": int(row[1]),
+                "correct": int(row[2])
+            }
+            for row in rows
+        ]
+    except Exception:
+        return []
+
+
 def get_15m_prediction_accuracy():
     """Precisión direccional a 15 minutos: evalúa cada señal individual al cumplirse +900 segundos."""
     empty = {
