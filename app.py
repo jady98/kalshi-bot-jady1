@@ -2907,6 +2907,61 @@ button:disabled{
     .chart-wrap { height: 165px !important; }
 }
 
+
+/* RADAR COMPLETO EN UNA SOLA PANTALLA MOVIL */
+@media (max-width: 600px) {
+    *, *::before, *::after { box-sizing: border-box; }
+    html, body { width:100%; height:100%; min-height:0; margin:0; overflow:hidden !important; }
+    body { padding:0 !important; }
+    main {
+        width:100%; max-width:none; height:100vh; height:100dvh; min-height:0;
+        padding:5px; margin:0; display:grid;
+        grid-template-rows:auto auto auto auto minmax(100px,1fr) auto;
+        gap:5px; overflow:hidden;
+    }
+    .header { min-height:25px; margin:0; padding:0 3px; }
+    .logo { font-size:clamp(16px,4.5vw,21px); }
+    .status { font-size:8px; gap:3px; }
+    .grid { min-height:0; margin:0; grid-template-columns:repeat(3,minmax(0,1fr)); gap:5px; }
+    .grid .card { min-width:0; margin:0; padding:7px 4px !important; border-radius:10px; }
+    .grid .brand-mark { display:none; }
+    .grid .label { font-size:clamp(7px,2vw,9px); line-height:1.1; overflow-wrap:anywhere; }
+    .grid .price { font-size:clamp(11px,3.5vw,16px); line-height:1.1; margin:6px 0 3px; overflow-wrap:anywhere; }
+    .grid .small { font-size:7px; line-height:1.15; }
+    main > section.card:nth-of-type(1) { min-height:0; margin:0; padding:7px 9px !important; }
+    main > section.card:nth-of-type(1) .section-title { font-size:8px; margin:0 0 3px; }
+    main > section.card:nth-of-type(1) .signal { font-size:clamp(16px,4vw,20px); margin:2px 0 4px; line-height:1.05; }
+    main > section.card:nth-of-type(1) .price { font-size:clamp(13px,3.5vw,17px); margin:1px 0; }
+    main > section.card:nth-of-type(1) .bar { height:7px; margin:4px 0; }
+    main > section.card:nth-of-type(1) .small { font-size:7px; line-height:1.15; }
+    .alert-stack { min-height:0; margin:0; gap:5px; grid-template-columns:repeat(3,minmax(0,1fr)); }
+    .alert-card { height:92px; min-height:0; padding:5px 3px; gap:3px; border-radius:10px; border-width:1px; }
+    .alert-card .alert-icon { flex:0 0 22px; width:22px; height:22px; font-size:15px; }
+    .alert-card .alert-title { font-size:clamp(8px,2.4vw,11px); line-height:1.08; margin:0 0 3px; }
+    .alert-card .alert-detail { font-size:clamp(7px,1.9vw,9px); line-height:1.12; }
+    main > section.card:nth-of-type(2) {
+        min-height:0; height:100%; margin:0; padding:6px !important;
+        display:flex; flex-direction:column; overflow:hidden;
+    }
+    main > section.card:nth-of-type(2) .row { flex:0 0 auto; }
+    main > section.card:nth-of-type(2) .section-title { font-size:8px; margin:0 0 2px; }
+    main > section.card:nth-of-type(2) .chart-legend { margin:3px 0; gap:7px; font-size:8px; }
+    main > section.card:nth-of-type(2) .chart-wrap { flex:1 1 auto; min-height:0; height:auto !important; }
+    main > section.card:nth-of-type(2) .row:last-of-type,
+    main > section.card:nth-of-type(2) > .small { display:none; }
+    main > section.card:nth-of-type(4) { min-height:0; margin:0; padding:5px 8px !important; }
+    main > section.card:nth-of-type(4) .signal { font-size:clamp(15px,4vw,19px); margin:2px 0; }
+    main > section.card:nth-of-type(4) .label,
+    main > section.card:nth-of-type(4) .small { font-size:7px; }
+    .technical-card, .footer { display:none !important; }
+}
+@media (max-width: 380px) {
+    main { padding:4px; gap:4px; }
+    .alert-card { height:84px; }
+    .alert-card .alert-title { font-size:8px; }
+    .alert-card .alert-detail { font-size:7px; }
+}
+
 </style>
 </head>
 
