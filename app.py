@@ -3209,7 +3209,7 @@ function drawChart(data){
             lineWidth:1,
             lineStyle:LightweightCharts.LineStyle.Dashed,
             axisLabelVisible:true,
-            title:""
+            title:"KALSHI"
         });
     }
 
