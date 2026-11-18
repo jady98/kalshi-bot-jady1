@@ -1051,18 +1051,35 @@ def calculate_prediction(
     pattern_samples = int(pattern_stats.get("samples") or 0)
     historical_bullish_pct = pattern_stats.get("bullish_pct")
     historical_bearish_pct = pattern_stats.get("bearish_pct")
-    # El historial solo pesa 15% y requiere al menos 20 resultados reales.
-    pattern_learning_used = bool(
+    # El historial de resultados BRTI a +900s solo influye cuando
+    # existe una ventaja histórica mínima y suficientes contratos distintos.
+    pattern_learning_weight = 0.0
+    pattern_learning_used = False
+    if (
         pattern_samples >= 20
         and historical_bullish_pct is not None
         and historical_bearish_pct is not None
-    )
-    if pattern_learning_used:
+    ):
         historical_bias = max(
             -1.0,
-            min(1.0, (float(historical_bullish_pct) - float(historical_bearish_pct)) / 100.0)
+            min(1.0, (
+                float(historical_bullish_pct)
+                - float(historical_bearish_pct)
+            ) / 100.0)
         )
-        normalized = (normalized * 0.85) + (historical_bias * 0.15)
+        # Evita aprender ruido: exige una diferencia mínima de 8 puntos.
+        if abs(historical_bias) >= 0.08:
+            sample_reliability = min(
+                1.0,
+                max(0.0, (pattern_samples - 19) / 31.0)
+            )
+            pattern_learning_weight = 0.10 * sample_reliability
+            if pattern_learning_weight > 0:
+                normalized = (
+                    normalized * (1.0 - pattern_learning_weight)
+                    + historical_bias * pattern_learning_weight
+                )
+                pattern_learning_used = True
 
     # El aprendizaje histórico puede modular la confianza, pero no invertir
     # el lado del contrato cuando la proyección ya está claramente sobre/bajo
@@ -1123,6 +1140,8 @@ def calculate_prediction(
         "pattern_historical_bullish_pct": historical_bullish_pct,
         "pattern_historical_bearish_pct": historical_bearish_pct,
         "pattern_learning_used": pattern_learning_used,
+        "pattern_learning_weight_pct": round(pattern_learning_weight * 100, 2),
+        "pattern_learning_source": "BRTI_OUTCOME_900S",
         "target_side_locked": target_side_locked,
         "contract_yes_probability": bullish if valid_price(market_target) else None,
         "contract_no_probability": bearish if valid_price(market_target) else None,
