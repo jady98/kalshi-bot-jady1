@@ -901,6 +901,7 @@ def get_recent_predictions(limit=50):
                 LEFT JOIN btc_signal_outcomes AS o
                   ON o.snapshot_id = s.id
                  AND o.horizon_seconds = 900
+                WHERE s.features->>'forecast_horizon_seconds' = '900'
                 ORDER BY s.signal_ts DESC
                 LIMIT %s
             """, (limit,)).fetchall()
@@ -963,14 +964,18 @@ def get_database_counts():
                      FROM btc_signal_snapshots),
 
                     (SELECT COUNT(*)
-                     FROM btc_signal_outcomes
-                     WHERE horizon_seconds = 900
-                     AND future_price IS NOT NULL),
+                     FROM btc_signal_outcomes AS o
+                     JOIN btc_signal_snapshots AS s ON s.id = o.snapshot_id
+                     WHERE o.horizon_seconds = 900
+                       AND o.future_price IS NOT NULL
+                       AND s.features->>'forecast_horizon_seconds' = '900'),
 
                     (SELECT COUNT(*)
-                     FROM btc_signal_outcomes
-                     WHERE horizon_seconds = 900
-                     AND future_price IS NULL),
+                     FROM btc_signal_outcomes AS o
+                     JOIN btc_signal_snapshots AS s ON s.id = o.snapshot_id
+                     WHERE o.horizon_seconds = 900
+                       AND o.future_price IS NULL
+                       AND s.features->>'forecast_horizon_seconds' = '900'),
 
                     (SELECT COUNT(*)
                      FROM btc_signal_outcomes
