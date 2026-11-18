@@ -2188,13 +2188,18 @@ def get_data():
         else "SIN VELAS BRTI"
     )
 
+    # Si Kalshi no tiene un contrato abierto, el radar sigue proyectando
+    # los próximos 15 minutos para aprender y mostrar pronóstico; solo se
+    # bloquean las alertas de entrada. Con contrato activo usa su cierre real.
+    prediction_horizon = countdown if contract_active else 900
     indicators = calculate_prediction(
         analysis_price,
         ticks,
-        countdown,
+        prediction_horizon,
         market_target if contract_active else None,
         analysis_candles
     )
+    indicators["forecast_horizon_seconds"] = prediction_horizon
 
     indicators["signal_source"] = signal_source
     indicators["candle_source"] = candle_source
