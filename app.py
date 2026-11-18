@@ -3341,59 +3341,71 @@ function describePattern(pattern){
     const lessons={
         "ENVOLVENTE ALCISTA":{
             direction:"bull",bars:2,label:"ENV",
-            text:"Una vela verde cubre el cuerpo de la roja anterior. Puede indicar que los compradores están tomando el control; gana fuerza si aparece tras una caída."
+            text:"La vela verde cubre el cuerpo de la vela roja anterior. Puede mostrar que los compradores están ganando fuerza.",
+            next:"Comprueba que aparezca después de una caída y que la siguiente vela cierre al alza. Sin confirmación puede ser una falsa señal."
         },
         "ENVOLVENTE BAJISTA":{
             direction:"bear",bars:2,label:"ENV",
-            text:"Una vela roja cubre el cuerpo de la verde anterior. Puede indicar presión vendedora; necesita continuidad para confirmar el giro."
+            text:"La vela roja cubre el cuerpo de la vela verde anterior. Puede mostrar que los vendedores están tomando el control.",
+            next:"Busca que aparezca después de una subida y que la siguiente vela siga cerrando a la baja."
         },
         "POSIBLE MARTILLO":{
             direction:"bull",bars:1,label:"MART",
-            text:"Tiene una mecha inferior larga y un cuerpo pequeño. Muestra rechazo de precios bajos; es más útil después de una caída y con confirmación alcista."
+            text:"Tiene una mecha inferior larga y un cuerpo pequeño. El precio cayó, pero los compradores lo empujaron de nuevo hacia arriba.",
+            next:"Es más relevante después de una caída. Espera una vela posterior alcista; aislado no confirma un giro."
         },
         "POSIBLE ESTRELLA FUGAZ":{
             direction:"bear",bars:1,label:"EST",
-            text:"Tiene una mecha superior larga y un cuerpo pequeño. Muestra rechazo de precios altos; es más útil después de una subida y con confirmación bajista."
+            text:"Tiene una mecha superior larga y un cuerpo pequeño. El precio subió, pero encontró vendedores en la zona alta.",
+            next:"Es más relevante después de una subida. Espera una vela posterior bajista para confirmar el rechazo."
         },
         "DOJI":{
             direction:"none",bars:1,label:"DOJI",
-            text:"Apertura y cierre casi iguales: hay indecisión. Por sí solo no indica compra ni venta; espera la vela siguiente."
+            text:"La apertura y el cierre son casi iguales. Compradores y vendedores terminaron prácticamente empatados.",
+            next:"No elijas dirección solo por el Doji. Observa si la siguiente vela rompe su máximo o su mínimo."
         },
         "TRES VELAS ALCISTAS":{
             direction:"bull",bars:3,label:"3 VELAS",
-            text:"Tres velas verdes consecutivas con cierres crecientes. Sugiere impulso comprador, aunque puede agotarse si llega a una resistencia."
+            text:"Tres velas verdes consecutivas con cierres cada vez más altos. Reflejan impulso comprador.",
+            next:"Comprueba que los cuerpos mantengan fuerza y que no estén chocando contra una resistencia cercana."
         },
         "TRES VELAS BAJISTAS":{
             direction:"bear",bars:3,label:"3 VELAS",
-            text:"Tres velas rojas consecutivas con cierres decrecientes. Sugiere impulso vendedor, aunque puede frenarse en un soporte."
+            text:"Tres velas rojas consecutivas con cierres cada vez más bajos. Reflejan impulso vendedor.",
+            next:"Comprueba que los cierres sigan descendiendo y que no haya un soporte cercano frenando la caída."
         },
         "RUPTURA ALCISTA DE RANGO":{
             direction:"bull",bars:1,label:"RUPTURA",
-            text:"El cierre supera el máximo del rango de las cinco velas anteriores. Puede iniciar un tramo alcista; vigila que el precio no vuelva al rango."
+            text:"La vela cerró por encima del máximo de las cinco velas anteriores. El precio intenta salir del rango hacia arriba.",
+            next:"Vigila que el precio permanezca por encima del antiguo máximo. Si vuelve al rango, la ruptura puede haber fallado."
         },
         "RUPTURA BAJISTA DE RANGO":{
             direction:"bear",bars:1,label:"RUPTURA",
-            text:"El cierre cae bajo el mínimo del rango de las cinco velas anteriores. Puede iniciar un tramo bajista; vigila que el precio no recupere el rango."
+            text:"La vela cerró por debajo del mínimo de las cinco velas anteriores. El precio intenta salir del rango hacia abajo.",
+            next:"Vigila que el precio permanezca por debajo del antiguo mínimo. Si recupera el rango, la ruptura puede haber fallado."
         },
         "ESTRUCTURA ALCISTA · HH/HL":{
             direction:"bull",bars:3,label:"HH / HL",
-            text:"Los máximos y mínimos van subiendo: HH = máximo más alto, HL = mínimo más alto. Es una estructura de tendencia alcista."
+            text:"Los máximos y mínimos van subiendo. HH significa máximo más alto y HL significa mínimo más alto.",
+            next:"La estructura se mantiene mientras los mínimos relevantes sigan subiendo. Una pérdida del último mínimo puede debilitarla."
         },
         "ESTRUCTURA BAJISTA · LH/LL":{
             direction:"bear",bars:3,label:"LH / LL",
-            text:"Los máximos y mínimos van bajando: LH = máximo más bajo, LL = mínimo más bajo. Es una estructura de tendencia bajista."
+            text:"Los máximos y mínimos van bajando. LH significa máximo más bajo y LL significa mínimo más bajo.",
+            next:"La estructura se mantiene mientras los máximos relevantes sigan bajando. Superar el último máximo puede debilitarla."
         },
         "VELA INTERNA · COMPRESIÓN":{
             direction:"none",bars:2,label:"INTERNA",
-            text:"La última vela queda dentro del máximo y mínimo de la anterior. El precio se está comprimiendo; espera una ruptura del rango para conocer el lado."
+            text:"La última vela quedó dentro del máximo y el mínimo de la vela anterior. El movimiento se está comprimiendo.",
+            next:"Marca el máximo y el mínimo de la vela grande. La ruptura confirmada de uno de esos límites puede mostrar el siguiente movimiento."
         }
     };
     return lessons[key] || {
         direction:"none",bars:0,label:"",
-        text:"Todavía no hay una figura reconocible con suficiente claridad. El radar seguirá observando las velas."
+        text:"Todavía no hay una figura reconocible con suficiente claridad.",
+        next:"Sigue observando las velas; no fuerces una interpretación cuando el patrón no está claro."
     };
 }
-
 function updatePatternGuide(pattern, candleRows, mainDirection, samples){
     const guide=$("patternGuide");
     const name=$("patternName");
@@ -3406,11 +3418,10 @@ function updatePatternGuide(pattern, candleRows, mainDirection, samples){
     const isNone=lesson.bars===0;
     guide.className="pattern-guide "+(isNone?"none":lesson.direction);
     name.textContent=isNone?"PATRÓN: SIN PATRÓN CLARO":key;
-    description.textContent=lesson.text;
+    description.textContent=lesson.text+(lesson.next?" Qué observar: "+lesson.next:"");
     const history=$("patternHistory");
     const sampleCount=Math.max(0,Number(samples)||0);
-    history.textContent="Historial oficial de este patrón: "+sampleCount+
-        " contrato"+(sampleCount===1?"":"s")+" evaluado"+(sampleCount===1?"":"s");
+    history.textContent="Muestras oficiales: "+sampleCount+" / 20 para habilitar influencia estadística.";
     const conflicts=(lesson.direction==="bull" && mainDirection==="BAJISTA") ||
         (lesson.direction==="bear" && mainDirection==="ALCISTA");
     if(conflicts){
