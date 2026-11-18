@@ -864,6 +864,29 @@ def get_database_counts():
             "error": str(exc)[:180]
         }
 
+def get_last_contract_signal(market_ticker):
+    """Última dirección predictiva válida guardada antes del cierre del contrato."""
+    ticker = str(market_ticker or "").strip()
+    if not ticker:
+        return None
+    try:
+        with _connect() as conn:
+            row = conn.execute("""
+                SELECT direction
+                FROM btc_signal_snapshots
+                WHERE market_ticker = %s
+                  AND direction IN ('ALCISTA', 'BAJISTA')
+                  AND (market_close_ts IS NULL OR signal_ts <= market_close_ts)
+                ORDER BY signal_ts DESC, id DESC
+                LIMIT 1
+            """, (ticker,)).fetchone()
+        return row[0] if row else None
+    except Exception as exc:
+        global _db_status
+        _db_status = "ERROR: " + str(exc)[:180]
+        return None
+
+
 def record_official_market_result(
     market_ticker,
     official_result,
