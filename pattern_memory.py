@@ -745,7 +745,7 @@ def get_15m_prediction_accuracy():
         "predictions_evaluated": 0, "correct": 0, "incorrect": 0,
         "no_change": 0, "indecisive_contracts": 0,
         "contracts_evaluated": 0, "accuracy_pct": None,
-        "measurement": "TODAS LAS SEÑALES RESUELTAS · HORIZONTE 900S"
+        "measurement": "SOLO PRONÓSTICOS CON HORIZONTE REAL DE 900S"
     }
     try:
         with _connect() as conn:
@@ -777,6 +777,7 @@ def get_15m_prediction_accuracy():
                   ON o.snapshot_id = s.id
                  AND o.horizon_seconds = 900
                  AND o.future_price IS NOT NULL
+                 AND s.features->>'forecast_horizon_seconds' = '900'
             """).fetchone()
         evaluated, correct, incorrect, no_change, indecisive = row
         total = correct + incorrect
@@ -788,7 +789,7 @@ def get_15m_prediction_accuracy():
             "indecisive_contracts": indecisive,
             "contracts_evaluated": evaluated,
             "accuracy_pct": round(correct * 100 / total, 1) if total else None,
-            "measurement": "TODAS LAS SEÑALES RESUELTAS · HORIZONTE 900S"
+            "measurement": "SOLO PRONÓSTICOS CON HORIZONTE REAL DE 900S"
         }
     except Exception as exc:
         return {**empty, "error": str(exc)[:180]}
@@ -807,6 +808,7 @@ def get_15m_prediction_accuracy_by_source():
                       ON o.snapshot_id = s.id
                      AND o.horizon_seconds = 900
                      AND o.future_price IS NOT NULL
+                     AND s.features->>'forecast_horizon_seconds' = '900'
                     CROSS JOIN LATERAL (
                         SELECT CASE
                             WHEN UPPER(COALESCE(s.features->>'signal_source', '')) LIKE '%BRTI%'
@@ -859,12 +861,12 @@ def get_15m_prediction_accuracy_by_source():
                 "no_change": no_change,
                 "indecisive_contracts": indecisive,
                 "accuracy_pct": round(correct * 100 / total, 1) if total else None,
-                "measurement": "TODAS LAS SEÑALES RESUELTAS POR FUENTE · HORIZONTE 900S"
+                "measurement": "SOLO PRONÓSTICOS CON HORIZONTE REAL DE 900S · POR FUENTE"
             })
         return {
             "sources": result,
             "error": None,
-            "measurement": "TODAS LAS SEÑALES RESUELTAS POR FUENTE · HORIZONTE 900S"
+            "measurement": "SOLO PRONÓSTICOS CON HORIZONTE REAL DE 900S · POR FUENTE"
         }
     except Exception as exc:
         return {"sources": [], "error": str(exc)[:180]}
