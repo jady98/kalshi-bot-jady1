@@ -1831,11 +1831,44 @@ def _tick_change_over_seconds(ticks, seconds, now):
     return ((current_price / reference[1]) - 1.0) * 100.0
 
 
-def build_forward_guidance(ticks, price, indicators):
+def _candle_change_over_seconds(candles, price, seconds, now):
+    """Respaldo con velas BRTI persistidas cuando el historial de ticks aún se está formando."""
+    if not valid_price(price):
+        return None
+    candidates = []
+    for candle in candles or []:
+        try:
+            close_ts = float(candle.get("_close_ts", candle.get("time", 0)))
+            close_price = float(candle.get("close", 0))
+            if (
+                math.isfinite(close_ts)
+                and valid_price(close_price)
+                and close_ts <= now - float(seconds)
+            ):
+                candidates.append((close_ts, close_price))
+        except (TypeError, ValueError, AttributeError):
+            continue
+    if not candidates:
+        return None
+    reference_ts, reference_price = max(candidates, key=lambda item: item[0])
+    age = now - reference_ts
+    # Velas de un minuto: tolerancia suficiente para cierres y pequeños retrasos.
+    if age < float(seconds) * 0.65 or age > float(seconds) + 90:
+        return None
+    return ((float(price) / reference_price) - 1.0) * 100.0
+
+
+def build_forward_guidance(ticks, price, indicators, candles=None):
     """Proyección corta separada del pronóstico principal al cierre de 15 minutos."""
     now = time.time()
     change_1m = _tick_change_over_seconds(ticks, 60, now)
     change_3m = _tick_change_over_seconds(ticks, 180, now)
+    # Tras un reinicio de Render, los ticks empiezan vacíos. Usar velas BRTI
+    # ya recuperadas de PostgreSQL evita esperar a reconstruir todo el historial.
+    if change_1m is None:
+        change_1m = _candle_change_over_seconds(candles, price, 60, now)
+    if change_3m is None:
+        change_3m = _candle_change_over_seconds(candles, price, 180, now)
     forecast_1m = (
         float(price) * (1 + change_1m / 100)
         if valid_price(price) and change_1m is not None else None
@@ -2119,7 +2152,9 @@ def get_data():
         brti_live,
         coinbase_live
     )
-    guidance = build_forward_guidance(ticks, bp if brti_live else None, indicators)
+    guidance = build_forward_guidance(
+        ticks, bp if brti_live else None, indicators, candles
+    )
     guidance_alert = update_guidance_alert(guidance, market_ticker)
     if guidance_alert is not None:
         alert_data = guidance_alert
