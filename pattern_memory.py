@@ -484,7 +484,7 @@ def get_pattern_stats(pattern):
                 FROM last_contract_signal AS contract_signal
                 JOIN btc_official_market_results AS official
                   ON official.market_ticker = contract_signal.market_ticker
-                WHERE contract_signal.pattern = %s
+                WHERE BTRIM(COALESCE(contract_signal.pattern, '')) = BTRIM(%s)
                   AND official.source = 'kalshi_api'
                   AND official.official_result IN ('SI', 'NO')
             """, (str(pattern),)).fetchone()
