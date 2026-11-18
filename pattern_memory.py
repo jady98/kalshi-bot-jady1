@@ -459,9 +459,9 @@ def get_pattern_learning_diagnostics():
 
 def get_pattern_stats(pattern):
     """
-    Aprende la relación entre cada patrón y el movimiento BRTI posterior
-    a 15 minutos. Cada contrato aporta como máximo una muestra por patrón,
-    usando la última aparición cuyo horizonte +900s ya esté resuelto.
+    Aprende qué resultado de contrato Kalshi se asocia a cada patrón.
+    Cada contrato aporta como máximo una muestra por patrón, usando el
+    resultado BRTI medio de los 60 segundos previos al cierre frente al strike.
     """
     global _db_status
     empty = {
@@ -775,7 +775,7 @@ def get_15m_prediction_accuracy():
                 FROM btc_signal_snapshots AS s
                 JOIN btc_signal_outcomes AS o
                   ON o.snapshot_id = s.id
-                 AND o.horizon_seconds = -1
+                 AND o.horizon_seconds = 900
                  AND o.future_price IS NOT NULL
             """).fetchone()
         evaluated, correct, incorrect, no_change, indecisive = row
@@ -805,7 +805,7 @@ def get_15m_prediction_accuracy_by_source():
                     FROM btc_signal_snapshots AS s
                     JOIN btc_signal_outcomes AS o
                       ON o.snapshot_id = s.id
-                     AND o.horizon_seconds = -1
+                     AND o.horizon_seconds = 900
                      AND o.future_price IS NOT NULL
                     CROSS JOIN LATERAL (
                         SELECT CASE
@@ -898,7 +898,7 @@ def get_recent_predictions(limit=50):
                 FROM btc_signal_snapshots AS s
                 LEFT JOIN btc_signal_outcomes AS o
                   ON o.snapshot_id = s.id
-                 AND o.horizon_seconds = -1
+                 AND o.horizon_seconds = 900
                 ORDER BY s.signal_ts DESC
                 LIMIT %s
             """, (limit,)).fetchall()
