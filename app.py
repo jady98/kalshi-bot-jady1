@@ -3104,6 +3104,7 @@ function initChart(){
         borderDownColor:"#ff5269",
         wickUpColor:"#00df9a",
         wickDownColor:"#ff5269",
+        priceLineColor:"#45a9ff",
         priceLineVisible:true,
         lastValueVisible:true
     });
