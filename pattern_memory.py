@@ -954,6 +954,7 @@ def get_official_market_accuracy():
                     market_ticker,
                     official_result,
                     signal_direction,
+                    source,
                     CASE
                         WHEN (
                             official_result = 'SI'
@@ -970,7 +971,7 @@ def get_official_market_accuracy():
                 ORDER BY recorded_ts DESC
             """).fetchall()
 
-        correct = sum(1 for row in rows if row[3])
+        correct = sum(1 for row in rows if row[4])
         total = len(rows)
 
         return {
@@ -986,8 +987,9 @@ def get_official_market_accuracy():
                     "market_ticker": row[0],
                     "official_result": row[1],
                     "signal_direction": row[2],
+                    "source": row[3],
                     "evaluation": (
-                        "ACIERTO" if row[3] else "FALLO"
+                        "ACIERTO" if row[4] else "FALLO"
                     )
                 }
                 for row in rows[:20]
