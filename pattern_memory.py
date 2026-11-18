@@ -336,7 +336,7 @@ def record_price(price, timestamp=None):
 
 
 def get_pattern_learning_diagnostics():
-    """Diagnóstico de por qué los resultados oficiales no alimentan patrones."""
+    """Diagnóstico del aprendizaje con resultados BRTI resueltos a +900s."""
     empty = {
         "official_total": 0,
         "kalshi_api_total": 0,
