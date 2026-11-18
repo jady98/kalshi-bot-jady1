@@ -102,7 +102,8 @@ _guidance_state = {
     "ticker": None,
     "stage": "SIN_SEÑAL",
     "direction": None,
-    "last_alert_ts": 0.0
+    "last_alert_ts": 0.0,
+    "alert": None
 }
 
 session = requests.Session()
@@ -1933,7 +1934,8 @@ def update_guidance_alert(guidance, ticker):
                 "ticker": ticker,
                 "stage": "SIN_SEÑAL",
                 "direction": None,
-                "last_alert_ts": 0.0
+                "last_alert_ts": 0.0,
+                "alert": None
             })
         previous_stage = state["stage"]
         previous_direction = state["direction"]
@@ -1971,7 +1973,17 @@ def update_guidance_alert(guidance, ticker):
         # por el intervalo de enfriamiento de una prealerta anterior.
         if alert:
             state["last_alert_ts"] = now
-            return alert
+            state["alert"] = alert
+
+        # Mantener la alerta visible entre las consultas periódicas de la pantalla.
+        # Así no desaparece después de una sola respuesta de la API.
+        saved_alert = state.get("alert")
+        if (
+            saved_alert
+            and saved_alert.get("timestamp") is not None
+            and now - float(saved_alert["timestamp"]) <= 300
+        ):
+            return dict(saved_alert)
     return None
 
 
