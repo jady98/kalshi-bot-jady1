@@ -2568,7 +2568,7 @@ main{width:100%;max-width:760px;margin:0 auto}
 .chart-wrap{width:100%;height:330px;min-height:220px;position:relative;overflow:hidden}#chart{display:block;width:100%;height:100%;touch-action:pan-y}
 .chart-legend{display:flex;gap:13px;flex-wrap:wrap;margin:8px 0;font-size:10px;color:#9aa9c4}.legend-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:4px}
 .pattern-guide{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:3px 8px;align-items:center;margin:5px 0 7px;padding:7px 9px;border:1px solid #35415d;border-left:3px solid #b98aff;border-radius:9px;background:linear-gradient(100deg,rgba(185,138,255,.12),rgba(17,24,39,.7))}
-.pattern-guide.none{border-left-color:#7c8ba5}.pattern-guide.bull{border-left-color:#00d995}.pattern-guide.bear{border-left-color:#ff5269}.pattern-name{font-size:11px;font-weight:900;line-height:1.2;overflow-wrap:anywhere}.pattern-state{font-size:8px;font-weight:900;letter-spacing:.45px;color:#f4c95d;text-align:right}.pattern-description{grid-column:1/-1;color:#b9c6dc;font-size:9px;line-height:1.25}
+.pattern-guide.none{border-left-color:#7c8ba5}.pattern-guide.bull{border-left-color:#00d995}.pattern-guide.bear{border-left-color:#ff5269}.pattern-name{font-size:11px;font-weight:900;line-height:1.2;overflow-wrap:anywhere}.pattern-state{font-size:8px;font-weight:900;letter-spacing:.45px;color:#f4c95d;text-align:right}.pattern-description{grid-column:1/-1;color:#b9c6dc;font-size:9px;line-height:1.25}.pattern-history{grid-column:1/-1;color:#8d9bb6;font-size:8px;line-height:1.2}.pattern-guide.conflict{border-color:#f4c95d;box-shadow:inset 0 0 0 1px rgba(244,201,93,.12)}
 button{border:1px solid #35476b;background:#182640;color:white;border-radius:9px;padding:10px 12px;font-size:10px;font-weight:800}button:active{opacity:.7}button:disabled{opacity:.5}
 .alert-stack{display:grid;grid-template-columns:1fr;gap:7px;margin:10px 0}
 .alert-card{display:flex;align-items:center;gap:11px;min-height:66px;padding:10px 12px;border:1px solid #34425b;border-radius:13px;background:rgba(8,12,28,.88);opacity:.42;filter:saturate(.55);transition:opacity .2s ease,box-shadow .2s ease}
@@ -2692,9 +2692,10 @@ button{border:1px solid #35476b;background:#182640;color:white;border-radius:9px
         <div class="brand-mark">K</div>
 
         <div class="label">
-            PRECIO OBJETIVO · KALSHI
+            KALSHI
         </div>
 
+        <div class="small">PRECIO OBJETIVO DEL CONTRATO</div>
         <div class="price" id="kalshiTarget">--</div>
 
         <div class="small" id="kalshiTargetLabel">
@@ -2853,6 +2854,7 @@ button{border:1px solid #35476b;background:#182640;color:white;border-radius:9px
         <div class="pattern-name" id="patternName">PATRÓN: ANALIZANDO VELAS</div>
         <div class="pattern-state" id="patternState">ESPERANDO</div>
         <div class="pattern-description" id="patternDescription">El radar señalará aquí las velas que forman el patrón y explicará qué puede indicar.</div>
+        <div class="pattern-history" id="patternHistory">Historial oficial del patrón: recopilando</div>
     </div>
 
     <div class="chart-wrap">
@@ -3207,7 +3209,7 @@ function drawChart(data){
             lineWidth:1,
             lineStyle:LightweightCharts.LineStyle.Dashed,
             axisLabelVisible:true,
-            title:"KALSHI"
+            title:""
         });
     }
 
@@ -3282,7 +3284,7 @@ function describePattern(pattern){
     };
 }
 
-function updatePatternGuide(pattern, candleRows){
+function updatePatternGuide(pattern, candleRows, mainDirection, samples){
     const guide=$("patternGuide");
     const name=$("patternName");
     const state=$("patternState");
@@ -3295,12 +3297,24 @@ function updatePatternGuide(pattern, candleRows){
     guide.className="pattern-guide "+(isNone?"none":lesson.direction);
     name.textContent=isNone?"PATRÓN: SIN PATRÓN CLARO":key;
     description.textContent=lesson.text;
+    const history=$("patternHistory");
+    const sampleCount=Math.max(0,Number(samples)||0);
+    history.textContent="Historial oficial de este patrón: "+sampleCount+
+        " contrato"+(sampleCount===1?"":"s")+" evaluado"+(sampleCount===1?"":"s");
+    const conflicts=(lesson.direction==="bull" && mainDirection==="BAJISTA") ||
+        (lesson.direction==="bear" && mainDirection==="ALCISTA");
+    if(conflicts){
+        guide.classList.add("conflict");
+        state.textContent="CONTRADICE LA DIRECCIÓN PRINCIPAL";
+    } else {
+        guide.classList.remove("conflict");
+    }
 
     const rows=Array.isArray(candleRows)?candleRows:[];
     const latest=rows.length?Number(rows[rows.length-1].time):0;
     const currentMinute=Math.floor(Date.now()/60000)*60;
     const forming=latest>0 && latest>=currentMinute;
-    state.textContent=isNone?"OBSERVANDO":(forming?"EN FORMACIÓN":"VELA CERRADA");
+    if(!conflicts) state.textContent=isNone?"OBSERVANDO":(forming?"EN FORMACIÓN":"VELA CERRADA");
 
     patternMarkers=[];
     if(!isNone && rows.length){
@@ -3534,7 +3548,7 @@ function updateRadar(d){
 
 
     drawChart(d.brti_candles || []);
-    updatePatternGuide(d.pattern, d.brti_candles || []);
+    updatePatternGuide(d.pattern, d.brti_candles || [], d.direction, d.pattern_samples);
 
     $("candleCount").textContent=
         (d.brti_candles || []).length+
