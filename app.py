@@ -552,7 +552,7 @@ def calculate_prediction(
         }
 
     # --------------------------------------
-    # PREPARAR HISTORIAL DE VELAS COINBASE
+    # PREPARAR HISTORIAL DE VELAS BRTI
     # --------------------------------------
 
     valid_candles = []
