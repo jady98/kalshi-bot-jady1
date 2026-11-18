@@ -2812,6 +2812,15 @@ def stats():
          "prediction_accuracy_15m_by_source":
             pattern_memory.get_15m_prediction_accuracy_by_source(),
 
+         "probability_calibration_bands":
+            get_cached_probability_calibration(),
+
+         "probability_calibration_ready":
+            any(
+                int(row.get("samples") or 0) >= 30
+                for row in get_cached_probability_calibration()
+            ),
+
          "official_market_accuracy":
             pattern_memory.get_official_market_accuracy()
 
