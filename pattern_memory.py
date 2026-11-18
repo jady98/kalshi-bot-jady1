@@ -443,8 +443,8 @@ def get_pattern_learning_diagnostics():
 def get_pattern_stats(pattern):
     """
     Aprendizaje por patrón usando exclusivamente resultados oficiales YES/NO
-    recuperados de Kalshi. Se toma el último snapshot direccional de cada
-    contrato para asociar el patrón con el resultado real de ese contrato.
+    recuperados de Kalshi. Cada contrato aporta como máximo una muestra por
+    cada patrón distinto que apareció en sus snapshots direccionales.
     """
     global _db_status
 
