@@ -2386,7 +2386,8 @@ def get_data():
                     "direction_method": indicators.get("direction_method"),
                     "signal_source": signal_source,
                     "candle_source": candle_source,
-                    "market_target": market_target
+                    "market_target": market_target,
+                    "forecast_horizon_seconds": prediction_horizon
                 }
             })
 
