@@ -337,8 +337,9 @@ def record_price(price, timestamp=None):
 
 def get_pattern_stats(pattern):
     """
-    Estadística histórica del mismo patrón a 15 minutos.
-    No devuelve porcentajes si hay menos de 10 resultados.
+    Estadística del resultado REAL de contratos Kalshi para este patrón.
+    Solo cuenta cierres de contrato resueltos contra su objetivo (horizon -1);
+    no mezcla la dirección genérica del precio a +15 minutos.
     """
     global _db_status
 
@@ -366,11 +367,17 @@ def get_pattern_stats(pattern):
                 JOIN btc_signal_snapshots AS s
                   ON s.id = o.snapshot_id
                 WHERE s.pattern = %s
-                  AND o.horizon_seconds = 900
+                  AND s.market_ticker IS NOT NULL
+                  AND s.market_close_ts IS NOT NULL
+                  AND o.horizon_seconds = -1
                   AND o.future_price IS NOT NULL
+                  AND o.result IN ('ALCISTA', 'BAJISTA')
             """, (str(pattern),)).fetchone()
 
         total, bullish, bearish = row
+        total = int(total or 0)
+        bullish = int(bullish or 0)
+        bearish = int(bearish or 0)
 
         _db_status = "CONECTADA"
 
@@ -876,7 +883,8 @@ def get_last_contract_signal(market_ticker):
                 FROM btc_signal_snapshots
                 WHERE market_ticker = %s
                   AND direction IN ('ALCISTA', 'BAJISTA')
-                  AND (market_close_ts IS NULL OR signal_ts <= market_close_ts)
+                  AND market_close_ts IS NOT NULL
+                  AND signal_ts <= market_close_ts
                 ORDER BY signal_ts DESC, id DESC
                 LIMIT 1
             """, (ticker,)).fetchone()
