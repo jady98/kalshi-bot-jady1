@@ -3429,15 +3429,28 @@ function drawChart(data){
         return;
     }
 
+    const lastIndex = candles.length - 1;
+    const lastCandleTime = Number(candles[lastIndex].time);
+    const firstCandleTime = Number(candles[0].time);
+    const maxTimeOffset = Math.max(
+        0,
+        (lastCandleTime - firstCandleTime) / 60
+    );
+
+    // Ajustar el encuadre inicial para incluir todo el historial disponible.
+    // La escala temporal conserva los huecos cuando faltan minutos.
     const count = Math.max(
         10,
         Math.min(
-            100,
-            Math.floor(65 / chartScale)
+            1200,
+            Math.ceil((maxTimeOffset + 4) / chartScale)
         )
     );
 
-    const center = Math.floor(count * 0.72);
+    const center = Math.min(
+        count - 2,
+        maxTimeOffset + 1
+    );
 
     const left = 12;
     const right = W - 66;
@@ -3450,16 +3463,8 @@ function drawChart(data){
     const step = plotWidth / count;
 
     const candleWidth = Math.max(
-        3,
+        1,
         Math.min(14, step * 0.65)
-    );
-
-    const lastIndex = candles.length - 1;
-    const lastCandleTime = Number(candles[lastIndex].time);
-    const firstCandleTime = Number(candles[0].time);
-    const maxTimeOffset = Math.max(
-        0,
-        (lastCandleTime - firstCandleTime) / 60
     );
 
     chartOffset = Math.max(
