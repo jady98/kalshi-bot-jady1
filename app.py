@@ -428,6 +428,72 @@ def calculate_brti_average(ticks):
     return calculate_brti_window_average(ticks, now - 60, now + 0.001)
 
 
+_probability_calibration_cache = {"ts": 0.0, "bands": []}
+
+def get_cached_probability_calibration():
+    """Bandas empíricas BRTI; consulta como máximo una vez por minuto."""
+    now = time.monotonic()
+    with lock:
+        cached = _probability_calibration_cache
+        if now - cached["ts"] < 60:
+            return list(cached["bands"])
+    try:
+        bands = pattern_memory.get_15m_probability_calibration()
+        if not isinstance(bands, list):
+            bands = []
+    except Exception:
+        bands = []
+    with lock:
+        _probability_calibration_cache["ts"] = now
+        _probability_calibration_cache["bands"] = list(bands)
+    return bands
+
+
+def calibrate_directional_scores(bullish, bearish):
+    """
+    Convierte la fuerza bruta en una estimación empírica por banda.
+    Exige 30 contratos distintos resueltos; si no, conserva el valor bruto.
+    """
+    bullish = float(bullish)
+    bearish = float(bearish)
+    raw_confidence = max(bullish, bearish)
+    band_floor = int(raw_confidence // 5) * 5
+    samples = 0
+    calibrated = False
+    output_confidence = raw_confidence
+
+    for row in get_cached_probability_calibration():
+        try:
+            if int(row.get("band_floor")) != band_floor:
+                continue
+            samples = int(row.get("samples") or 0)
+            correct = int(row.get("correct") or 0)
+            if samples >= 30:
+                # Suavizado beta(5,5): evita extremos con muestras limitadas.
+                empirical = ((correct + 5.0) / (samples + 10.0)) * 100.0
+                output_confidence = max(50.0, min(95.0, empirical))
+                calibrated = True
+            break
+        except (TypeError, ValueError):
+            continue
+
+    if bullish >= bearish:
+        return (
+            round(output_confidence, 1),
+            round(100.0 - output_confidence, 1),
+            calibrated,
+            samples,
+            "BRTI_900S_CONTRATOS_UNICOS" if calibrated else "SIN_MUESTRA_SUFICIENTE"
+        )
+    return (
+        round(100.0 - output_confidence, 1),
+        round(output_confidence, 1),
+        calibrated,
+        samples,
+        "BRTI_900S_CONTRATOS_UNICOS" if calibrated else "SIN_MUESTRA_SUFICIENTE"
+    )
+
+
 def get_cached_pattern_stats(pattern):
     """Consulta el historial de patrones como máximo una vez por minuto."""
     if not pattern or pattern == "SIN PATRÓN CLARO":
@@ -665,8 +731,11 @@ def calculate_prediction(
             )
 
         normalized, direction = stabilize_direction(normalized, seconds_to_close)
-        bullish = max(20, min(80, round(50 + normalized * 30, 1)))
-        bearish = round(100 - bullish, 1)
+        raw_bullish = max(20, min(80, round(50 + normalized * 30, 1)))
+        raw_bearish = round(100 - raw_bullish, 1)
+        bullish, bearish, probability_calibrated, probability_calibration_samples, probability_calibration_method = calibrate_directional_scores(
+            raw_bullish, raw_bearish
+        )
         if direction == "ALCISTA" and bullish < 50:
             direction = "INDECISO"
         elif direction == "BAJISTA" and bearish < 50:
@@ -687,6 +756,9 @@ def calculate_prediction(
             "target_gap_pct": round(target_gap_pct, 5) if target_gap_pct is not None else None,
             "target_direction": target_direction,
             "technical_score": round(normalized, 4),
+            "probability_calibrated": probability_calibrated,
+            "probability_calibration_samples": probability_calibration_samples,
+            "probability_calibration_method": probability_calibration_method,
             "direction_method": "BRTI_TICKS_BOOTSTRAP_15M"
         }
 
@@ -1158,12 +1230,14 @@ def calculate_prediction(
         remaining
     )
 
-    bullish = max(
+    raw_bullish = max(
         20,
         min(80, round(50 + normalized * 30, 1))
     )
-
-    bearish = round(100 - bullish, 1)
+    raw_bearish = round(100 - raw_bullish, 1)
+    bullish, bearish, probability_calibrated, probability_calibration_samples, probability_calibration_method = calibrate_directional_scores(
+        raw_bullish, raw_bearish
+    )
 
     # No mostrar una dirección que contradiga la probabilidad calculada.
     # Durante la espera de confirmación de un giro, mostrar INDECISO.
@@ -1197,6 +1271,9 @@ def calculate_prediction(
         ),
         "target_direction": target_direction,
         "technical_score": round(technical_normalized, 4),
+        "probability_calibrated": probability_calibrated,
+        "probability_calibration_samples": probability_calibration_samples,
+        "probability_calibration_method": probability_calibration_method,
         "pattern_samples": pattern_samples,
         "pattern_historical_bullish_pct": historical_bullish_pct,
         "pattern_historical_bearish_pct": historical_bearish_pct,
