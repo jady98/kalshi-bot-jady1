@@ -2101,14 +2101,9 @@ def get_data():
     snapshot_minute = int(now // 60)
     should_save_snapshot = False
 
-    if (
-        bp is not None
-        and brti_live
-        and market_ticker
-        and valid_price(market_target)
-        and market_close is not None
-        and market_close > now
-    ):
+    # Registrar una predicción BRTI por minuto aunque Kalshi no tenga
+    # contrato activo. El cierre del contrato se guarda solo como dato adicional.
+    if bp is not None and brti_live and valid_price(bp):
         with lock:
             if last_pattern_snapshot_minute != snapshot_minute:
                 last_pattern_snapshot_minute = snapshot_minute
