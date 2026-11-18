@@ -335,6 +335,109 @@ def record_price(price, timestamp=None):
         return False
 
 
+def get_pattern_learning_diagnostics():
+    """Diagnóstico de por qué los resultados oficiales no alimentan patrones."""
+    empty = {
+        "official_total": 0,
+        "kalshi_api_total": 0,
+        "manual_total": 0,
+        "snapshots_total": 0,
+        "snapshots_with_ticker": 0,
+        "snapshots_directional_with_close": 0,
+        "eligible_contracts": 0,
+        "eligible_with_pattern": 0,
+        "eligible_without_pattern": 0,
+        "patterns": [],
+        "error": None
+    }
+    try:
+        with _connect() as conn:
+            totals = conn.execute("""
+                SELECT
+                    (SELECT COUNT(*) FROM btc_official_market_results),
+                    (SELECT COUNT(*) FROM btc_official_market_results
+                     WHERE source = 'kalshi_api'),
+                    (SELECT COUNT(*) FROM btc_official_market_results
+                     WHERE source <> 'kalshi_api'),
+                    (SELECT COUNT(*) FROM btc_signal_snapshots),
+                    (SELECT COUNT(*) FROM btc_signal_snapshots
+                     WHERE market_ticker IS NOT NULL),
+                    (SELECT COUNT(*) FROM btc_signal_snapshots
+                     WHERE market_ticker IS NOT NULL
+                       AND market_close_ts IS NOT NULL
+                       AND direction IN ('ALCISTA', 'BAJISTA')
+                       AND signal_ts <= market_close_ts)
+            """).fetchone()
+
+            eligible = conn.execute("""
+                WITH last_contract_signal AS (
+                    SELECT DISTINCT ON (s.market_ticker)
+                        s.market_ticker, s.pattern
+                    FROM btc_signal_snapshots AS s
+                    JOIN btc_official_market_results AS o
+                      ON o.market_ticker = s.market_ticker
+                    WHERE s.market_ticker IS NOT NULL
+                      AND s.market_close_ts IS NOT NULL
+                      AND s.direction IN ('ALCISTA', 'BAJISTA')
+                      AND s.signal_ts <= s.market_close_ts
+                      AND o.source = 'kalshi_api'
+                      AND o.official_result IN ('SI', 'NO')
+                    ORDER BY s.market_ticker, s.signal_ts DESC, s.id DESC
+                )
+                SELECT
+                    COUNT(*),
+                    COUNT(*) FILTER (
+                        WHERE pattern IS NOT NULL AND BTRIM(pattern) <> ''
+                    ),
+                    COUNT(*) FILTER (
+                        WHERE pattern IS NULL OR BTRIM(pattern) = ''
+                    )
+                FROM last_contract_signal
+            """).fetchone()
+
+            patterns = conn.execute("""
+                WITH last_contract_signal AS (
+                    SELECT DISTINCT ON (s.market_ticker)
+                        s.market_ticker, s.pattern
+                    FROM btc_signal_snapshots AS s
+                    JOIN btc_official_market_results AS o
+                      ON o.market_ticker = s.market_ticker
+                    WHERE s.market_ticker IS NOT NULL
+                      AND s.market_close_ts IS NOT NULL
+                      AND s.direction IN ('ALCISTA', 'BAJISTA')
+                      AND s.signal_ts <= s.market_close_ts
+                      AND o.source = 'kalshi_api'
+                      AND o.official_result IN ('SI', 'NO')
+                    ORDER BY s.market_ticker, s.signal_ts DESC, s.id DESC
+                )
+                SELECT COALESCE(NULLIF(BTRIM(pattern), ''), '(SIN PATRÓN)'),
+                       COUNT(*)
+                FROM last_contract_signal
+                GROUP BY 1
+                ORDER BY COUNT(*) DESC
+                LIMIT 10
+            """).fetchall()
+
+        return {
+            "official_total": int(totals[0] or 0),
+            "kalshi_api_total": int(totals[1] or 0),
+            "manual_total": int(totals[2] or 0),
+            "snapshots_total": int(totals[3] or 0),
+            "snapshots_with_ticker": int(totals[4] or 0),
+            "snapshots_directional_with_close": int(totals[5] or 0),
+            "eligible_contracts": int(eligible[0] or 0),
+            "eligible_with_pattern": int(eligible[1] or 0),
+            "eligible_without_pattern": int(eligible[2] or 0),
+            "patterns": [
+                {"pattern": str(row[0]), "samples": int(row[1])}
+                for row in patterns
+            ],
+            "error": None
+        }
+    except Exception as exc:
+        return {**empty, "error": str(exc)[:180]}
+
+
 def get_pattern_stats(pattern):
     """
     Aprendizaje por patrón usando exclusivamente resultados oficiales YES/NO
