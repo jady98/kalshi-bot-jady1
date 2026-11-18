@@ -2939,20 +2939,20 @@ button:disabled{
     .alert-card .alert-icon { flex:0 0 22px; width:22px; height:22px; font-size:15px; }
     .alert-card .alert-title { font-size:clamp(8px,2.4vw,11px); line-height:1.08; margin:0 0 3px; }
     .alert-card .alert-detail { font-size:clamp(7px,1.9vw,9px); line-height:1.12; }
-    main > section.card:nth-of-type(2) {
+    main > section.card:nth-of-type(3) {
         min-height:0; height:100%; margin:0; padding:6px !important;
         display:flex; flex-direction:column; overflow:hidden;
     }
-    main > section.card:nth-of-type(2) .row { flex:0 0 auto; }
-    main > section.card:nth-of-type(2) .section-title { font-size:8px; margin:0 0 2px; }
-    main > section.card:nth-of-type(2) .chart-legend { margin:3px 0; gap:7px; font-size:8px; }
-    main > section.card:nth-of-type(2) .chart-wrap { flex:1 1 auto; min-height:0; height:auto !important; }
-    main > section.card:nth-of-type(2) .row:last-of-type,
-    main > section.card:nth-of-type(2) > .small { display:none; }
-    main > section.card:nth-of-type(4) { min-height:0; margin:0; padding:5px 8px !important; }
-    main > section.card:nth-of-type(4) .signal { font-size:clamp(15px,4vw,19px); margin:2px 0; }
-    main > section.card:nth-of-type(4) .label,
-    main > section.card:nth-of-type(4) .small { font-size:7px; }
+    main > section.card:nth-of-type(3) .row { flex:0 0 auto; }
+    main > section.card:nth-of-type(3) .section-title { font-size:8px; margin:0 0 2px; }
+    main > section.card:nth-of-type(3) .chart-legend { margin:3px 0; gap:7px; font-size:8px; }
+    main > section.card:nth-of-type(3) .chart-wrap { flex:1 1 auto; min-height:0; height:auto !important; }
+    main > section.card:nth-of-type(3) .row:last-of-type,
+    main > section.card:nth-of-type(3) > .small { display:none; }
+    main > section.card:nth-of-type(5) { min-height:0; margin:0; padding:5px 8px !important; }
+    main > section.card:nth-of-type(5) .signal { font-size:clamp(15px,4vw,19px); margin:2px 0; }
+    main > section.card:nth-of-type(5) .label,
+    main > section.card:nth-of-type(5) .small { font-size:7px; }
     .technical-card, .footer { display:none !important; }
 }
 @media (max-width: 380px) {
