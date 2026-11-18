@@ -67,6 +67,7 @@ _market_result_last_check = {}
 
 started = False
 last_pattern_snapshot_minute = None
+last_contract_snapshot_minute = None
 _last_brti_candle_save = 0.0
 
 # Alertas informativas: no ejecutan cierres ni órdenes.
@@ -599,7 +600,8 @@ def calculate_prediction(
     ticks,
     seconds_to_close,
     market_target=None,
-    candles=None
+    candles=None,
+    stabilize=True
 ):
 
     if not valid_price(price):
@@ -730,7 +732,14 @@ def calculate_prediction(
                 else "CERCA DEL OBJETIVO"
             )
 
-        normalized, direction = stabilize_direction(normalized, seconds_to_close)
+        if stabilize:
+            normalized, direction = stabilize_direction(normalized, seconds_to_close)
+        else:
+            direction = (
+                "ALCISTA" if normalized >= 0.14
+                else "BAJISTA" if normalized <= -0.14
+                else "INDECISO"
+            )
         raw_bullish = max(20, min(80, round(50 + normalized * 30, 1)))
         raw_bearish = round(100 - raw_bullish, 1)
         bullish, bearish, probability_calibrated, probability_calibration_samples, probability_calibration_method = calibrate_directional_scores(
@@ -746,6 +755,8 @@ def calculate_prediction(
             "predicted_price": round(predicted, 2),
             "bullish_score": bullish,
             "bearish_score": bearish,
+            "raw_bullish_score": raw_bullish,
+            "raw_bearish_score": raw_bearish,
             "technical_strength": round(abs(normalized) * 100),
             "momentum_pct": round(momentum, 5),
             "ema9": None,
@@ -1225,10 +1236,17 @@ def calculate_prediction(
     if target_side_locked:
         normalized = math.copysign(abs(normalized), target_gap_pct)
 
-    normalized, direction = stabilize_direction(
-        normalized,
-        remaining
-    )
+    if stabilize:
+        normalized, direction = stabilize_direction(
+            normalized,
+            remaining
+        )
+    else:
+        direction = (
+            "ALCISTA" if normalized >= 0.14
+            else "BAJISTA" if normalized <= -0.14
+            else "INDECISO"
+        )
 
     raw_bullish = max(
         20,
@@ -1256,6 +1274,8 @@ def calculate_prediction(
         "predicted_price": round(predicted, 2),
         "bullish_score": bullish,
         "bearish_score": bearish,
+        "raw_bullish_score": raw_bullish,
+        "raw_bearish_score": raw_bearish,
         "technical_strength": round(
             abs(normalized) * 100
         ),
@@ -2483,48 +2503,103 @@ def get_data():
     indicators["candle_source"] = candle_source
     if not brti_live:
         indicators["direction_method"] = "BRTI_WAITING_FOR_DATA"
-    global last_pattern_snapshot_minute
 
+    global last_pattern_snapshot_minute, last_contract_snapshot_minute
     snapshot_minute = int(now // 60)
-    snapshot_slot = (
+    base_snapshot_slot = (
         str(snapshot_minute) + ":" +
         (market_ticker if contract_active else "GLOBAL")
     )
-    should_save_snapshot = False
 
-    # Registrar una predicción BRTI por minuto aunque Kalshi no tenga
-    # contrato activo. El cierre del contrato se guarda solo como dato adicional.
     if bp is not None and brti_live and valid_price(bp):
-        with lock:
-            if last_pattern_snapshot_minute != snapshot_slot:
-                last_pattern_snapshot_minute = snapshot_slot
-                should_save_snapshot = True
+        # Pronóstico independiente y fijo a +15 minutos. No usa el strike
+        # de Kalshi ni modifica el suavizador de la señal que ve el usuario.
+        fifteen_minute_prediction = calculate_prediction(
+            analysis_price,
+            ticks,
+            900,
+            None,
+            analysis_candles,
+            stabilize=False
+        )
+        fifteen_minute_prediction["forecast_horizon_seconds"] = 900
+        fifteen_minute_prediction["signal_source"] = signal_source
+        fifteen_minute_prediction["candle_source"] = candle_source
 
-        if should_save_snapshot:
+        fifteen_slot = base_snapshot_slot + ":15M"
+        save_fifteen = False
+        with lock:
+            if last_pattern_snapshot_minute != fifteen_slot:
+                last_pattern_snapshot_minute = fifteen_slot
+                save_fifteen = True
+
+        if save_fifteen:
             pattern_memory.save_snapshot({
                 "signal_ts": now,
                 "price": bp,
                 "market_ticker": market_ticker if contract_active else None,
-                "market_close_ts": market_close if contract_active else None,
-                "direction": indicators.get("direction"),
-                "bullish_score": indicators.get("bullish_score"),
-                "bearish_score": indicators.get("bearish_score"),
-                "predicted_price": indicators.get("predicted_price"),
-                "ema9": indicators.get("ema9"),
-                "ema21": indicators.get("ema21"),
-                "rsi": indicators.get("rsi"),
-                "momentum_pct": indicators.get("momentum_pct"),
-                "pattern": indicators.get("pattern"),
+                # Sin market_close_ts: esta muestra evalúa exclusivamente +900s.
+                "market_close_ts": None,
+                "snapshot_kind": "15M",
+                "direction": fifteen_minute_prediction.get("direction"),
+                "bullish_score": fifteen_minute_prediction.get("bullish_score"),
+                "bearish_score": fifteen_minute_prediction.get("bearish_score"),
+                "predicted_price": fifteen_minute_prediction.get("predicted_price"),
+                "ema9": fifteen_minute_prediction.get("ema9"),
+                "ema21": fifteen_minute_prediction.get("ema21"),
+                "rsi": fifteen_minute_prediction.get("rsi"),
+                "momentum_pct": fifteen_minute_prediction.get("momentum_pct"),
+                "pattern": fifteen_minute_prediction.get("pattern"),
                 "features": {
-                    "target_influence": indicators.get("target_influence"),
-                    "technical_strength": indicators.get("technical_strength"),
-                    "direction_method": indicators.get("direction_method"),
+                    "target_influence": "SIN OBJETIVO KALSHI · PRONÓSTICO FIJO 15M",
+                    "technical_strength": fifteen_minute_prediction.get("technical_strength"),
+                    "direction_method": fifteen_minute_prediction.get("direction_method"),
                     "signal_source": signal_source,
                     "candle_source": candle_source,
-                    "market_target": market_target,
-                    "forecast_horizon_seconds": prediction_horizon
+                    "forecast_horizon_seconds": 900,
+                    "raw_bullish_score": fifteen_minute_prediction.get("raw_bullish_score"),
+                    "raw_bearish_score": fifteen_minute_prediction.get("raw_bearish_score")
                 }
             })
+
+        # La señal separada al cierre conserva el comportamiento anterior
+        # y sigue siendo la referencia para evaluar el resultado oficial Kalshi.
+        if contract_active and market_close is not None:
+            contract_slot = base_snapshot_slot + ":CONTRACT"
+            save_contract = False
+            with lock:
+                if last_contract_snapshot_minute != contract_slot:
+                    last_contract_snapshot_minute = contract_slot
+                    save_contract = True
+
+            if save_contract:
+                pattern_memory.save_snapshot({
+                    "signal_ts": now,
+                    "price": bp,
+                    "market_ticker": market_ticker,
+                    "market_close_ts": market_close,
+                    "snapshot_kind": "CONTRACT",
+                    "direction": indicators.get("direction"),
+                    "bullish_score": indicators.get("bullish_score"),
+                    "bearish_score": indicators.get("bearish_score"),
+                    "predicted_price": indicators.get("predicted_price"),
+                    "ema9": indicators.get("ema9"),
+                    "ema21": indicators.get("ema21"),
+                    "rsi": indicators.get("rsi"),
+                    "momentum_pct": indicators.get("momentum_pct"),
+                    "pattern": indicators.get("pattern"),
+                    "features": {
+                        "target_influence": indicators.get("target_influence"),
+                        "technical_strength": indicators.get("technical_strength"),
+                        "direction_method": indicators.get("direction_method"),
+                        "signal_source": signal_source,
+                        "candle_source": candle_source,
+                        "market_target": market_target,
+                        "forecast_horizon_seconds": prediction_horizon,
+                        "raw_bullish_score": indicators.get("raw_bullish_score"),
+                        "raw_bearish_score": indicators.get("raw_bearish_score")
+                    }
+                })
 
         
     average, average_count = calculate_brti_average(
