@@ -2616,14 +2616,16 @@ main{
 .chart-wrap{
     width:100%;
     height:300px;
+    min-height:180px;
     position:relative;
+    overflow:hidden;
 }
 
-canvas{
+#chart{
     display:block;
     width:100%;
     height:100%;
-    touch-action:none;
+    touch-action:pan-y;
 }
 
 .chart-legend{
@@ -2953,8 +2955,8 @@ button:disabled{
     main > section.card:nth-of-type(3) .section-title { font-size:8px; margin:0 0 2px; }
     main > section.card:nth-of-type(3) .chart-legend { margin:3px 0; gap:7px; font-size:8px; }
     main > section.card:nth-of-type(3) .chart-wrap { flex:1 1 auto; min-height:0; height:auto !important; }
-    main > section.card:nth-of-type(3) .row:last-of-type,
-    main > section.card:nth-of-type(3) > .small { display:none; }
+    main > section.card:nth-of-type(3) .row:last-of-type { flex:0 0 auto; }
+    main > section.card:nth-of-type(3) > .small { font-size:7px; flex:0 0 auto; }
     main > section.card:nth-of-type(5) { min-height:0; margin:0; padding:5px 8px !important; }
     main > section.card:nth-of-type(5) .signal { font-size:clamp(15px,4vw,19px); margin:2px 0; }
     main > section.card:nth-of-type(5) .label,
@@ -3182,7 +3184,7 @@ button:disabled{
 
     <div class="chart-wrap">
 
-        <canvas id="chart"></canvas>
+        <div id="chart" role="img" aria-label="Gráfica de velas BTC/USD"></div>
 
     </div>
 
@@ -3316,610 +3318,242 @@ button:disabled{
 
 </main>
 
+<script src="https://unpkg.com/lightweight-charts@4.2.2/dist/lightweight-charts.standalone.production.js"></script>
 <script>
 
 const $ = id => document.getElementById(id);
 
 let candles = [];
 let chartTargetValue = null;
-
-let chartOffset = 0;
-let chartScale = 1;
-
-let pointers = new Map();
-let previousX = 0;
-
-let initialDistance = 0;
-let initialZoom = 1;
-
+let chart = null;
+let candleSeries = null;
+let ema9Line = null;
+let ema21Line = null;
+let chartTargetLine = null;
+let chartFollowLive = true;
+let chartInitialized = false;
 let busy = false;
 
-
 function money(value){
-
-    if(
-        value === null ||
-        value === undefined ||
-        !Number.isFinite(Number(value))
-    ){
+    if(value === null || value === undefined || !Number.isFinite(Number(value))){
         return "--";
     }
-
-    return Number(value).toLocaleString(
-        "en-US",
-        {
-            minimumFractionDigits:2,
-            maximumFractionDigits:2
-        }
-    );
+    return Number(value).toLocaleString("en-US", {
+        minimumFractionDigits:2,
+        maximumFractionDigits:2
+    });
 }
-
 
 function clock(seconds){
-
-    const m = Math.floor(seconds / 60);
-    const s = seconds % 60;
-
-    return String(m).padStart(2,"0")
-        + ":" +
-        String(s).padStart(2,"0");
+    const safe = Math.max(0, Number(seconds) || 0);
+    const m = Math.floor(safe / 60);
+    const s = Math.floor(safe % 60);
+    return String(m).padStart(2,"0") + ":" + String(s).padStart(2,"0");
 }
 
-
 function emaSeries(values, period){
-
     if(!values.length) return [];
-
     const alpha = 2 / (period + 1);
-
-    let result = values[0];
-
+    let result = Number(values[0]);
     const output = [result];
-
     for(let i=1;i<values.length;i++){
-
-        result =
-            alpha * values[i]
-            + (1-alpha) * result;
-
+        result = alpha * Number(values[i]) + (1-alpha) * result;
         output.push(result);
     }
-
     return output;
 }
 
-
-function drawChart(data){
-
-    if(Array.isArray(data)){
-        candles = data;
-    }
-
-    const canvas = $("chart");
-    const rect = canvas.getBoundingClientRect();
-
-    if(!rect.width || !rect.height) return;
-
-    const ratio = window.devicePixelRatio || 1;
-
-    canvas.width = Math.round(rect.width * ratio);
-    canvas.height = Math.round(rect.height * ratio);
-
-    const ctx = canvas.getContext("2d");
-
-    ctx.setTransform(ratio,0,0,ratio,0,0);
-
-    const W = rect.width;
-    const H = rect.height;
-
-    ctx.clearRect(0,0,W,H);
-
-    if(!candles.length){
-
-        ctx.fillStyle="#91a2c1";
-        ctx.font="13px Arial";
-        ctx.textAlign="center";
-
-        ctx.fillText(
-            "ESPERANDO VELAS BRTI",
-            W/2,
-            H/2
-        );
-
+function initChart(){
+    const container = $("chart");
+    if(!container || !window.LightweightCharts) {
+        if(container) container.textContent = "No se pudo cargar el motor de gráficas.";
         return;
     }
 
-    const lastIndex = candles.length - 1;
+    chart = LightweightCharts.createChart(container, {
+        width: Math.max(1, container.clientWidth),
+        height: Math.max(180, container.clientHeight),
+        layout: {
+            background: { type:"solid", color:"#0b1220" },
+            textColor:"#91a2c1",
+            fontFamily:"Arial, sans-serif",
+            fontSize:10
+        },
+        grid: {
+            vertLines:{ color:"#1b2940" },
+            horzLines:{ color:"#1b2940" }
+        },
+        rightPriceScale:{
+            borderColor:"#2a3850",
+            autoScale:true,
+            scaleMargins:{ top:0.12, bottom:0.12 }
+        },
+        timeScale:{
+            borderColor:"#2a3850",
+            timeVisible:true,
+            secondsVisible:false,
+            rightOffset:5,
+            barSpacing:7,
+            minBarSpacing:2,
+            lockVisibleTimeRangeOnResize:true
+        },
+        crosshair:{
+            mode:LightweightCharts.CrosshairMode.Normal,
+            vertLine:{ color:"#60718e", width:1, style:2 },
+            horzLine:{ color:"#60718e", width:1, style:2 }
+        },
+        handleScroll:{
+            mouseWheel:true,
+            pressedMouseMove:true,
+            horzTouchDrag:true,
+            vertTouchDrag:false
+        },
+        handleScale:{
+            axisPressedMouseMove:true,
+            mouseWheel:true,
+            pinch:true
+        },
+        localization:{
+            priceFormatter: price => Number(price).toLocaleString("en-US", {
+                minimumFractionDigits:2,
+                maximumFractionDigits:2
+            })
+        }
+    });
 
-    // Cada vela ocupa un espacio consecutivo de 1 minuto.
-    // Los cuerpos mantienen separación visual uniforme y no se forman
-    // grupos aislados por saltos grandes en las marcas de tiempo.
-    const count = Math.max(
-        10,
-        Math.min(
-            1200,
-            Math.ceil((candles.length + 4) / chartScale)
-        )
-    );
+    candleSeries = chart.addCandlestickSeries({
+        upColor:"#00df9a",
+        downColor:"#ff5269",
+        borderUpColor:"#00df9a",
+        borderDownColor:"#ff5269",
+        wickUpColor:"#00df9a",
+        wickDownColor:"#ff5269",
+        priceLineVisible:true,
+        lastValueVisible:true
+    });
 
-    const maxTimeOffset = Math.max(0, candles.length - 1);
+    ema9Line = chart.addLineSeries({
+        color:"#b98aff",
+        lineWidth:2,
+        priceLineVisible:false,
+        lastValueVisible:false,
+        crosshairMarkerVisible:false
+    });
 
-    const left = 12;
-    const right = W - 66;
-    const top = 20;
-    const bottom = H - 20;
+    ema21Line = chart.addLineSeries({
+        color:"#45a9ff",
+        lineWidth:2,
+        priceLineVisible:false,
+        lastValueVisible:false,
+        crosshairMarkerVisible:false
+    });
 
-    const plotHeight = bottom - top;
-    const plotWidth = right - left;
+    container.addEventListener("pointerdown", () => {
+        chartFollowLive = false;
+    }, {passive:true});
 
-    const step = plotWidth / count;
-
-    const candleWidth = Math.max(
-        1,
-        Math.min(14, step * 0.65)
-    );
-
-    chartOffset = Math.max(
-        0,
-        Math.min(chartOffset, maxTimeOffset)
-    );
-
-    function candleX(index){
-
-        return left + (
-            index
-            + 0.5
-            + chartOffset
-        ) * step;
+    if(window.ResizeObserver){
+        const observer = new ResizeObserver(entries => {
+            const box = entries[0] && entries[0].contentRect;
+            if(box && chart){
+                chart.applyOptions({
+                    width:Math.max(1, Math.floor(box.width)),
+                    height:Math.max(180, Math.floor(box.height))
+                });
+            }
+        });
+        observer.observe(container);
+    } else {
+        window.addEventListener("resize", () => {
+            if(chart) chart.applyOptions({
+                width:Math.max(1,container.clientWidth),
+                height:Math.max(180,container.clientHeight)
+            });
+        });
     }
 
-    const closes = candles.map(
-        c => Number(c.close)
-    );
+    chartInitialized = true;
+}
 
+function drawChart(data){
+    if(Array.isArray(data)) candles = data;
+    if(!chartInitialized) initChart();
+    if(!chart || !candleSeries) return;
+
+    const previousRange = chartFollowLive
+        ? null
+        : chart.timeScale().getVisibleLogicalRange();
+
+    const rows = candles
+        .map(c => ({
+            time:Math.floor(Number(c.time)),
+            open:Number(c.open),
+            high:Number(c.high),
+            low:Number(c.low),
+            close:Number(c.close)
+        }))
+        .filter(c =>
+            Number.isFinite(c.time) &&
+            Number.isFinite(c.open) &&
+            Number.isFinite(c.high) &&
+            Number.isFinite(c.low) &&
+            Number.isFinite(c.close) &&
+            c.time > 0 &&
+            c.low > 0 &&
+            c.high >= c.low
+        )
+        .sort((a,b)=>a.time-b.time)
+        .filter((c,i,arr)=>i===0 || c.time!==arr[i-1].time);
+
+    if(!rows.length){
+        candleSeries.setData([]);
+        ema9Line.setData([]);
+        ema21Line.setData([]);
+        return;
+    }
+
+    candleSeries.setData(rows);
+
+    const closes = rows.map(c=>c.close);
     const e9 = emaSeries(closes,9);
     const e21 = emaSeries(closes,21);
 
-    const visible = [];
+    ema9Line.setData(rows.map((c,i)=>({time:c.time,value:e9[i]})));
+    ema21Line.setData(rows.map((c,i)=>({time:c.time,value:e21[i]})));
 
-    for(let i=0;i<candles.length;i++){
-
-        const x = candleX(i);
-
-        if(
-            x >= left - candleWidth
-            && x <= right + candleWidth
-        ){
-
-            visible.push({
-                index:i,
-                candle:candles[i],
-                x:x
-            });
-        }
+    if(chartTargetLine){
+        candleSeries.removePriceLine(chartTargetLine);
+        chartTargetLine = null;
     }
-
-    if(!visible.length) return;
-
-    const values = [];
-
-    visible.forEach(item=>{
-
-        const c = item.candle;
-
-        values.push(
-            Number(c.high),
-            Number(c.low)
-        );
-
-        if(e9[item.index] != null){
-            values.push(e9[item.index]);
-        }
-
-        if(e21[item.index] != null){
-            values.push(e21[item.index]);
-        }
-
-    });
-        let min = Math.min(...values);
-    let max = Math.max(...values);
-
-    if(!Number.isFinite(min) || !Number.isFinite(max)){
-        return;
-    }
-
-    if(max === min){
-        max += 1;
-        min -= 1;
-    }
-
-    const padding = Math.max(
-        (max-min)*0.13,
-        2
-    );
-
-    min -= padding;
-    max += padding;
-
-    const y = price =>
-        bottom -
-        ((price-min)/(max-min))*plotHeight;
-
-
-    // CUADRÍCULA Y PRECIOS
-
-    ctx.font="10px Arial";
-    ctx.textAlign="left";
-    ctx.strokeStyle="#263247";
-    ctx.lineWidth=1;
-
-    for(let i=0;i<=4;i++){
-
-        const yy = top + plotHeight*i/4;
-
-        ctx.beginPath();
-        ctx.moveTo(left,yy);
-        ctx.lineTo(right,yy);
-        ctx.stroke();
-
-        const price =
-            max-(max-min)*i/4;
-
-        ctx.fillStyle="#8999b5";
-
-        ctx.fillText(
-            price.toFixed(0),
-            right+7,
-            yy+3
-        );
-    }
-
-
-    // VELAS BRTI
-
-    visible.forEach(item=>{
-
-        const c = item.candle;
-        const x = item.x;
-
-        const open = Number(c.open);
-        const close = Number(c.close);
-        const high = Number(c.high);
-        const low = Number(c.low);
-
-        if(
-            !Number.isFinite(open)
-            || !Number.isFinite(close)
-            || !Number.isFinite(high)
-            || !Number.isFinite(low)
-        ){
-            return;
-        }
-
-        const up = close >= open;
-
-        const color = up
-            ? "#00df9a"
-            : "#ff5269";
-
-        ctx.strokeStyle=color;
-        ctx.fillStyle=color;
-        ctx.lineWidth=1.5;
-
-        ctx.beginPath();
-        ctx.moveTo(x,y(high));
-        ctx.lineTo(x,y(low));
-        ctx.stroke();
-
-        const bodyTop = Math.min(
-            y(open),
-            y(close)
-        );
-
-        const bodyHeight = Math.max(
-            2,
-            Math.abs(y(open)-y(close))
-        );
-
-        ctx.fillRect(
-            x-candleWidth/2,
-            bodyTop,
-            candleWidth,
-            bodyHeight
-        );
-
-    });
-
-
-    // EMA 9 Y EMA 21
-
-    function drawLine(series,color){
-
-        if(!series.length) return;
-
-        ctx.beginPath();
-
-        ctx.strokeStyle=color;
-        ctx.lineWidth=1.8;
-        ctx.lineJoin="round";
-        ctx.lineCap="round";
-
-        let startedLine = false;
-        let previousTime = null;
-
-        visible.forEach(item=>{
-
-            const value = series[item.index];
-            const currentTime = Number(item.candle.time);
-
-            if(!Number.isFinite(value) || !Number.isFinite(currentTime)){
-                startedLine = false;
-                previousTime = null;
-                return;
-            }
-
-            // No dibujar una EMA atravesando minutos sin datos BRTI.
-            if(previousTime !== null && currentTime - previousTime > 60){
-                startedLine = false;
-            }
-
-            const x = item.x;
-            const yy = y(value);
-
-            if(!startedLine){
-                ctx.moveTo(x,yy);
-                startedLine = true;
-            }else{
-                ctx.lineTo(x,yy);
-            }
-
-            previousTime = currentTime;
+    if(Number.isFinite(chartTargetValue) && chartTargetValue > 0){
+        chartTargetLine = candleSeries.createPriceLine({
+            price:chartTargetValue,
+            color:"#00d995",
+            lineWidth:1,
+            lineStyle:LightweightCharts.LineStyle.Dashed,
+            axisLabelVisible:true,
+            title:"KALSHI"
         });
-
-        if(startedLine){
-            ctx.stroke();
-        }
     }
 
-    drawLine(e9,"#b98aff");
-    drawLine(e21,"#45a9ff");
-
-    // OBJETIVO KALSHI: marcador en el margen derecho, sin cruzar las velas
-    if(
-        Number.isFinite(chartTargetValue)
-        && chartTargetValue >= min
-        && chartTargetValue <= max
-    ){
-        const targetY = y(chartTargetValue);
-        ctx.save();
-        ctx.strokeStyle="#00d995";
-        ctx.fillStyle="#00d995";
-        ctx.lineWidth=2;
-
-        // Marca corta junto a la escala de precios; no invade el área de velas.
-        ctx.beginPath();
-        ctx.moveTo(right+2,targetY);
-        ctx.lineTo(right+11,targetY);
-        ctx.stroke();
-
-        ctx.beginPath();
-        ctx.moveTo(right+2,targetY);
-        ctx.lineTo(right+7,targetY-4);
-        ctx.lineTo(right+7,targetY+4);
-        ctx.closePath();
-        ctx.fill();
-
-        ctx.font="bold 9px Arial";
-        ctx.textAlign="left";
-        ctx.textBaseline="middle";
-        ctx.fillText("KALSHI",right+13,Math.max(top+6,Math.min(bottom-6,targetY)));
-        ctx.restore();
+    if(chartFollowLive || !previousRange){
+        chart.timeScale().setVisibleLogicalRange({
+            from:Math.max(0,rows.length-55),
+            to:rows.length+4
+        });
+    } else {
+        const from = Math.max(-5, Math.min(previousRange.from, rows.length-2));
+        const to = Math.max(from+10, Math.min(previousRange.to, rows.length+8));
+        chart.timeScale().setVisibleLogicalRange({from,to});
     }
-
-    // PRECIO DE LA ÚLTIMA VELA BRTI
-
-    if(chartOffset < 0.05){
-
-        const last = candles[lastIndex];
-        const lastPrice = Number(last.close);
-        const lastY = y(lastPrice);
-
-        ctx.setLineDash([5,4]);
-
-        ctx.strokeStyle="#f4c95d";
-        ctx.lineWidth=1;
-
-        ctx.beginPath();
-        ctx.moveTo(left,lastY);
-        ctx.lineTo(right,lastY);
-        ctx.stroke();
-
-        ctx.setLineDash([]);
-    }
-
 }
-
-
-// ==========================================
-// VOLVER A LA ÚLTIMA VELA
-// ==========================================
 
 function goLive(){
-
-    chartOffset = 0;
-    chartScale = 1;
-
-    drawChart();
+    chartFollowLive = true;
+    if(chart && candles.length){
+        chart.timeScale().scrollToRealTime();
+    }
 }
-
-
-// ==========================================
-// CONTROL TÁCTIL Y ZOOM
-// ==========================================
-
-function pointerDistance(a,b){
-
-    return Math.hypot(
-        a.x-b.x,
-        a.y-b.y
-    );
-}
-
-const canvas = $("chart");
-
-
-canvas.addEventListener(
-    "pointerdown",
-    event=>{
-
-        event.preventDefault();
-
-        canvas.setPointerCapture(event.pointerId);
-
-        pointers.set(
-            event.pointerId,
-            {
-                x:event.clientX,
-                y:event.clientY
-            }
-        );
-
-        if(pointers.size===1){
-
-            previousX=event.clientX;
-
-        }
-
-        if(pointers.size===2){
-
-            const p=[...pointers.values()];
-
-            initialDistance=pointerDistance(
-                p[0],p[1]
-            );
-
-            initialZoom=chartScale;
-
-        }
-
-    }
-);
-
-
-canvas.addEventListener(
-    "pointermove",
-    event=>{
-
-        if(!pointers.has(event.pointerId)) return;
-
-        event.preventDefault();
-
-        const oldPoint = pointers.get(event.pointerId);
-
-        const deltaX = event.clientX - oldPoint.x;
-
-        pointers.set(
-            event.pointerId,
-            {
-                x:event.clientX,
-                y:event.clientY
-            }
-        );
-
-
-        if(pointers.size===2){
-
-            const p=[...pointers.values()];
-
-            const distance=pointerDistance(
-                p[0],p[1]
-            );
-
-            if(initialDistance>0){
-
-                chartScale=Math.max(
-                    0.5,
-                    Math.min(
-                        8,
-                        initialZoom*distance/initialDistance
-                    )
-                );
-
-                drawChart();
-
-            }
-
-        }
-
-        else if(pointers.size===1){
-
-            const count=Math.max(
-                10,
-                Math.min(
-                    1200,
-                    Math.ceil((candles.length+4)/chartScale)
-                )
-            );
-
-            const plotWidth = Math.max(
-                canvas.clientWidth-78,
-                1
-            );
-
-            const step=plotWidth/count;
-
-            chartOffset += deltaX/Math.max(step,1);
-
-            chartOffset=Math.max(
-                0,
-                Math.min(
-                    chartOffset,
-                    Math.max(0,candles.length-1)
-                )
-            );
-
-            drawChart();
-
-        }
-
-    }
-);
-
-
-function releasePointer(event){
-
-    pointers.delete(event.pointerId);
-
-    if(pointers.size<2){
-        initialDistance=0;
-    }
-
-    if(pointers.size===1){
-
-        const remaining=[...pointers.values()][0];
-
-        previousX=remaining.x;
-
-    }
-
-}
-
-
-canvas.addEventListener(
-    "pointerup",
-    releasePointer
-);
-
-canvas.addEventListener(
-    "pointercancel",
-    releasePointer
-);
-
-canvas.addEventListener(
-    "lostpointercapture",
-    releasePointer
-);
-
 
 // ==========================================
 // ACTUALIZAR INFORMACIÓN DEL RADAR
@@ -4202,10 +3836,12 @@ async function refreshData(manual=false){
 // ARRANQUE
 // ==========================================
 
-window.addEventListener(
-    "resize",
-    ()=>drawChart()
-);
+window.addEventListener("resize", () => {
+    if(chart) chart.applyOptions({
+        width:Math.max(1,$("chart").clientWidth),
+        height:Math.max(180,$("chart").clientHeight)
+    });
+});
 
 refreshData();
 
