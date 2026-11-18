@@ -2766,26 +2766,65 @@ button:disabled{
     }
 }
 
+.alert-stack {
+    display: grid;
+    gap: 12px;
+    margin: 14px 0;
+}
 .alert-card {
-    border: 1px solid #34425b;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    min-height: 104px;
+    padding: 16px 18px;
+    border: 2px solid #34425b;
+    border-radius: 18px;
+    background: rgba(8,12,28,.88);
+    opacity: .38;
+    filter: saturate(.55);
+    transition: opacity .2s ease, box-shadow .2s ease, transform .2s ease;
 }
-.alert-card.alert-warning {
-    border-color: rgba(244,201,93,.65);
+.alert-card.active {
+    opacity: 1;
+    filter: none;
+    transform: scale(1.01);
 }
-.alert-card.alert-critical {
-    border-color: rgba(255,82,105,.8);
-    box-shadow: 0 0 16px rgba(255,82,105,.12);
+.alert-card .alert-icon {
+    flex: 0 0 58px;
+    width: 58px;
+    height: 58px;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    font-size: 36px;
+    font-weight: 1000;
 }
-.alert-title {
-    font-size: 12px;
-    font-weight: 900;
-    letter-spacing: .7px;
+.alert-card .alert-copy { min-width: 0; }
+.alert-card .alert-title {
+    font-size: clamp(21px, 5.5vw, 30px);
+    font-weight: 1000;
+    line-height: 1.05;
+    letter-spacing: .2px;
     margin-bottom: 7px;
 }
-.alert-detail {
-    color: #aab8d0;
-    font-size: 12px;
-    line-height: 1.5;
+.alert-card .alert-detail {
+    color: #f2f5ff;
+    font-size: clamp(14px, 3.8vw, 18px);
+    line-height: 1.3;
+    font-weight: 650;
+}
+.alert-card.prealert { border-color: #ffd21f; }
+.alert-card.prealert .alert-icon { color: #111; background: #ffd21f; }
+.alert-card.prealert.active { box-shadow: 0 0 22px rgba(255,210,31,.28); }
+.alert-card.entry { border-color: #25ed77; }
+.alert-card.entry .alert-icon { color: #042112; background: #25ed77; }
+.alert-card.entry.active { box-shadow: 0 0 22px rgba(37,237,119,.28); }
+.alert-card.protect { border-color: #ff405b; }
+.alert-card.protect .alert-icon { color: white; background: #ff405b; }
+.alert-card.protect.active { box-shadow: 0 0 22px rgba(255,64,91,.32); }
+@media (max-width: 420px) {
+    .alert-card { min-height: 92px; padding: 13px 12px; gap: 11px; }
+    .alert-card .alert-icon { flex-basis: 48px; width: 48px; height: 48px; font-size: 29px; }
 }
 </style>
 </head>
@@ -2923,11 +2962,28 @@ button:disabled{
 
 </section>
 
-<section class="card alert-card" id="alertCard">
-    <div class="alert-title" id="alertTitle">ALERTAS DEL RADAR</div>
-    <div class="alert-detail" id="alertDetail">
-        El radar vigila cambios de dirección, debilitamiento y divergencia entre fuentes.
-    </div>
+<section class="alert-stack" id="alertStack" aria-label="Alertas del radar">
+    <article class="alert-card prealert" id="prealertCard">
+        <div class="alert-icon">!</div>
+        <div class="alert-copy">
+            <div class="alert-title" id="prealertTitle">PREALERTA</div>
+            <div class="alert-detail" id="prealertDetail">Aviso temprano cuando empieza a formarse una dirección.</div>
+        </div>
+    </article>
+    <article class="alert-card entry" id="entryCard">
+        <div class="alert-icon">✓</div>
+        <div class="alert-copy">
+            <div class="alert-title" id="entryTitle">ENTRADA CONFIRMADA</div>
+            <div class="alert-detail" id="entryDetail">Se activa cuando la señal principal y los movimientos de 1 y 3 minutos coinciden.</div>
+        </div>
+    </article>
+    <article class="alert-card protect" id="protectCard">
+        <div class="alert-icon">!</div>
+        <div class="alert-copy">
+            <div class="alert-title" id="protectTitle">PROTEGER TU ENTRADA</div>
+            <div class="alert-detail" id="protectDetail">Se activa si una entrada confirmada pierde su confirmación.</div>
+        </div>
+    </article>
 </section>
 
 
@@ -3818,17 +3874,35 @@ function updateRadar(d){
             : " · aprendizaje histórico en recopilación");
 
     const alertData = d.alert || {};
-    $("alertTitle").textContent =
-        alertData.message || "SIN ALERTAS NUEVAS";
-    $("alertDetail").textContent =
-        alertData.detail || "El radar sigue vigilando la señal.";
-    $("alertCard").className = "card alert-card " + (
-        alertData.level === "CRITICA"
-        ? "alert-critical"
-        : alertData.level === "AVISO"
-        ? "alert-warning"
-        : ""
-    );
+    const alertType = String(alertData.type || "").toUpperCase();
+    const entryStage = String(d.entry_stage || "").toUpperCase();
+    const alertDirection = String(d.entry_direction || d.direction || "").toUpperCase();
+    const activePrealert = alertType === "PREALERTA" ||
+        (!alertType && entryStage === "PREALERTA");
+    const activeEntry = alertType === "ENTRADA" ||
+        (!alertType && entryStage === "ENTRADA");
+    const activeProtect = alertType === "PROTEGER";
+    $("prealertCard").classList.toggle("active", activePrealert);
+    $("entryCard").classList.toggle("active", activeEntry);
+    $("protectCard").classList.toggle("active", activeProtect);
+    $("prealertTitle").textContent = activePrealert
+        ? "PREALERTA " + (alertDirection || "") : "PREALERTA";
+    $("entryTitle").textContent = activeEntry
+        ? "ENTRADA CONFIRMADA " + (alertDirection || "") : "ENTRADA CONFIRMADA";
+    $("protectTitle").textContent = activeProtect
+        ? "PROTEGER TU ENTRADA" : "PROTEGER TU ENTRADA";
+    if (activePrealert) {
+        $("prealertDetail").textContent = alertData.detail ||
+            "Se está formando un movimiento " + (alertDirection || "direccional") + ". Todavía no es confirmación completa.";
+    }
+    if (activeEntry) {
+        $("entryDetail").textContent = alertData.detail ||
+            "La dirección principal y los movimientos de 1 y 3 minutos están alineados.";
+    }
+    if (activeProtect) {
+        $("protectDetail").textContent = alertData.detail ||
+            "La señal confirmada se debilitó. Revisa el contrato y el riesgo.";
+    }
 
 
     $("ema9").textContent=
