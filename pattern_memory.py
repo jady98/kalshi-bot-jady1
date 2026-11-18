@@ -355,15 +355,14 @@ def get_pattern_stats(pattern):
 
         with _connect() as conn:
             row = conn.execute("""
-                WITH last_pattern_signal AS (
+                WITH last_contract_signal AS (
                     SELECT DISTINCT ON (s.market_ticker)
                         s.market_ticker,
                         s.pattern
                     FROM btc_signal_snapshots AS s
                     JOIN btc_official_market_results AS official
                       ON official.market_ticker = s.market_ticker
-                    WHERE s.pattern = %s
-                      AND s.market_ticker IS NOT NULL
+                    WHERE s.market_ticker IS NOT NULL
                       AND s.market_close_ts IS NOT NULL
                       AND s.direction IN ('ALCISTA', 'BAJISTA')
                       AND s.signal_ts <= s.market_close_ts
@@ -379,10 +378,11 @@ def get_pattern_stats(pattern):
                     COUNT(*) FILTER (
                         WHERE official.official_result = 'NO'
                     ) AS bearish
-                FROM last_pattern_signal AS pattern_signal
+                FROM last_contract_signal AS contract_signal
                 JOIN btc_official_market_results AS official
-                  ON official.market_ticker = pattern_signal.market_ticker
-                WHERE official.source = 'kalshi_api'
+                  ON official.market_ticker = contract_signal.market_ticker
+                WHERE contract_signal.pattern = %s
+                  AND official.source = 'kalshi_api'
                   AND official.official_result IN ('SI', 'NO')
             """, (str(pattern),)).fetchone()
 
