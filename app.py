@@ -63,6 +63,7 @@ kalshi_market_ticker = ""
 kalshi_market_close = None
 kalshi_market_error = ""
 market_resolution_queue = deque(maxlen=20)
+_market_result_last_check = {}
 
 started = False
 last_pattern_snapshot_minute = None
@@ -2161,19 +2162,63 @@ def get_data():
     for queued_ticker, queued_close in list(market_resolution_queue):
         if now < queued_close:
             continue
+
+        # Guardar también la referencia BRTI del cierre para el análisis interno.
         closing_average, closing_samples = calculate_brti_window_average(
             ticks, queued_close - 60, queued_close
         )
         if closing_average is not None and closing_samples >= 45:
-            saved = pattern_memory.record_market_close(
+            pattern_memory.record_market_close(
                 queued_ticker, closing_average, now
             )
-            if saved:
+
+        # La precisión oficial se calcula con el resultado YES/NO publicado
+        # por Kalshi, no deduciéndolo únicamente de nuestra media BRTI.
+        last_check = _market_result_last_check.get(queued_ticker, 0)
+        if now - last_check < 10:
+            continue
+        _market_result_last_check[queued_ticker] = now
+
+        try:
+            result_response = session.get(
+                f"{KALSHI_REST}/markets/{queued_ticker}",
+                timeout=10
+            )
+            result_response.raise_for_status()
+            market_payload = result_response.json()
+            settled_market = market_payload.get("market", market_payload)
+            official = str(settled_market.get("result") or "").strip().lower()
+            status = str(settled_market.get("status") or "").strip().lower()
+
+            if official in ("yes", "no"):
+                last_direction = pattern_memory.get_last_contract_signal(
+                    queued_ticker
+                )
+                if last_direction in ("ALCISTA", "BAJISTA"):
+                    pattern_memory.record_official_market_result(
+                        queued_ticker,
+                        "SI" if official == "yes" else "NO",
+                        last_direction,
+                        source="kalshi_api"
+                    )
+                # Si no hubo señal direccional válida, no inventar una evaluación.
                 with lock:
                     market_resolution_queue = deque(
                         (item for item in market_resolution_queue if item[0] != queued_ticker),
                         maxlen=20
                     )
+                    _market_result_last_check.pop(queued_ticker, None)
+            elif status in ("finalized", "determined", "settled") and official:
+                # Resolver/void: no contabilizarlo como acierto o fallo binario.
+                with lock:
+                    market_resolution_queue = deque(
+                        (item for item in market_resolution_queue if item[0] != queued_ticker),
+                        maxlen=20
+                    )
+                    _market_result_last_check.pop(queued_ticker, None)
+        except Exception:
+            # Mantenerlo pendiente y reintentar; no marcar resultado por suposición.
+            continue
 
     # FUENTE UNICA DE PREDICCION: BRTI.
     # Coinbase permanece conectado solo para diagnostico/comparacion.
