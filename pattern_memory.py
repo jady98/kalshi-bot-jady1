@@ -372,7 +372,7 @@ def get_pattern_stats(pattern):
                 JOIN btc_signal_snapshots AS s
                   ON s.id = o.snapshot_id
                 WHERE s.pattern = %s
-                  AND o.horizon_seconds = -1
+                  AND o.horizon_seconds = 900
                   AND o.future_price IS NOT NULL
             """, (str(pattern),)).fetchone()
 
@@ -494,7 +494,12 @@ def get_prediction_accuracy():
                     COUNT(*) FILTER (
                         WHERE direction = 'INDECISO'
                     )
-                FROM latest
+                FROM btc_signal_snapshots AS s
+                JOIN btc_signal_outcomes AS o
+                  ON o.snapshot_id = s.id
+                 AND o.horizon_seconds = 900
+                 AND o.future_price IS NOT NULL
+                WHERE s.market_ticker IS NOT NULL
             """).fetchone()
 
         evaluated, correct, incorrect, no_change, indecisive = row
@@ -615,27 +620,16 @@ def get_prediction_accuracy_by_source():
 
 
 def get_15m_prediction_accuracy():
-    """Precisión direccional a 15 minutos, usando la última señal resuelta por contrato."""
+    """Precisión direccional a 15 minutos: evalúa cada señal individual al cumplirse +900 segundos."""
     empty = {
         "predictions_evaluated": 0, "correct": 0, "incorrect": 0,
         "no_change": 0, "indecisive_contracts": 0,
         "contracts_evaluated": 0, "accuracy_pct": None,
-        "measurement": "ÚLTIMA SEÑAL RESUELTA POR CONTRATO · HORIZONTE 900S"
+        "measurement": "TODAS LAS SEÑALES RESUELTAS · HORIZONTE 900S"
     }
     try:
         with _connect() as conn:
             row = conn.execute("""
-                WITH latest AS (
-                    SELECT DISTINCT ON (s.market_ticker)
-                        s.market_ticker, s.direction, o.result
-                    FROM btc_signal_snapshots AS s
-                    JOIN btc_signal_outcomes AS o
-                      ON o.snapshot_id = s.id
-                     AND o.horizon_seconds = 900
-                     AND o.future_price IS NOT NULL
-                    WHERE s.market_ticker IS NOT NULL
-                    ORDER BY s.market_ticker, s.signal_ts DESC, s.id DESC
-                )
                 SELECT
                     COUNT(*) FILTER (
                         WHERE direction IN ('ALCISTA', 'BAJISTA')
@@ -670,20 +664,19 @@ def get_15m_prediction_accuracy():
             "indecisive_contracts": indecisive,
             "contracts_evaluated": evaluated,
             "accuracy_pct": round(correct * 100 / total, 1) if total else None,
-            "measurement": "ÚLTIMA SEÑAL RESUELTA POR CONTRATO · HORIZONTE 900S"
+            "measurement": "TODAS LAS SEÑALES RESUELTAS · HORIZONTE 900S"
         }
     except Exception as exc:
         return {**empty, "error": str(exc)[:180]}
 
 
 def get_15m_prediction_accuracy_by_source():
-    """Precisión a 15 minutos separada por fuente, una última señal por contrato y fuente."""
+    """Precisión a 15 minutos por fuente, contando cada señal individual resuelta a +900 segundos."""
     try:
         with _connect() as conn:
             rows = conn.execute("""
                 WITH candidates AS (
-                    SELECT DISTINCT ON (s.market_ticker, source.source)
-                        s.market_ticker, s.signal_ts, s.direction, o.result,
+                    SELECT s.market_ticker, s.signal_ts, s.direction, o.result,
                         source.source
                     FROM btc_signal_snapshots AS s
                     JOIN btc_signal_outcomes AS o
@@ -703,7 +696,6 @@ def get_15m_prediction_accuracy_by_source():
                         END AS source
                     ) AS source
                     WHERE s.market_ticker IS NOT NULL
-                    ORDER BY s.market_ticker, source.source, s.signal_ts DESC, s.id DESC
                 )
                 SELECT
                     source,
@@ -744,12 +736,12 @@ def get_15m_prediction_accuracy_by_source():
                 "no_change": no_change,
                 "indecisive_contracts": indecisive,
                 "accuracy_pct": round(correct * 100 / total, 1) if total else None,
-                "measurement": "ÚLTIMA SEÑAL RESUELTA POR CONTRATO Y FUENTE · HORIZONTE 900S"
+                "measurement": "TODAS LAS SEÑALES RESUELTAS POR FUENTE · HORIZONTE 900S"
             })
         return {
             "sources": result,
             "error": None,
-            "measurement": "ÚLTIMA SEÑAL RESUELTA POR CONTRATO Y FUENTE · HORIZONTE 900S"
+            "measurement": "TODAS LAS SEÑALES RESUELTAS POR FUENTE · HORIZONTE 900S"
         }
     except Exception as exc:
         return {"sources": [], "error": str(exc)[:180]}
