@@ -210,9 +210,10 @@ def save_snapshot(data):
             market_close_ts = None
 
         minute_bucket = int(signal_ts // 60)
-        # Una señal por minuto y contrato: evita que una muestra GLOBAL
-        # impida guardar la señal vinculada al contrato que acaba de abrir.
-        snapshot_key = f"BRTI:{minute_bucket}:{ticker or 'GLOBAL'}"
+        snapshot_kind = str(data.get("snapshot_kind") or "LEGACY").strip().upper()
+        # Mantiene separados el pronóstico fijo de 15m y la señal al cierre
+        # de Kalshi, incluso si ambos se generan en el mismo minuto.
+        snapshot_key = f"BRTI:{minute_bucket}:{ticker or 'GLOBAL'}:{snapshot_kind}"
 
         with _connect() as conn:
             row = conn.execute("""
@@ -751,8 +752,14 @@ def get_15m_probability_calibration():
                     SELECT DISTINCT ON (s.market_ticker)
                         s.market_ticker,
                         s.direction,
-                        s.bullish_score,
-                        s.bearish_score,
+                        COALESCE(
+                            NULLIF(s.features->>'raw_bullish_score', '')::DOUBLE PRECISION,
+                            s.bullish_score
+                        ) AS bullish_score,
+                        COALESCE(
+                            NULLIF(s.features->>'raw_bearish_score', '')::DOUBLE PRECISION,
+                            s.bearish_score
+                        ) AS bearish_score,
                         o.result
                     FROM btc_signal_snapshots AS s
                     JOIN btc_signal_outcomes AS o
