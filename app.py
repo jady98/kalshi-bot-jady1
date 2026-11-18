@@ -3506,8 +3506,11 @@ function goLive(){
 
 function updateRadar(d){
 
+    const measuredOffset = Number(d._client_clock_offset_ms);
     const serverTimeSeconds = Number(d.server_time);
-    if(Number.isFinite(serverTimeSeconds) && serverTimeSeconds > 0){
+    if(Number.isFinite(measuredOffset)){
+        serverClockOffsetMs = measuredOffset;
+    } else if(Number.isFinite(serverTimeSeconds) && serverTimeSeconds > 0){
         serverClockOffsetMs = serverTimeSeconds * 1000 - Date.now();
     }
     const closeSeconds = Number(d.kalshi_market_close);
@@ -3735,8 +3738,9 @@ async function refreshData(manual=false){
 
     try{
 
+        const requestStartedAt = Date.now();
         const response=await fetch(
-            "/api?t="+Date.now(),
+            "/api?t="+requestStartedAt,
             {
                 cache:"no-store"
             }
@@ -3751,6 +3755,10 @@ async function refreshData(manual=false){
         }
 
         const data=await response.json();
+        const serverTimeMs = Number(data.server_time) * 1000;
+        if(Number.isFinite(serverTimeMs) && serverTimeMs > 0){
+            data._client_clock_offset_ms = serverTimeMs - ((requestStartedAt + Date.now()) / 2);
+        }
 
         updateRadar(data);
 
@@ -3796,6 +3804,8 @@ setInterval(
     ()=>refreshData(false),
     1000
 );
+
+setInterval(updateContractCountdown,250);
 
 </script>
 
