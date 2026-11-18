@@ -2035,7 +2035,9 @@ def update_guidance_alert(guidance, ticker, contract_active=False):
                 "type": "PROTEGER",
                 "level": "CRITICA",
                 "message": "SEÑAL PERDIÓ CONFIRMACIÓN · VALORA SALIR",
-                "detail": "La entrada anterior ya no mantiene la confirmación conjunta de 1 y 3 minutos. Revisa el contrato y el riesgo antes de mantener la posición.",
+                "detail": "La señal del contrato " + str(ticker) + " perdió la confirmación de 1 y 3 minutos. Quedan " + str(seconds_left) + " segundos; vuelve a evaluar el riesgo.",
+                "ticker": str(ticker),
+                "seconds_remaining": seconds_left,
                 "timestamp": now
             }
         elif stage == "ENTRADA" and (
