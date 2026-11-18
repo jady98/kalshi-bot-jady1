@@ -2481,6 +2481,8 @@ def health():
 
         "database_status": pattern_memory.database_status(),
         "database_counts": pattern_memory.get_database_counts(),
+        "pattern_learning_diagnostics":
+            pattern_memory.get_pattern_learning_diagnostics(),
         "prediction_accuracy": pattern_memory.get_prediction_accuracy(),
         "prediction_accuracy_by_source": pattern_memory.get_prediction_accuracy_by_source(),
         "official_market_accuracy":
