@@ -2565,7 +2565,7 @@ main{width:100%;max-width:760px;margin:0 auto}
 .bar{height:12px;display:flex;border-radius:20px;overflow:hidden;background:#29344a;margin:10px 0 8px}.bull{background:#00d995;width:50%}.bear{background:#ff5269;width:50%}
 .row{display:flex;justify-content:space-between;align-items:center;gap:8px;min-width:0}
 .section-title{color:#a1afca;font-size:11px;font-weight:800;margin-bottom:10px;letter-spacing:.35px}
-.chart-wrap{width:100%;height:330px;min-height:220px;position:relative;overflow:hidden}#chart{display:block;width:100%;height:100%;touch-action:pan-y}
+.chart-wrap{width:100%;height:330px;min-height:220px;position:relative;overflow:hidden}#chart{display:block;width:100%;height:100%;touch-action:pan-y}.kalshi-axis-tag{display:none;position:absolute;right:0;z-index:5;transform:translateY(-50%);width:82px;min-height:31px;box-sizing:border-box;padding:3px 4px;border:1px solid #00d995;border-radius:5px;background:#0b241e;color:#49e9b1;text-align:center;line-height:1.05;pointer-events:none;box-shadow:0 0 8px rgba(0,217,149,.22)}.kalshi-axis-name{font-size:8px;font-weight:900;letter-spacing:.6px}.kalshi-axis-value{font-size:10px;font-weight:900;margin-top:3px;white-space:nowrap}
 .chart-legend{display:flex;gap:13px;flex-wrap:wrap;margin:8px 0;font-size:10px;color:#9aa9c4}.legend-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:4px}
 .pattern-guide{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:3px 8px;align-items:center;margin:5px 0 7px;padding:7px 9px;border:1px solid #35415d;border-left:3px solid #b98aff;border-radius:9px;background:linear-gradient(100deg,rgba(185,138,255,.12),rgba(17,24,39,.7))}
 .pattern-guide.none{border-left-color:#7c8ba5}.pattern-guide.bull{border-left-color:#00d995}.pattern-guide.bear{border-left-color:#ff5269}.pattern-name{font-size:11px;font-weight:900;line-height:1.2;overflow-wrap:anywhere}.pattern-state{font-size:8px;font-weight:900;letter-spacing:.45px;color:#f4c95d;text-align:right}.pattern-description{grid-column:1/-1;color:#b9c6dc;font-size:9px;line-height:1.25}.pattern-history{grid-column:1/-1;color:#8d9bb6;font-size:8px;line-height:1.2}.pattern-guide.conflict{border-color:#f4c95d;box-shadow:inset 0 0 0 1px rgba(244,201,93,.12)}
@@ -2860,6 +2860,7 @@ button{border:1px solid #35476b;background:#182640;color:white;border-radius:9px
     <div class="chart-wrap">
 
         <div id="chart" role="img" aria-label="Gráfica de velas BTC/USD con patrones señalados"></div>
+        <div class="kalshi-axis-tag" id="kalshiAxisTag"><div class="kalshi-axis-name">KALSHI</div><div class="kalshi-axis-value" id="kalshiAxisValue">--</div></div>
 
     </div>
 
@@ -3061,6 +3062,7 @@ function initChart(){
         },
         rightPriceScale:{
             borderColor:"#2a3850",
+            minimumWidth:82,
             autoScale:true,
             scaleMargins:{ top:0.12, bottom:0.12 }
         },
@@ -3137,6 +3139,7 @@ function initChart(){
                     width:Math.max(1, Math.floor(box.width)),
                     height:Math.max(180, Math.floor(box.height))
                 });
+                updateKalshiAxisTag();
             }
         });
         observer.observe(container);
@@ -3146,6 +3149,7 @@ function initChart(){
                 width:Math.max(1,container.clientWidth),
                 height:Math.max(180,container.clientHeight)
             });
+            updateKalshiAxisTag();
         });
     }
 
@@ -3209,8 +3213,8 @@ function drawChart(data){
             color:"#00d995",
             lineWidth:1,
             lineStyle:LightweightCharts.LineStyle.Dashed,
-            axisLabelVisible:true,
-            title:"KALSHI"
+            axisLabelVisible:false,
+            title:""
         });
     }
 
@@ -3224,6 +3228,25 @@ function drawChart(data){
         const to = Math.max(from+10, Math.min(previousRange.to, rows.length+8));
         chart.timeScale().setVisibleLogicalRange({from,to});
     }
+    updateKalshiAxisTag();
+}
+
+function updateKalshiAxisTag(){
+    const tag=$("kalshiAxisTag");
+    const value=$("kalshiAxisValue");
+    if(!tag || !value || !chart || !candleSeries || !Number.isFinite(chartTargetValue) || chartTargetValue<=0){
+        if(tag) tag.style.display="none";
+        return;
+    }
+    const y=candleSeries.priceToCoordinate(chartTargetValue);
+    const height=$("chart")?.clientHeight || 0;
+    if(y==null || !Number.isFinite(y) || y<0 || y>height){
+        tag.style.display="none";
+        return;
+    }
+    value.textContent=money(chartTargetValue);
+    tag.style.top=y+"px";
+    tag.style.display="block";
 }
 
 
