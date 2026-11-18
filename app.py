@@ -2630,8 +2630,8 @@ main{width:100%;max-width:760px;margin:0 auto}
 .section-title{color:#a1afca;font-size:11px;font-weight:800;margin-bottom:10px;letter-spacing:.35px}
 .chart-wrap{width:100%;height:330px;min-height:220px;position:relative;overflow:hidden}#chart{display:block;width:100%;height:100%;touch-action:pan-y}.kalshi-axis-tag{display:none;position:absolute;right:0;z-index:5;transform:translateY(-50%);width:82px;min-height:31px;box-sizing:border-box;padding:3px 4px;border:1px solid #00d995;border-radius:5px;background:#0b241e;color:#49e9b1;text-align:center;line-height:1.05;pointer-events:none;box-shadow:0 0 8px rgba(0,217,149,.22)}.kalshi-axis-name{font-size:8px;font-weight:900;letter-spacing:.6px}.kalshi-axis-value{font-size:10px;font-weight:900;margin-top:3px;white-space:nowrap}
 .chart-legend{display:flex;gap:13px;flex-wrap:wrap;margin:8px 0;font-size:10px;color:#9aa9c4}.legend-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:4px}
-.pattern-guide{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:3px 8px;align-items:center;margin:5px 0 7px;padding:7px 9px;border:1px solid #35415d;border-left:3px solid #b98aff;border-radius:9px;background:linear-gradient(100deg,rgba(185,138,255,.12),rgba(17,24,39,.7))}
-.pattern-guide.none{border-left-color:#7c8ba5}.pattern-guide.bull{border-left-color:#00d995}.pattern-guide.bear{border-left-color:#ff5269}.pattern-name{font-size:11px;font-weight:900;line-height:1.2;overflow-wrap:anywhere}.pattern-state{font-size:8px;font-weight:900;letter-spacing:.45px;color:#f4c95d;text-align:right}.pattern-description{grid-column:1/-1;color:#b9c6dc;font-size:9px;line-height:1.25}.pattern-history{grid-column:1/-1;color:#8d9bb6;font-size:8px;line-height:1.2}.pattern-guide.conflict{border-color:#f4c95d;box-shadow:inset 0 0 0 1px rgba(244,201,93,.12)}
+.pattern-guide{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px 10px;align-items:center;width:100%;box-sizing:border-box;margin:7px 0 9px;padding:12px 14px;border:1px solid #465777;border-left:5px solid #b98aff;border-radius:12px;background:linear-gradient(100deg,rgba(185,138,255,.2),rgba(17,24,39,.96));box-shadow:0 3px 14px rgba(0,0,0,.24)}
+.pattern-guide.none{border-left-color:#9aa9c4}.pattern-guide.bull{border-left-color:#00e6a0;background:linear-gradient(100deg,rgba(0,217,149,.17),rgba(17,24,39,.97))}.pattern-guide.bear{border-left-color:#ff5269;background:linear-gradient(100deg,rgba(255,82,105,.17),rgba(17,24,39,.97))}.pattern-name{font-size:16px;font-weight:1000;line-height:1.2;overflow-wrap:anywhere;color:#fff;letter-spacing:.25px}.pattern-state{font-size:10px;font-weight:950;letter-spacing:.45px;color:#ffe078;text-align:right;max-width:145px}.pattern-description{grid-column:1/-1;color:#f0f4ff;font-size:13px;line-height:1.4;font-weight:600}.pattern-history{grid-column:1/-1;color:#b8c6df;font-size:10px;line-height:1.3}.pattern-guide.conflict{border-color:#ffd34e;box-shadow:0 0 0 1px rgba(244,201,93,.22),0 3px 14px rgba(0,0,0,.24)}
 button{border:1px solid #35476b;background:#182640;color:white;border-radius:9px;padding:10px 12px;font-size:10px;font-weight:800}button:active{opacity:.7}button:disabled{opacity:.5}
 .alert-stack{display:grid;grid-template-columns:1fr;gap:7px;margin:10px 0}
 .alert-card{display:flex;align-items:center;gap:11px;min-height:66px;padding:10px 12px;border:1px solid #34425b;border-radius:13px;background:rgba(8,12,28,.88);opacity:.42;filter:saturate(.55);transition:opacity .2s ease,box-shadow .2s ease}
@@ -2670,10 +2670,11 @@ button{border:1px solid #35476b;background:#182640;color:white;border-radius:9px
  main>section.card:nth-of-type(3) .row{flex:0 0 auto}
  main>section.card:nth-of-type(3) .section-title{font-size:8px;margin:0 0 2px}
  main>section.card:nth-of-type(3) .chart-legend{margin:3px 0;gap:7px;font-size:8px}
- main>section.card:nth-of-type(3) .pattern-guide{margin:2px 0 4px;padding:5px 7px;gap:2px 6px}
- main>section.card:nth-of-type(3) .pattern-name{font-size:9px}
- main>section.card:nth-of-type(3) .pattern-state{font-size:7px}
- main>section.card:nth-of-type(3) .pattern-description{font-size:8px;line-height:1.15}
+ main>section.card:nth-of-type(3) .pattern-guide{margin:4px 0 6px;padding:9px 11px;gap:5px 8px;flex:0 0 auto}
+ main>section.card:nth-of-type(3) .pattern-name{font-size:clamp(13px,3.7vw,16px);line-height:1.2}
+ main>section.card:nth-of-type(3) .pattern-state{font-size:9px;line-height:1.2;max-width:112px}
+ main>section.card:nth-of-type(3) .pattern-description{font-size:clamp(11px,3vw,13px);line-height:1.35;font-weight:600}
+ main>section.card:nth-of-type(3) .pattern-history{font-size:9px;line-height:1.25}
  main>section.card:nth-of-type(3) .chart-wrap{flex:1 1 auto;min-height:0;height:auto}
  main>section.card:nth-of-type(3) .row:last-of-type{flex:0 0 auto}
  main>section.card:nth-of-type(3)>.small{font-size:7px;flex:0 0 auto}
