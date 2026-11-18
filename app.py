@@ -1934,7 +1934,9 @@ def update_guidance_alert(guidance, ticker):
             }
         state["stage"] = stage
         state["direction"] = direction
-        if alert and now - state["last_alert_ts"] >= 20:
+        # Cada transición se anuncia una sola vez; no se pierde una entrada
+        # por el intervalo de enfriamiento de una prealerta anterior.
+        if alert:
             state["last_alert_ts"] = now
             return alert
     return None
