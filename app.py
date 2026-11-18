@@ -2429,6 +2429,7 @@ def get_data():
     return {
 
         "ok": True,
+        "server_time": now,
 
         "brti_price": (
             round(bp, 2)
@@ -3095,6 +3096,8 @@ let patternMarkers = [];
 let chartFollowLive = true;
 let chartInitialized = false;
 let busy = false;
+let serverClockOffsetMs = 0;
+let contractCloseEpochMs = null;
 
 function money(value){
     if(value === null || value === undefined || !Number.isFinite(Number(value))){
@@ -3107,10 +3110,22 @@ function money(value){
 }
 
 function clock(seconds){
-    const safe = Math.max(0, Number(seconds) || 0);
+    const safe = Math.max(0, Math.ceil(Number(seconds) || 0));
     const m = Math.floor(safe / 60);
     const s = Math.floor(safe % 60);
     return String(m).padStart(2,"0") + ":" + String(s).padStart(2,"0");
+}
+
+function updateContractCountdown(){
+    const el = $("countdown");
+    if(!el) return;
+    if(!Number.isFinite(contractCloseEpochMs)){
+        el.textContent = "—";
+        return;
+    }
+    const synchronizedNow = Date.now() + serverClockOffsetMs;
+    const secondsLeft = Math.max(0, (contractCloseEpochMs - synchronizedNow) / 1000);
+    el.textContent = clock(secondsLeft);
 }
 
 function emaSeries(values, period){
@@ -3491,6 +3506,16 @@ function goLive(){
 
 function updateRadar(d){
 
+    const serverTimeSeconds = Number(d.server_time);
+    if(Number.isFinite(serverTimeSeconds) && serverTimeSeconds > 0){
+        serverClockOffsetMs = serverTimeSeconds * 1000 - Date.now();
+    }
+    const closeSeconds = Number(d.kalshi_market_close);
+    contractCloseEpochMs = d.kalshi_market_active && Number.isFinite(closeSeconds) && closeSeconds > 0
+        ? closeSeconds * 1000
+        : null;
+    updateContractCountdown();
+
     $("brtiPrice").textContent =
         money(d.brti_price);
     chartCurrentPrice = Number(d.brti_price);
@@ -3668,10 +3693,6 @@ function updateRadar(d){
 
     $("sourceConnection").textContent =
         "Fuente única de predicción y gráfica: BRTI";
-
-
-    $("countdown").textContent=
-        clock(Number(d.countdown || 0));
 
 
     $("errors").textContent=
