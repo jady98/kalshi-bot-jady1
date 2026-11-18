@@ -179,8 +179,9 @@ def get_brti_candles(limit=300):
 
 def save_snapshot(data):
     """
-    Guarda una señal como máximo una vez por minuto y contrato.
-    Los resultados futuros se crean pendientes, nunca se inventan.
+    Guarda una predicción BRTI por minuto, independientemente de Kalshi.
+    Crea objetivos +1m, +3m, +5m y +15m desde la hora de la señal.
+    El resultado de cierre del contrato se registra solo si existe contrato.
     """
     global _db_status
 
@@ -190,26 +191,27 @@ def save_snapshot(data):
 
         if not math.isfinite(signal_ts) or not math.isfinite(price):
             return False
-
         if signal_ts <= 0 or price <= 0:
             return False
 
         ticker = str(data.get("market_ticker") or "").strip()
+        if not ticker or ticker == "SIN_CONTRATO":
+            ticker = None
+
         try:
             market_close_ts = float(data.get("market_close_ts"))
+            if (
+                not math.isfinite(market_close_ts)
+                or market_close_ts <= signal_ts
+                or ticker is None
+            ):
+                market_close_ts = None
         except (TypeError, ValueError):
-            return False
-
-        if (
-            not ticker
-            or ticker == "SIN_CONTRATO"
-            or not math.isfinite(market_close_ts)
-            or market_close_ts <= signal_ts
-        ):
-            return False
+            market_close_ts = None
 
         minute_bucket = int(signal_ts // 60)
-        snapshot_key = f"{ticker}:{minute_bucket}"
+        # Una sola señal BRTI por minuto, no una por contrato de Kalshi.
+        snapshot_key = f"BRTI:{minute_bucket}"
 
         with _connect() as conn:
             row = conn.execute("""
@@ -249,11 +251,7 @@ def save_snapshot(data):
 
             snapshot_id = row[0]
 
-            # Cada horizonte se mide desde la señal, aunque el contrato
-            # de Kalshi cierre antes. Así 15m significa siempre +900 segundos.
             for horizon in (60, 180, 300, 900):
-                target_ts = signal_ts + horizon
-
                 conn.execute("""
                     INSERT INTO btc_signal_outcomes (
                         snapshot_id, horizon_seconds, target_ts
@@ -261,21 +259,18 @@ def save_snapshot(data):
                     VALUES (%s, %s, %s)
                     ON CONFLICT (snapshot_id, horizon_seconds)
                     DO NOTHING
-                """, (
-                    snapshot_id,
-                    horizon,
-                    target_ts
-                ))
+                """, (snapshot_id, horizon, signal_ts + horizon))
 
-            # Resultado principal: precio observado al cierre real del contrato.
-            conn.execute("""
-                INSERT INTO btc_signal_outcomes (
-                    snapshot_id, horizon_seconds, target_ts
-                )
-                VALUES (%s, -1, %s)
-                ON CONFLICT (snapshot_id, horizon_seconds)
-                DO NOTHING
-            """, (snapshot_id, market_close_ts))
+            # El resultado al cierre de Kalshi es independiente del horizonte +15m.
+            if ticker is not None and market_close_ts is not None:
+                conn.execute("""
+                    INSERT INTO btc_signal_outcomes (
+                        snapshot_id, horizon_seconds, target_ts
+                    )
+                    VALUES (%s, -1, %s)
+                    ON CONFLICT (snapshot_id, horizon_seconds)
+                    DO NOTHING
+                """, (snapshot_id, market_close_ts))
 
         _db_status = "CONECTADA"
         return True
@@ -283,7 +278,6 @@ def save_snapshot(data):
     except Exception as exc:
         _db_status = "ERROR: " + str(exc)[:180]
         return False
-
 
 def record_price(price, timestamp=None):
     """
@@ -329,7 +323,6 @@ def record_price(price, timestamp=None):
                   AND o.horizon_seconds > 0
                   AND o.target_ts <= %s
                   AND %s > s.signal_ts
-                  AND s.market_close_ts IS NOT NULL
                   AND %s <= o.target_ts + 60 
           """, (price, price, price, price, ts, ts, ts, ts))
 
@@ -652,7 +645,6 @@ def get_15m_prediction_accuracy():
                   ON o.snapshot_id = s.id
                  AND o.horizon_seconds = 900
                  AND o.future_price IS NOT NULL
-                WHERE s.market_ticker IS NOT NULL
             """).fetchone()
         evaluated, correct, incorrect, no_change, indecisive = row
         total = correct + incorrect
@@ -695,7 +687,6 @@ def get_15m_prediction_accuracy_by_source():
                             ELSE 'TECNICA_SIN_FUENTE'
                         END AS source
                     ) AS source
-                    WHERE s.market_ticker IS NOT NULL
                 )
                 SELECT
                     source,
