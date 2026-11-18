@@ -2194,20 +2194,23 @@ def get_data():
                 last_direction = pattern_memory.get_last_contract_signal(
                     queued_ticker
                 )
+                saved_official = False
                 if last_direction in ("ALCISTA", "BAJISTA"):
-                    pattern_memory.record_official_market_result(
+                    saved_official = pattern_memory.record_official_market_result(
                         queued_ticker,
                         "SI" if official == "yes" else "NO",
                         last_direction,
                         source="kalshi_api"
                     )
-                # Si no hubo señal direccional válida, no inventar una evaluación.
-                with lock:
-                    market_resolution_queue = deque(
-                        (item for item in market_resolution_queue if item[0] != queued_ticker),
-                        maxlen=20
-                    )
-                    _market_result_last_check.pop(queued_ticker, None)
+                # Si no hubo señal, no inventar evaluación; si falla la BD,
+                # mantener el contrato pendiente para reintentar el registro.
+                if last_direction not in ("ALCISTA", "BAJISTA") or saved_official:
+                    with lock:
+                        market_resolution_queue = deque(
+                            (item for item in market_resolution_queue if item[0] != queued_ticker),
+                            maxlen=20
+                        )
+                        _market_result_last_check.pop(queued_ticker, None)
             elif status in ("finalized", "determined", "settled") and official:
                 # Resolver/void: no contabilizarlo como acierto o fallo binario.
                 with lock:
