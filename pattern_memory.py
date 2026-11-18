@@ -210,8 +210,9 @@ def save_snapshot(data):
             market_close_ts = None
 
         minute_bucket = int(signal_ts // 60)
-        # Una sola señal BRTI por minuto, no una por contrato de Kalshi.
-        snapshot_key = f"BRTI:{minute_bucket}"
+        # Una señal por minuto y contrato: evita que una muestra GLOBAL
+        # impida guardar la señal vinculada al contrato que acaba de abrir.
+        snapshot_key = f"BRTI:{minute_bucket}:{ticker or 'GLOBAL'}"
 
         with _connect() as conn:
             row = conn.execute("""
