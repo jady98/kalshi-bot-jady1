@@ -1051,8 +1051,8 @@ def calculate_prediction(
     pattern_samples = int(pattern_stats.get("samples") or 0)
     historical_bullish_pct = pattern_stats.get("bullish_pct")
     historical_bearish_pct = pattern_stats.get("bearish_pct")
-    # El historial de resultados BRTI a +900s solo influye cuando
-    # existe una ventaja histórica mínima y suficientes contratos distintos.
+    # El aprendizaje usa el resultado real del contrato Kalshi al cierre
+    # (outcome horizon_seconds=-1), no el simple cambio desde el precio de entrada.
     pattern_learning_weight = 0.0
     pattern_learning_used = False
     if (
@@ -1069,11 +1069,14 @@ def calculate_prediction(
         )
         # Evita aprender ruido: exige una diferencia mínima de 8 puntos.
         if abs(historical_bias) >= 0.08:
+            # El peso crece gradualmente y nunca domina la lectura actual.
+            # Se exige una base mayor porque cada muestra debe ser un contrato
+            # distinto ya resuelto oficialmente por su promedio BRTI de cierre.
             sample_reliability = min(
                 1.0,
-                max(0.0, (pattern_samples - 19) / 31.0)
+                max(0.0, (pattern_samples - 19) / 41.0)
             )
-            pattern_learning_weight = 0.10 * sample_reliability
+            pattern_learning_weight = 0.18 * sample_reliability
             if pattern_learning_weight > 0:
                 normalized = (
                     normalized * (1.0 - pattern_learning_weight)
@@ -1141,7 +1144,7 @@ def calculate_prediction(
         "pattern_historical_bearish_pct": historical_bearish_pct,
         "pattern_learning_used": pattern_learning_used,
         "pattern_learning_weight_pct": round(pattern_learning_weight * 100, 2),
-        "pattern_learning_source": "BRTI_OUTCOME_900S",
+        "pattern_learning_source": "KALSHI_CONTRACT_CLOSE_BRTI_AVERAGE",
         "target_side_locked": target_side_locked,
         "contract_yes_probability": bullish if valid_price(market_target) else None,
         "contract_no_probability": bearish if valid_price(market_target) else None,
