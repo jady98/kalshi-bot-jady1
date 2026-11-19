@@ -774,17 +774,17 @@ def get_prediction_accuracy_by_source():
             """).fetchall()
 
         result = []
-        for source, evaluated, correct, incorrect, no_change, indecisive, contracts, indecisive_contracts in rows:
+        for source, evaluated, correct, incorrect, no_change, indecisive in rows:
             total = correct + incorrect
             result.append({
                 "source": source,
                 "predictions_evaluated": evaluated,
-                "contracts_evaluated": contracts,
+                "contracts_evaluated": evaluated,
                 "correct": correct,
                 "incorrect": incorrect,
                 "no_change": no_change,
                 "indecisive_predictions": indecisive,
-                "indecisive_contracts": indecisive_contracts,
+                "indecisive_contracts": indecisive,
                 "accuracy_pct": round(correct * 100 / total, 1)
                     if total else None,
                 "measurement": "UNA ÚLTIMA SEÑAL POR CONTRATO"
@@ -987,16 +987,17 @@ def get_15m_prediction_accuracy_by_source():
                 ORDER BY source
             """).fetchall()
         result = []
-        for source, evaluated, correct, incorrect, no_change, indecisive in rows:
+        for source, evaluated, correct, incorrect, no_change, indecisive, contracts, indecisive_contracts in rows:
             total = correct + incorrect
             result.append({
                 "source": source,
                 "predictions_evaluated": evaluated,
-                "contracts_evaluated": evaluated,
+                "contracts_evaluated": contracts,
                 "correct": correct,
                 "incorrect": incorrect,
                 "no_change": no_change,
-                "indecisive_contracts": indecisive,
+                "indecisive_predictions": indecisive,
+                "indecisive_contracts": indecisive_contracts,
                 "accuracy_pct": round(correct * 100 / total, 1) if total else None,
                 "measurement": "SOLO PRONÓSTICOS CON HORIZONTE REAL DE 900S · POR FUENTE"
             })
