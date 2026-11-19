@@ -27,6 +27,7 @@ KALSHI_WS_PATH = "/trade-api/ws/v2"
 COINBASE_WS = "wss://advanced-trade-ws.coinbase.com"
 COINBASE_REST = "https://api.exchange.coinbase.com"
 KALSHI_REST = "https://api.elections.kalshi.com/trade-api/v2"
+KALSHI_MARKET_DATA_REST = "https://external-api.kalshi.com/trade-api/v2"
 KALSHI_SERIES = "KXBTC15M"
 
 INDEX_ID = "BRTI"
