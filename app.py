@@ -3582,7 +3582,31 @@ function initChart(){
         wickDownColor:"#ff5269",
         priceLineColor:"#45a9ff",
         priceLineVisible:true,
-        lastValueVisible:false
+        lastValueVisible:false,
+        // Incluye el objetivo de Kalshi en el rango vertical para que
+        // la línea y su etiqueta no desaparezcan fuera de la escala visible.
+        autoscaleInfoProvider: original => {
+            const info = original();
+            if(!info || !info.priceRange) return info;
+            const values = [
+                Number(info.priceRange.minValue),
+                Number(info.priceRange.maxValue),
+                chartTargetValue,
+                chartCurrentPrice
+            ].filter(value => Number.isFinite(value) && value > 0);
+            if(values.length < 2) return info;
+            const minValue = Math.min(...values);
+            const maxValue = Math.max(...values);
+            const padding = Math.max((maxValue-minValue)*0.04, 0.01);
+            return {
+                ...info,
+                priceRange:{
+                    ...info.priceRange,
+                    minValue:minValue-padding,
+                    maxValue:maxValue+padding
+                }
+            };
+        }
     });
 
     ema9Line = chart.addLineSeries({
