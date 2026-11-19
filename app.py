@@ -3624,24 +3624,15 @@ function drawChart(data){
         .sort((a,b)=>a.time-b.time)
         .filter((c,i,arr)=>i===0 || c.time!==arr[i-1].time);
 
-    // La gráfica usa únicamente el tramo cronológico continuo más reciente.
-    // No dibujar velas separadas por minutos ausentes como si fueran una serie regular.
-    let continuousStart = 0;
-    for(let i=rows.length-1;i>0;i--){
-        const gapSeconds = rows[i].time - rows[i-1].time;
-        if(gapSeconds < 50 || gapSeconds > 90){
-            continuousStart = i;
-            break;
-        }
-    }
-    const chartRows = rows.slice(continuousStart);
-    const chartHasGaps = continuousStart > 0;
+    // Conserva todas las velas históricas en la gráfica profesional.
+    // Los timestamps reales mantienen visibles los huecos; no se inventan velas.
+    const chartRows = rows;
     const countLabel = $("candleCount");
     if(countLabel){
-        countLabel.textContent = chartRows.length +
-            (chartHasGaps ? " velas seguidas · huecos excluidos" : " velas BRTI");
+        const gaps = rows.reduce((total,c,i)=>total + (i>0 && c.time-rows[i-1].time>90 ? 1 : 0),0);
+        countLabel.textContent = rows.length + " velas BRTI" +
+            (gaps ? " · " + gaps + " huecos visibles" : "");
     }
-
     if(!chartRows.length){
         candleSeries.setData([]);
         ema9Line.setData([]);
@@ -3656,8 +3647,20 @@ function drawChart(data){
     const e9 = emaSeries(closes,9);
     const e21 = emaSeries(closes,21);
 
-    ema9Line.setData(chartRows.map((c,i)=>({time:c.time,value:e9[i]})));
-    ema21Line.setData(chartRows.map((c,i)=>({time:c.time,value:e21[i]})));
+    const ema9Data = [];
+    const ema21Data = [];
+    chartRows.forEach((c,i)=>{
+        if(i>0 && c.time-chartRows[i-1].time>90){
+            // Punto vacío para cortar las EMA: no unir datos a través de un hueco.
+            const breakTime = chartRows[i-1].time + 60;
+            ema9Data.push({time:breakTime});
+            ema21Data.push({time:breakTime});
+        }
+        ema9Data.push({time:c.time,value:e9[i]});
+        ema21Data.push({time:c.time,value:e21[i]});
+    });
+    ema9Line.setData(ema9Data);
+    ema21Line.setData(ema21Data);
 
     if(chartTargetLine){
         candleSeries.removePriceLine(chartTargetLine);
