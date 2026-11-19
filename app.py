@@ -3684,6 +3684,13 @@ function realChartTime(displayTime){
     const timestamp=Number(real==null?displayTime:real);
     return new Date(timestamp*1000);
 }
+function displayChartTime(realTime){
+    const target=Number(realTime);
+    for(const [display,real] of chartTimeLookup.entries()){
+        if(Number(real)===target) return Number(display);
+    }
+    return target;
+}
 function formatChartTime(displayTime){
     const date=realChartTime(displayTime);
     return new Intl.DateTimeFormat("es-US",{hour:"2-digit",minute:"2-digit",month:"2-digit",day:"2-digit"}).format(date);
@@ -4129,7 +4136,7 @@ function updatePatternGuide(pattern, candleRows, mainDirection, samples){
                 lesson.direction==="bear"?"aboveBar":
                 (Number(c.close)>=Number(c.open)?"belowBar":"aboveBar");
             patternMarkers.push({
-                time:(()=>{ const index=rows.findIndex(row=>Number(row.time)===Number(c.time)); return index>=0 ? chartRows[index].time : Number(c.time); })(),
+                time:displayChartTime(c.time),
                 position:position,
                 color:color,
                 shape:bullish?"arrowUp":lesson.direction==="bear"?"arrowDown":"circle",
