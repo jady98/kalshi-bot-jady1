@@ -2024,7 +2024,7 @@ def start_services():
                 time.sleep(30)
 
             # Recupera minutos que faltan usando solo ticks BRTI reales
-            # persistidos en los últimos seis horas; no inventa precios.
+            # persistidos en los últimas 72 horas; no inventa precios.
             rebuilt = pattern_memory.rebuild_brti_candles_from_ticks()
             print(
                 "BRTI: MINUTOS AUSENTES RECONSTRUIDOS DESDE TICKS REALES",
