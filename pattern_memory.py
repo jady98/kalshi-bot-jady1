@@ -1349,15 +1349,18 @@ def get_15m_prediction_accuracy_by_contract():
 
 
 def get_15m_error_diagnostics():
-    """Resume fallos reales de pronósticos BRTI a +900s sin modificar el historial."""
+    """Diagnóstico de la última señal resuelta por contrato/ventana a +900s."""
     empty = {"by_pattern": [], "by_confidence": [], "recent_errors": [], "error": None}
     try:
         with _connect() as conn:
-            pattern_rows = conn.execute("""
-                WITH resolved AS (
-                    SELECT
-                        COALESCE(NULLIF(BTRIM(s.pattern), ''), 'SIN PATRON') AS pattern,
-                        CASE WHEN s.direction = o.result THEN 1 ELSE 0 END AS correct
+            base_cte = """
+                WITH latest AS (
+                    SELECT DISTINCT ON (
+                        COALESCE(NULLIF(s.market_ticker, ''), NULLIF(s.snapshot_key, ''), s.id::TEXT)
+                    )
+                        s.signal_ts, s.market_ticker, s.snapshot_key, s.direction,
+                        s.features, s.pattern, s.price,
+                        o.future_price, o.change_pct, o.result
                     FROM btc_signal_snapshots AS s
                     JOIN btc_signal_outcomes AS o
                       ON o.snapshot_id = s.id
@@ -1370,65 +1373,53 @@ def get_15m_error_diagnostics():
                         UPPER(COALESCE(s.features->>'signal_source', '')) LIKE '%BRTI%'
                         OR UPPER(COALESCE(s.features->>'direction_method', '')) LIKE '%BRTI%'
                       )
+                    ORDER BY
+                        COALESCE(NULLIF(s.market_ticker, ''), NULLIF(s.snapshot_key, ''), s.id::TEXT),
+                        s.signal_ts DESC, s.id DESC
                 )
-                SELECT pattern, COUNT(*) AS samples, SUM(correct) AS correct
-                FROM resolved
-                GROUP BY pattern
+            """
+            pattern_rows = conn.execute(base_cte + """
+                SELECT
+                    COALESCE(NULLIF(BTRIM(pattern), ''), 'SIN PATRON') AS pattern,
+                    COUNT(*) AS samples,
+                    SUM(CASE WHEN direction = result THEN 1 ELSE 0 END) AS correct
+                FROM latest
+                GROUP BY 1
                 ORDER BY COUNT(*) DESC
                 LIMIT 12
             """).fetchall()
 
-            confidence_rows = conn.execute("""
-                WITH resolved AS (
-                    SELECT
-                        FLOOR((
-                            GREATEST(
-                                COALESCE(NULLIF(s.features->>'raw_bullish_score', '')::DOUBLE PRECISION, s.bullish_score, 50),
-                                COALESCE(NULLIF(s.features->>'raw_bearish_score', '')::DOUBLE PRECISION, s.bearish_score, 50)
-                            ) - 50
-                        ) / 5.0) * 5 + 50 AS band_floor,
-                        CASE WHEN s.direction = o.result THEN 1 ELSE 0 END AS correct
-                    FROM btc_signal_snapshots AS s
-                    JOIN btc_signal_outcomes AS o
-                      ON o.snapshot_id = s.id
-                     AND o.horizon_seconds = 900
-                     AND o.future_price IS NOT NULL
-                    WHERE s.features->>'forecast_horizon_seconds' = '900'
-                      AND s.direction IN ('ALCISTA', 'BAJISTA')
-                      AND o.result IN ('ALCISTA', 'BAJISTA')
-                      AND (
-                        UPPER(COALESCE(s.features->>'signal_source', '')) LIKE '%BRTI%'
-                        OR UPPER(COALESCE(s.features->>'direction_method', '')) LIKE '%BRTI%'
-                      )
-                )
-                SELECT band_floor, COUNT(*) AS samples, SUM(correct) AS correct
-                FROM resolved
-                GROUP BY band_floor
-                ORDER BY band_floor
+            confidence_rows = conn.execute(base_cte + """
+                SELECT
+                    FLOOR((
+                        GREATEST(
+                            COALESCE(NULLIF(features->>'raw_bullish_score', '')::DOUBLE PRECISION, 50),
+                            COALESCE(NULLIF(features->>'raw_bearish_score', '')::DOUBLE PRECISION, 50)
+                        ) - 50
+                    ) / 5.0) * 5 + 50 AS band_floor,
+                    COUNT(*) AS samples,
+                    SUM(CASE WHEN direction = result THEN 1 ELSE 0 END) AS correct
+                FROM latest
+                GROUP BY 1
+                ORDER BY 1
             """).fetchall()
 
-            error_rows = conn.execute("""
+            error_rows = conn.execute(base_cte + """
                 SELECT
-                    s.signal_ts, s.market_ticker, s.direction,
+                    signal_ts, market_ticker, direction,
                     GREATEST(
-                        COALESCE(NULLIF(s.features->>'raw_bullish_score', '')::DOUBLE PRECISION, s.bullish_score, 50),
-                        COALESCE(NULLIF(s.features->>'raw_bearish_score', '')::DOUBLE PRECISION, s.bearish_score, 50)
+                        COALESCE(NULLIF(features->>'raw_bullish_score', '')::DOUBLE PRECISION, 50),
+                        COALESCE(NULLIF(features->>'raw_bearish_score', '')::DOUBLE PRECISION, 50)
                     ) AS confidence,
-                    s.pattern, s.price, o.future_price, o.change_pct, o.result
-                FROM btc_signal_snapshots AS s
-                JOIN btc_signal_outcomes AS o
-                  ON o.snapshot_id = s.id
-                 AND o.horizon_seconds = 900
-                 AND o.future_price IS NOT NULL
-                WHERE s.features->>'forecast_horizon_seconds' = '900'
-                  AND s.direction IN ('ALCISTA', 'BAJISTA')
-                  AND o.result IN ('ALCISTA', 'BAJISTA')
-                  AND s.direction <> o.result
-                ORDER BY s.signal_ts DESC, s.id DESC
+                    pattern, price, future_price, change_pct, result
+                FROM latest
+                WHERE direction <> result
+                ORDER BY signal_ts DESC
                 LIMIT 20
             """).fetchall()
 
         return {
+            "measurement": "ULTIMA SEÑAL BRTI RESUELTA POR CONTRATO/VENTANA · +900S",
             "by_pattern": [
                 {"pattern": str(r[0]), "samples": int(r[1]), "correct": int(r[2]),
                  "incorrect": int(r[1]) - int(r[2]),
@@ -1439,7 +1430,7 @@ def get_15m_error_diagnostics():
                 {"band_floor": int(r[0]), "samples": int(r[1]), "correct": int(r[2]),
                  "incorrect": int(r[1]) - int(r[2]),
                  "accuracy_pct": round(int(r[2]) * 100 / int(r[1]), 1) if r[1] else None}
-                for r in confidence_rows
+                for r in confidence_rows if r[0] is not None
             ],
             "recent_errors": [
                 {"signal_ts": float(r[0]), "market_ticker": r[1], "direction": r[2],
@@ -1454,3 +1445,4 @@ def get_15m_error_diagnostics():
         }
     except Exception as exc:
         return {**empty, "error": str(exc)[:180]}
+
