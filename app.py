@@ -2023,6 +2023,15 @@ def start_services():
             while not pattern_memory.init_db():
                 time.sleep(30)
 
+            # Recupera minutos que faltan usando solo ticks BRTI reales
+            # persistidos en los últimos seis horas; no inventa precios.
+            rebuilt = pattern_memory.rebuild_brti_candles_from_ticks()
+            print(
+                "BRTI: MINUTOS AUSENTES RECONSTRUIDOS DESDE TICKS REALES",
+                rebuilt,
+                flush=True
+            )
+
             # Recupera velas BRTI reales guardadas en PostgreSQL.
             # No utiliza Coinbase ni crea velas artificiales.
             restored = pattern_memory.get_brti_candles(MAX_CANDLES)
