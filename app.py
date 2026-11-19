@@ -2887,6 +2887,9 @@ def stats():
         "database_counts":
             pattern_memory.get_database_counts(),
 
+        "resolution_diagnostics":
+            pattern_memory.get_resolution_diagnostics(),
+
          "prediction_accuracy":
             pattern_memory.get_prediction_accuracy(),
 
