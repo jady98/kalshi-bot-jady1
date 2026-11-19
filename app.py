@@ -210,10 +210,15 @@ def get_kalshi_orderbook(ticker):
     except Exception as exc:
         data = {
             "available": False, "ticker": ticker, "best_yes_bid": None,
-            "best_yes_ask": None, "best_no_bid": None, "best_no_ask": None,
-            "yes_spread": None, "no_spread": None, "updated_ts": now,
+            "best_yes_bid_size": None, "best_yes_ask": None,
+            "best_yes_ask_size": None, "best_no_bid": None,
+            "best_no_bid_size": None, "best_no_ask": None,
+            "best_no_ask_size": None, "yes_spread": None,
+            "no_spread": None, "updated_ts": now,
             "error": str(exc)[:240]
         }
+        with lock:
+            orderbook_cache.update({"ticker": ticker, "updated_ts": now, "data": data})
         return data
 
 
