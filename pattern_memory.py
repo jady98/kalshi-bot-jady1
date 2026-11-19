@@ -9,6 +9,7 @@ from psycopg.types.json import Jsonb
 
 _lock = threading.RLock()
 _last_tick_second = 0
+_tick_save_count = 0
 _db_status = "PENDIENTE"
 
 
@@ -38,6 +39,16 @@ def init_db():
                     volume DOUBLE PRECISION NOT NULL DEFAULT 0,
                     open_ts DOUBLE PRECISION NOT NULL,
                     close_ts DOUBLE PRECISION NOT NULL
+                )
+            """)
+
+            # Muestras BRTI espaciadas por 5 segundos para reconstruir
+            # ventanas de 1 y 3 minutos después de reinicios de Render.
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS brti_price_ticks (
+                    tick_second BIGINT PRIMARY KEY,
+                    tick_ts DOUBLE PRECISION NOT NULL,
+                    price DOUBLE PRECISION NOT NULL
                 )
             """)
 
@@ -176,6 +187,25 @@ def get_brti_candles(limit=300):
         } for r in reversed(rows)]
         _db_status = "CONECTADA"
         return candles
+    except Exception as exc:
+        _db_status = "ERROR: " + str(exc)[:180]
+        return []
+
+
+def get_brti_ticks(limit=3600):
+    """Restaura muestras BRTI recientes, en orden cronológico."""
+    global _db_status
+    try:
+        limit = max(1, min(int(limit), 10000))
+        with _connect() as conn:
+            rows = conn.execute("""
+                SELECT tick_ts, price
+                FROM brti_price_ticks
+                ORDER BY tick_second DESC
+                LIMIT %s
+            """, (limit,)).fetchall()
+        _db_status = "CONECTADA"
+        return [(float(row[0]), float(row[1])) for row in reversed(rows)]
     except Exception as exc:
         _db_status = "ERROR: " + str(exc)[:180]
         return []
@@ -370,6 +400,14 @@ def record_price(price, timestamp=None):
 
         with _connect() as conn:
             conn.execute("""
+                INSERT INTO brti_price_ticks (tick_second, tick_ts, price)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (tick_second) DO UPDATE SET
+                    tick_ts = EXCLUDED.tick_ts,
+                    price = EXCLUDED.price
+            """, (second, ts, price))
+
+            conn.execute("""
                 UPDATE btc_signal_outcomes AS o
                 SET future_price = %s,
                     change_pct = ((%s / s.price) - 1) * 100,
@@ -397,6 +435,17 @@ def record_price(price, timestamp=None):
                   AND o.target_ts <= %s
                   AND %s > s.signal_ts
           """, (price, price, ts, price, price, price, price, ts, ts, ts, ts))
+
+        global _tick_save_count
+        with _lock:
+            _tick_save_count += 1
+            prune_ticks = (_tick_save_count % 1000 == 0)
+        if prune_ticks:
+            with _connect() as conn:
+                conn.execute(
+                    "DELETE FROM brti_price_ticks WHERE tick_ts < %s",
+                    (ts - 21600,)
+                )
 
         _db_status = "CONECTADA"
         return True
