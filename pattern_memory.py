@@ -774,16 +774,17 @@ def get_prediction_accuracy_by_source():
             """).fetchall()
 
         result = []
-        for source, evaluated, correct, incorrect, no_change, indecisive in rows:
+        for source, evaluated, correct, incorrect, no_change, indecisive, contracts, indecisive_contracts in rows:
             total = correct + incorrect
             result.append({
                 "source": source,
                 "predictions_evaluated": evaluated,
-                "contracts_evaluated": evaluated,
+                "contracts_evaluated": contracts,
                 "correct": correct,
                 "incorrect": incorrect,
                 "no_change": no_change,
-                "indecisive_contracts": indecisive,
+                "indecisive_predictions": indecisive,
+                "indecisive_contracts": indecisive_contracts,
                 "accuracy_pct": round(correct * 100 / total, 1)
                     if total else None,
                 "measurement": "UNA ÚLTIMA SEÑAL POR CONTRATO"
@@ -890,6 +891,14 @@ def get_15m_prediction_accuracy():
                     COUNT(*) FILTER (
                         WHERE direction IN ('INDECISO', 'RECOPILANDO')
                            OR direction IS NULL
+                    ),
+                    COUNT(DISTINCT COALESCE(s.market_ticker, s.snapshot_key)) FILTER (
+                        WHERE direction IN ('ALCISTA', 'BAJISTA')
+                          AND result IN ('ALCISTA', 'BAJISTA')
+                    ),
+                    COUNT(DISTINCT COALESCE(s.market_ticker, s.snapshot_key)) FILTER (
+                        WHERE direction IN ('INDECISO', 'RECOPILANDO')
+                           OR direction IS NULL
                     )
                 FROM btc_signal_snapshots AS s
                 JOIN btc_signal_outcomes AS o
@@ -898,15 +907,16 @@ def get_15m_prediction_accuracy():
                  AND o.future_price IS NOT NULL
                  AND s.features->>'forecast_horizon_seconds' = '900'
             """).fetchone()
-        evaluated, correct, incorrect, no_change, indecisive = row
+        evaluated, correct, incorrect, no_change, indecisive, contracts, indecisive_contracts = row
         total = correct + incorrect
         return {
             "predictions_evaluated": evaluated,
             "correct": correct,
             "incorrect": incorrect,
             "no_change": no_change,
-            "indecisive_contracts": indecisive,
-            "contracts_evaluated": evaluated,
+            "indecisive_predictions": indecisive,
+            "indecisive_contracts": indecisive_contracts,
+            "contracts_evaluated": contracts,
             "accuracy_pct": round(correct * 100 / total, 1) if total else None,
             "measurement": "SOLO PRONÓSTICOS CON HORIZONTE REAL DE 900S"
         }
@@ -920,7 +930,7 @@ def get_15m_prediction_accuracy_by_source():
         with _connect() as conn:
             rows = conn.execute("""
                 WITH candidates AS (
-                    SELECT s.market_ticker, s.signal_ts, s.direction, o.result,
+                    SELECT s.market_ticker, s.snapshot_key, s.signal_ts, s.direction, o.result,
                         source.source
                     FROM btc_signal_snapshots AS s
                     JOIN btc_signal_outcomes AS o
@@ -961,6 +971,14 @@ def get_15m_prediction_accuracy_by_source():
                           AND result = 'SIN CAMBIO'
                     ),
                     COUNT(*) FILTER (
+                        WHERE direction IN ('INDECISO', 'RECOPILANDO')
+                           OR direction IS NULL
+                    ),
+                    COUNT(DISTINCT COALESCE(market_ticker, snapshot_key)) FILTER (
+                        WHERE direction IN ('ALCISTA', 'BAJISTA')
+                          AND result IN ('ALCISTA', 'BAJISTA')
+                    ),
+                    COUNT(DISTINCT COALESCE(market_ticker, snapshot_key)) FILTER (
                         WHERE direction IN ('INDECISO', 'RECOPILANDO')
                            OR direction IS NULL
                     )
