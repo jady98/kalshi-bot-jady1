@@ -3624,22 +3624,40 @@ function drawChart(data){
         .sort((a,b)=>a.time-b.time)
         .filter((c,i,arr)=>i===0 || c.time!==arr[i-1].time);
 
-    if(!rows.length){
+    // La gráfica usa únicamente el tramo cronológico continuo más reciente.
+    // No dibujar velas separadas por minutos ausentes como si fueran una serie regular.
+    let continuousStart = 0;
+    for(let i=rows.length-1;i>0;i--){
+        const gapSeconds = rows[i].time - rows[i-1].time;
+        if(gapSeconds < 50 || gapSeconds > 90){
+            continuousStart = i;
+            break;
+        }
+    }
+    const chartRows = rows.slice(continuousStart);
+    const chartHasGaps = continuousStart > 0;
+    const countLabel = $("candleCount");
+    if(countLabel){
+        countLabel.textContent = chartRows.length +
+            (chartHasGaps ? " velas seguidas · huecos excluidos" : " velas BRTI");
+    }
+
+    if(!chartRows.length){
         candleSeries.setData([]);
         ema9Line.setData([]);
         ema21Line.setData([]);
         return;
     }
 
-    candleSeries.setData(rows);
+    candleSeries.setData(chartRows);
     candleSeries.setMarkers(patternMarkers);
 
-    const closes = rows.map(c=>c.close);
+    const closes = chartRows.map(c=>c.close);
     const e9 = emaSeries(closes,9);
     const e21 = emaSeries(closes,21);
 
-    ema9Line.setData(rows.map((c,i)=>({time:c.time,value:e9[i]})));
-    ema21Line.setData(rows.map((c,i)=>({time:c.time,value:e21[i]})));
+    ema9Line.setData(chartRows.map((c,i)=>({time:c.time,value:e9[i]})));
+    ema21Line.setData(chartRows.map((c,i)=>({time:c.time,value:e21[i]})));
 
     if(chartTargetLine){
         candleSeries.removePriceLine(chartTargetLine);
@@ -3658,12 +3676,12 @@ function drawChart(data){
 
     if(chartFollowLive || !previousRange){
         chart.timeScale().setVisibleLogicalRange({
-            from:Math.max(0,rows.length-55),
-            to:rows.length+4
+            from:Math.max(0,chartRows.length-55),
+            to:chartRows.length+4
         });
     } else {
-        const from = Math.max(-5, Math.min(previousRange.from, rows.length-1));
-        const to = Math.max(from+1, Math.min(previousRange.to, rows.length+8));
+        const from = Math.max(-5, Math.min(previousRange.from, chartRows.length-1));
+        const to = Math.max(from+1, Math.min(previousRange.to, chartRows.length+8));
         chart.timeScale().setVisibleLogicalRange({from,to});
     }
     updateKalshiAxisTag();
@@ -4124,9 +4142,7 @@ function updateRadar(d){
     drawChart(d.brti_candles || []);
     updatePatternGuide(d.pattern, d.brti_candles || [], d.direction, d.pattern_samples);
 
-    $("candleCount").textContent=
-        (d.brti_candles || []).length+
-        " velas BRTI";
+    // El contador se actualiza dentro de drawChart con las velas realmente visibles.
 
 }
 
