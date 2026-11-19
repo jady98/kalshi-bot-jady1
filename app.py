@@ -1320,13 +1320,11 @@ def calculate_prediction(
         raw_bullish, raw_bearish
     )
 
-    # No mostrar una dirección que contradiga la probabilidad calculada.
-    # Durante la espera de confirmación de un giro, mostrar INDECISO.
-    display_direction = direction
-    if direction == "ALCISTA" and bullish < 50:
-        display_direction = "INDECISO"
-    elif direction == "BAJISTA" and bearish < 50:
-        display_direction = "INDECISO"
+    # La interfaz siempre muestra el lado con mayor probabilidad.
+    # La confirmación de entrada conserva sus filtros estrictos en build_forward_guidance.
+    display_direction = (
+        "ALCISTA" if bullish >= bearish else "BAJISTA"
+    )
 
     # --------------------------------------
     # RESULTADO
@@ -3082,10 +3080,8 @@ button{border:1px solid #35476b;background:#182640;color:white;border-radius:9px
 .compact-radar-alert .radar-alert-heading .section-title{margin:0;font-size:9px}
 .compact-radar-alert .radar-alert-heading .small{font-size:8px;line-height:1.2}
 .compact-radar-alert .radar-alert-heading button{padding:6px 8px;font-size:8px}
-.compact-radar-alert .radar-alert-state{margin:4px 0 0;padding:4px 7px;font-size:9px}
-.compact-radar-alert .radar-alert-message,.compact-radar-alert .radar-alert-detail{display:none}
-.compact-radar-alert.has-event .radar-alert-message{display:block;font-size:11px;line-height:1.25;margin:4px 0 0}
-.compact-radar-alert.has-event .radar-alert-detail{display:block;font-size:9px;line-height:1.25;margin-top:2px}
+.compact-radar-alert .radar-alert-state{margin:4px 0 0;padding:5px 8px;font-size:10px}
+.compact-radar-alert .radar-alert-message,.compact-radar-alert .radar-alert-detail{display:none!important}
 .compact-pattern{grid-template-columns:minmax(0,1fr) auto;gap:3px 8px;margin:3px 0 5px!important;padding:6px 9px!important;cursor:pointer;min-height:0}
 .compact-pattern .pattern-name{font-size:11px!important;line-height:1.15}
 .compact-pattern .pattern-state{font-size:8px!important;line-height:1.1}
@@ -3262,14 +3258,14 @@ button{border:1px solid #35476b;background:#182640;color:white;border-radius:9px
 <section class="card radar-alert-panel compact-radar-alert" id="radarAlertPanel" aria-live="polite">
     <div class="row radar-alert-heading">
         <div>
-            <div class="section-title">ALERTAS INTELIGENTES · ENTRADA Y SALIDA</div>
-            <div class="small" id="radarAlertStatus">Vigilando señales BRTI de 15 minutos</div>
+            <div class="section-title">ALERTAS</div>
+            <div class="small" id="radarAlertStatus">BRTI · 15 MIN</div>
         </div>
         <button id="alertsEnableButton" onclick="enableRadarAlerts()">ACTIVAR AVISOS</button>
     </div>
-    <div class="radar-alert-state neutral" id="radarAlertState">ESPERANDO UNA SEÑAL</div>
-    <div class="radar-alert-message" id="radarAlertMessage">El radar avisará cuando confirme una entrada o detecte una salida.</div>
-    <div class="small radar-alert-detail" id="radarAlertDetail">Activa los avisos para recibir notificación y sonido mientras el radar esté abierto.</div>
+    <div class="radar-alert-state neutral" id="radarAlertState">OBSERVAR</div>
+    <div class="radar-alert-message" id="radarAlertMessage"></div>
+    <div class="small radar-alert-detail" id="radarAlertDetail"></div>
 </section>
 
 
@@ -4020,7 +4016,7 @@ function handleRadarAlert(data){
     if(!state || !message || !detail || !panel) return;
 
     state.className = "radar-alert-state " + (isExit ? "exit" : isEntry ? "entry" : isPrealert ? "prealert" : "neutral");
-    state.textContent = isExit ? "SALIDA · PROTEGER" : isEntry ? "ENTRADA CONFIRMADA" : isPrealert ? "PREALERTA" : "ESPERANDO UNA SEÑAL";
+    state.textContent = isExit ? "SALIDA" : isEntry ? "ENTRADA CONFIRMADA" : isPrealert ? "PREALERTA" : "OBSERVAR";
     panel.classList.toggle("has-event", isExit || isEntry || isPrealert);
     message.textContent = alertData.message || (
         isEntry ? "ENTRADA CONFIRMADA · " + (data.entry_direction || data.direction || "") :
