@@ -277,6 +277,11 @@ def get_brti_candle_diagnostics():
         "span_hours": 0,
         "gaps_over_90_seconds": 0,
         "missing_minutes_estimate": 0,
+        "tick_samples_72h": 0,
+        "first_tick_ts_72h": None,
+        "last_tick_ts_72h": None,
+        "tick_minutes_rebuildable_72h": 0,
+        "missing_candles_rebuildable_72h": 0,
         "error": None
     }
     try:
@@ -286,22 +291,38 @@ def get_brti_candle_diagnostics():
                     SELECT candle_time,
                            LAG(candle_time) OVER (ORDER BY candle_time) AS prev_time
                     FROM brti_minute_candles
+                ),
+                tick_minutes AS (
+                    SELECT
+                        FLOOR(tick_ts / 60.0)::BIGINT * 60 AS candle_time,
+                        COUNT(*) AS sample_count
+                    FROM brti_price_ticks
+                    WHERE tick_ts > EXTRACT(EPOCH FROM NOW()) - 259200
+                    GROUP BY FLOOR(tick_ts / 60.0)::BIGINT * 60
+                    HAVING COUNT(*) >= 2
                 )
                 SELECT
-                    COUNT(*),
-                    MIN(candle_time),
-                    MAX(candle_time),
-                    COUNT(*) FILTER (
-                        WHERE prev_time IS NOT NULL
-                          AND candle_time - prev_time > 90
-                    ),
-                    COALESCE(SUM(
-                        GREATEST(
-                            FLOOR((candle_time - prev_time) / 60.0) - 1,
-                            0
-                        )
-                    ) FILTER (WHERE prev_time IS NOT NULL), 0)
-                FROM ordered
+                    (SELECT COUNT(*) FROM ordered),
+                    (SELECT MIN(candle_time) FROM ordered),
+                    (SELECT MAX(candle_time) FROM ordered),
+                    (SELECT COUNT(*) FROM ordered
+                     WHERE prev_time IS NOT NULL AND candle_time - prev_time > 90),
+                    (SELECT COALESCE(SUM(GREATEST(
+                        FLOOR((candle_time - prev_time) / 60.0) - 1, 0
+                    )), 0) FROM ordered WHERE prev_time IS NOT NULL),
+                    (SELECT COUNT(*) FROM brti_price_ticks
+                     WHERE tick_ts > EXTRACT(EPOCH FROM NOW()) - 259200),
+                    (SELECT MIN(tick_ts) FROM brti_price_ticks
+                     WHERE tick_ts > EXTRACT(EPOCH FROM NOW()) - 259200),
+                    (SELECT MAX(tick_ts) FROM brti_price_ticks
+                     WHERE tick_ts > EXTRACT(EPOCH FROM NOW()) - 259200),
+                    (SELECT COUNT(*) FROM tick_minutes),
+                    (SELECT COUNT(*) FROM tick_minutes tm
+                     WHERE NOT EXISTS (
+                         SELECT 1 FROM brti_minute_candles c
+                         WHERE c.candle_time = tm.candle_time
+                     ))
+
             """).fetchone()
 
         count = int(row[0] or 0)
@@ -318,6 +339,11 @@ def get_brti_candle_diagnostics():
             "span_hours": span_hours,
             "gaps_over_90_seconds": int(row[3] or 0),
             "missing_minutes_estimate": int(row[4] or 0),
+            "tick_samples_72h": int(row[5] or 0),
+            "first_tick_ts_72h": int(row[6]) if row[6] is not None else None,
+            "last_tick_ts_72h": int(row[7]) if row[7] is not None else None,
+            "tick_minutes_rebuildable_72h": int(row[8] or 0),
+            "missing_candles_rebuildable_72h": int(row[9] or 0),
             "error": None
         }
     except Exception as exc:
