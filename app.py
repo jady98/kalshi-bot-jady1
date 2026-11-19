@@ -196,7 +196,9 @@ def get_kalshi_orderbook(ticker):
             "best_no_bid": round(best_no[0], 4) if best_no else None,
             "best_no_bid_size": round(best_no[1], 2) if best_no else None,
             "best_yes_ask": round(yes_ask, 4) if yes_ask is not None else None,
+            "best_yes_ask_size": round(best_no[1], 2) if best_no else None,
             "best_no_ask": round(no_ask, 4) if no_ask is not None else None,
+            "best_no_ask_size": round(best_yes[1], 2) if best_yes else None,
             "yes_spread": round(yes_ask - best_yes[0], 4) if yes_ask is not None and best_yes else None,
             "no_spread": round(no_ask - best_no[0], 4) if no_ask is not None and best_no else None,
             "updated_ts": now,
@@ -233,9 +235,9 @@ def calculate_entry_economics(direction, bullish_probability, bearish_probabilit
         return {"available": False, "reason": "DATOS FUERA DE RANGO"}
 
     # Tarifa taker general publicada: 7% * P * (1-P), redondeada hacia arriba
-    # a $0.0001 por contrato. Es una estimación para una compra inmediata.
+    # al centavo superior para una compra inmediata de 1 contrato.
     raw_fee = 0.07 * price * (1.0 - price)
-    fee = math.ceil((raw_fee - 1e-12) * 10000.0) / 10000.0
+    fee = math.ceil((raw_fee - 1e-12) * 100.0) / 100.0
     total_cost = price + fee
     expected_value = probability - total_cost
     return {
