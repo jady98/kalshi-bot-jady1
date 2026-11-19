@@ -77,6 +77,7 @@ kalshi_market_target = None
 kalshi_market_ticker = ""
 kalshi_market_close = None
 kalshi_market_error = ""
+orderbook_cache = {"ticker": None, "updated_ts": 0.0, "data": None}
 market_resolution_queue = deque(maxlen=20)
 _market_result_last_check = {}
 
@@ -139,6 +140,117 @@ def valid_price(value):
         return math.isfinite(value) and value > 0
     except (TypeError, ValueError):
         return False
+
+
+def get_kalshi_orderbook(ticker):
+    """Lee el libro real de Kalshi y deriva asks desde bids binarios."""
+    if not ticker:
+        return {"available": False, "error": "SIN CONTRATO"}
+
+    now = time.time()
+    with lock:
+        cached = dict(orderbook_cache)
+    if cached.get("ticker") == ticker and cached.get("data") and now - cached.get("updated_ts", 0) < 3:
+        return dict(cached["data"])
+
+    try:
+        response = session.get(
+            f"{KALSHI_REST}/markets/{ticker}/orderbook",
+            timeout=5
+        )
+        response.raise_for_status()
+        payload = response.json()
+        book = payload.get("orderbook_fp") or payload.get("orderbook") or {}
+
+        def levels(name):
+            raw = book.get(name + "_dollars")
+            dollar_values = True
+            if raw is None:
+                raw = book.get(name) or []
+                dollar_values = False
+            parsed = []
+            for row in raw:
+                try:
+                    price = float(row[0])
+                    size = float(row[1])
+                    if not dollar_values:
+                        price /= 100.0
+                    if math.isfinite(price) and math.isfinite(size) and 0 < price < 1 and size > 0:
+                        parsed.append((price, size))
+                except (TypeError, ValueError, IndexError):
+                    continue
+            return parsed
+
+        yes_levels = levels("yes")
+        no_levels = levels("no")
+        best_yes = max(yes_levels, key=lambda x: x[0]) if yes_levels else None
+        best_no = max(no_levels, key=lambda x: x[0]) if no_levels else None
+
+        yes_ask = 1.0 - best_no[0] if best_no else None
+        no_ask = 1.0 - best_yes[0] if best_yes else None
+        data = {
+            "available": bool(best_yes or best_no),
+            "ticker": ticker,
+            "best_yes_bid": round(best_yes[0], 4) if best_yes else None,
+            "best_yes_bid_size": round(best_yes[1], 2) if best_yes else None,
+            "best_no_bid": round(best_no[0], 4) if best_no else None,
+            "best_no_bid_size": round(best_no[1], 2) if best_no else None,
+            "best_yes_ask": round(yes_ask, 4) if yes_ask is not None else None,
+            "best_no_ask": round(no_ask, 4) if no_ask is not None else None,
+            "yes_spread": round(yes_ask - best_yes[0], 4) if yes_ask is not None and best_yes else None,
+            "no_spread": round(no_ask - best_no[0], 4) if no_ask is not None and best_no else None,
+            "updated_ts": now,
+            "error": None
+        }
+        with lock:
+            orderbook_cache.update({"ticker": ticker, "updated_ts": now, "data": data})
+        return data
+    except Exception as exc:
+        data = {
+            "available": False, "ticker": ticker, "best_yes_bid": None,
+            "best_yes_ask": None, "best_no_bid": None, "best_no_ask": None,
+            "yes_spread": None, "no_spread": None, "updated_ts": now,
+            "error": str(exc)[:240]
+        }
+        return data
+
+
+def calculate_entry_economics(direction, bullish_probability, bearish_probability, orderbook):
+    """EV indicativo por contrato, usando ask del libro y tarifa taker publicada."""
+    if not orderbook or not orderbook.get("available"):
+        return {"available": False, "reason": "LIBRO NO DISPONIBLE"}
+    side = "YES" if direction == "ALCISTA" else "NO" if direction == "BAJISTA" else None
+    if not side:
+        return {"available": False, "reason": "SIN DIRECCIÓN"}
+    ask = orderbook.get("best_yes_ask" if side == "YES" else "best_no_ask")
+    probability_pct = bullish_probability if side == "YES" else bearish_probability
+    try:
+        price = float(ask)
+        probability = float(probability_pct) / 100.0
+    except (TypeError, ValueError):
+        return {"available": False, "reason": "PRECIO O PROBABILIDAD NO DISPONIBLE"}
+    if not (0 < price < 1 and 0 <= probability <= 1):
+        return {"available": False, "reason": "DATOS FUERA DE RANGO"}
+
+    # Tarifa taker general publicada: 7% * P * (1-P), redondeada hacia arriba
+    # a $0.0001 por contrato. Es una estimación para una compra inmediata.
+    raw_fee = 0.07 * price * (1.0 - price)
+    fee = math.ceil((raw_fee - 1e-12) * 10000.0) / 10000.0
+    total_cost = price + fee
+    expected_value = probability - total_cost
+    return {
+        "available": True,
+        "side": side,
+        "entry_ask": round(price, 4),
+        "model_probability_pct": round(probability * 100.0, 2),
+        "estimated_taker_fee": round(fee, 4),
+        "estimated_total_cost": round(total_cost, 4),
+        "estimated_net_ev_per_contract": round(expected_value, 4),
+        "estimated_net_ev_pct_of_cost": round((expected_value / total_cost) * 100.0, 2) if total_cost > 0 else None,
+        "break_even_probability_pct": round(total_cost * 100.0, 2),
+        "is_positive_estimated_ev": expected_value > 0,
+        "warning": "ESTIMACIÓN CON PROBABILIDAD DEL MODELO; NO ES RENTABILIDAD VALIDADA"
+    }
 
 
 def normalize_timestamp(value):
@@ -2620,6 +2732,7 @@ def get_data():
         market_target = None
         market_close = None
     countdown = max(0, int(market_close - now)) if contract_active else 0
+    orderbook = get_kalshi_orderbook(market_ticker) if contract_active else {"available": False, "error": "SIN CONTRATO"}
 
     brti_age = (
         round(now - bt, 1)
@@ -2958,6 +3071,11 @@ def get_data():
         "kalshi_market_close": market_close,
         "seconds_to_close": countdown,
         "kalshi_market_error": market_error,
+        "kalshi_orderbook": orderbook,
+        "entry_economics": calculate_entry_economics(
+            indicators.get("direction"), indicators.get("bullish_score"),
+            indicators.get("bearish_score"), orderbook
+        ),
 
         "countdown": countdown,
 
@@ -3018,6 +3136,8 @@ def health():
         "seconds_to_close": data.get("seconds_to_close", 0),
         "entry_stage": data.get("entry_stage"),
         "entry_ticker": data.get("entry_ticker"),
+        "kalshi_orderbook": data.get("kalshi_orderbook"),
+        "entry_economics": data.get("entry_economics"),
         "pattern": data.get("pattern"),
         "pattern_samples": data.get("pattern_samples", 0),
         "pattern_learning_used": data.get("pattern_learning_used", False),
