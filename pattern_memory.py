@@ -181,6 +181,49 @@ def save_brti_candle(candle):
         return False
 
 
+def rebuild_brti_candles_from_ticks():
+    """
+    Reconstruye únicamente minutos ausentes usando muestras BRTI reales
+    persistidas cada cinco segundos. No genera precios para minutos sin ticks.
+    """
+    global _db_status
+    try:
+        with _connect() as conn:
+            row = conn.execute("""
+                WITH minute_samples AS (
+                    SELECT
+                        FLOOR(tick_ts / 60.0)::BIGINT * 60 AS candle_time,
+                        (ARRAY_AGG(price ORDER BY tick_ts))[1] AS open_price,
+                        MAX(price) AS high_price,
+                        MIN(price) AS low_price,
+                        (ARRAY_AGG(price ORDER BY tick_ts DESC))[1] AS close_price,
+                        MIN(tick_ts) AS open_ts,
+                        MAX(tick_ts) AS close_ts,
+                        COUNT(*) AS sample_count
+                    FROM brti_price_ticks
+                    WHERE tick_ts > EXTRACT(EPOCH FROM NOW()) - 21600
+                    GROUP BY FLOOR(tick_ts / 60.0)::BIGINT * 60
+                    HAVING COUNT(*) >= 2
+                ),
+                inserted AS (
+                    INSERT INTO brti_minute_candles
+                        (candle_time, open_price, high_price, low_price,
+                         close_price, volume, open_ts, close_ts)
+                    SELECT candle_time, open_price, high_price, low_price,
+                           close_price, 0, open_ts, close_ts
+                    FROM minute_samples
+                    ON CONFLICT (candle_time) DO NOTHING
+                    RETURNING candle_time
+                )
+                SELECT COUNT(*) FROM inserted
+            """).fetchone()
+        _db_status = "CONECTADA"
+        return int(row[0] or 0)
+    except Exception as exc:
+        _db_status = "ERROR: " + str(exc)[:180]
+        return 0
+
+
 def get_brti_candles(limit=300):
     """Carga las últimas velas BRTI persistidas, en orden cronológico."""
     global _db_status
