@@ -74,12 +74,16 @@ def init_db():
                     change_pct DOUBLE PRECISION,
                     result TEXT,
                     resolved_ts DOUBLE PRECISION,
+                    resolution_delay_seconds DOUBLE PRECISION,
                     UNIQUE(snapshot_id, horizon_seconds)
                 )
             """)
 
             conn.execute("""
-                CREATE INDEX IF NOT EXISTS
+                ALTER TABLE btc_signal_outcomes
+                ADD COLUMN IF NOT EXISTS resolution_delay_seconds DOUBLE PRECISION;
+
+            CREATE INDEX IF NOT EXISTS
                 idx_btc_outcomes_pending
                 ON btc_signal_outcomes(target_ts)
                 WHERE future_price IS NULL
@@ -370,21 +374,29 @@ def record_price(price, timestamp=None):
                 SET future_price = %s,
                     change_pct = ((%s / s.price) - 1) * 100,
                     result = CASE
+                        WHEN %s - o.target_ts > 60 THEN
+                            CASE
+                                WHEN ((%s / s.price) - 1) * 100 > 0.01
+                                    THEN 'TARDIO_ALCISTA'
+                                WHEN ((%s / s.price) - 1) * 100 < -0.01
+                                    THEN 'TARDIO_BAJISTA'
+                                ELSE 'TARDIO_SIN_CAMBIO'
+                            END
                         WHEN ((%s / s.price) - 1) * 100 > 0.01
                             THEN 'ALCISTA'
                         WHEN ((%s / s.price) - 1) * 100 < -0.01
                             THEN 'BAJISTA'
                         ELSE 'SIN CAMBIO'
                     END,
-                    resolved_ts = %s
+                    resolved_ts = %s,
+                    resolution_delay_seconds = GREATEST(0, %s - o.target_ts)
                 FROM btc_signal_snapshots AS s
                 WHERE o.snapshot_id = s.id
                   AND o.future_price IS NULL
                   AND o.horizon_seconds > 0
                   AND o.target_ts <= %s
                   AND %s > s.signal_ts
-                  AND %s <= o.target_ts + 60 
-          """, (price, price, price, price, ts, ts, ts, ts))
+          """, (price, price, ts, price, price, price, price, price, ts, ts, ts, ts))
 
         _db_status = "CONECTADA"
         return True
