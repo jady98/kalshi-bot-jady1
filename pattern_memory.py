@@ -1465,41 +1465,50 @@ def save_model_comparison_snapshot(
 
 
 def get_model_comparison_accuracy():
-    """Compara la última predicción previa al cierre contra el resultado oficial."""
+    """Compara por separado la última señal principal y la última probabilidad GBM válida por contrato.
+
+    Una muestra GBM nula más reciente no debe borrar una probabilidad válida
+    guardada anteriormente para el mismo contrato.
+    """
     empty = {
-        "measurement": "ULTIMA PREDICCION GUARDADA ANTES DEL CIERRE POR CONTRATO",
+        "measurement": "ULTIMA PREDICCION VALIDA ANTES DEL CIERRE POR MODELO Y CONTRATO",
         "main_predictor": {"contracts_evaluated": 0, "correct": 0, "incorrect": 0, "accuracy_pct": None},
-        "gbm": {"contracts_evaluated": 0, "correct": 0, "incorrect": 0, "accuracy_pct": None},
+        "gbm": {"contracts_evaluated": 0, "correct": 0, "incorrect": 0, "accuracy_pct": None, "brier_score": None},
         "contracts_with_comparison": 0,
         "results": [],
         "error": None
     }
     try:
         with _connect() as conn:
-            rows = conn.execute("""
-                WITH latest AS (
-                    SELECT DISTINCT ON (s.market_ticker)
-                        s.market_ticker, s.main_direction,
-                        s.gbm_yes_probability, o.official_result,
-                        s.signal_ts
-                    FROM btc_model_comparison_snapshots AS s
-                    JOIN btc_official_market_results AS o
-                      ON o.market_ticker = s.market_ticker
-                     AND o.source = 'kalshi_api'
-                    WHERE s.signal_ts <= s.market_close_ts
-                    ORDER BY s.market_ticker, s.signal_ts DESC, s.id DESC
-                )
-                SELECT market_ticker, main_direction, gbm_yes_probability,
-                       official_result, signal_ts
-                FROM latest
-                ORDER BY signal_ts DESC
+            main_rows = conn.execute("""
+                SELECT DISTINCT ON (s.market_ticker)
+                    s.market_ticker, s.main_direction, o.official_result,
+                    s.signal_ts
+                FROM btc_model_comparison_snapshots AS s
+                JOIN btc_official_market_results AS o
+                  ON o.market_ticker = s.market_ticker
+                 AND o.source = 'kalshi_api'
+                WHERE s.signal_ts <= s.market_close_ts
+                  AND s.main_direction IN ('ALCISTA', 'BAJISTA')
+                ORDER BY s.market_ticker, s.signal_ts DESC, s.id DESC
             """).fetchall()
-        main_rows = [r for r in rows if r[1] in ("ALCISTA", "BAJISTA")]
-        gbm_rows = [r for r in rows if r[2] is not None]
+            gbm_rows = conn.execute("""
+                SELECT DISTINCT ON (s.market_ticker)
+                    s.market_ticker, s.gbm_yes_probability,
+                    o.official_result, s.signal_ts
+                FROM btc_model_comparison_snapshots AS s
+                JOIN btc_official_market_results AS o
+                  ON o.market_ticker = s.market_ticker
+                 AND o.source = 'kalshi_api'
+                WHERE s.signal_ts <= s.market_close_ts
+                  AND s.gbm_yes_probability IS NOT NULL
+                ORDER BY s.market_ticker, s.signal_ts DESC, s.id DESC
+            """).fetchall()
+
         def summary(items, direction_fn):
             correct = sum(
-                1 for r in items
-                if direction_fn(r) == ("ALCISTA" if r[3] == "SI" else "BAJISTA")
+                1 for row in items
+                if direction_fn(row) == ("ALCISTA" if row[2] == "SI" else "BAJISTA")
             )
             total = len(items)
             return {
@@ -1508,23 +1517,54 @@ def get_model_comparison_accuracy():
                 "incorrect": total - correct,
                 "accuracy_pct": round(correct * 100 / total, 1) if total else None
             }
-        main = summary(main_rows, lambda r: r[1])
-        gbm = summary(gbm_rows, lambda r: "ALCISTA" if float(r[2]) >= 50 else "BAJISTA")
+
+        main = summary(main_rows, lambda row: row[1])
+        gbm = summary(
+            gbm_rows,
+            lambda row: "ALCISTA" if float(row[1]) >= 50 else "BAJISTA"
+        )
+        if gbm_rows:
+            brier = sum(
+                (float(row[1]) / 100.0 - (1.0 if row[2] == "SI" else 0.0)) ** 2
+                for row in gbm_rows
+            ) / len(gbm_rows)
+            gbm["brier_score"] = round(brier, 4)
+        else:
+            gbm["brier_score"] = None
+
+        main_by_ticker = {row[0]: row for row in main_rows}
+        gbm_by_ticker = {row[0]: row for row in gbm_rows}
+        tickers = sorted(
+            set(main_by_ticker) | set(gbm_by_ticker),
+            key=lambda ticker: max(
+                main_by_ticker.get(ticker, (None, None, None, 0))[3] or 0,
+                gbm_by_ticker.get(ticker, (None, None, 0, 0))[3] or 0
+            ),
+            reverse=True
+        )
+        results = []
+        for ticker in tickers[:20]:
+            main_row = main_by_ticker.get(ticker)
+            gbm_row = gbm_by_ticker.get(ticker)
+            official = (main_row[2] if main_row else gbm_row[2])
+            results.append({
+                "market_ticker": ticker,
+                "main_direction": main_row[1] if main_row else None,
+                "main_signal_ts": float(main_row[3]) if main_row else None,
+                "gbm_yes_probability": round(float(gbm_row[1]), 2) if gbm_row else None,
+                "gbm_direction": (
+                    "ALCISTA" if float(gbm_row[1]) >= 50 else "BAJISTA"
+                ) if gbm_row else None,
+                "gbm_signal_ts": float(gbm_row[3]) if gbm_row else None,
+                "official_result": official
+            })
+
         return {
             "measurement": empty["measurement"],
             "main_predictor": main,
             "gbm": gbm,
-            "contracts_with_comparison": len(rows),
-            "results": [{
-                "market_ticker": r[0],
-                "main_direction": r[1],
-                "gbm_yes_probability": round(float(r[2]), 2) if r[2] is not None else None,
-                "gbm_direction": (
-                    "ALCISTA" if float(r[2]) >= 50 else "BAJISTA"
-                ) if r[2] is not None else None,
-                "official_result": r[3],
-                "signal_ts": float(r[4])
-            } for r in rows[:20]],
+            "contracts_with_comparison": len(tickers),
+            "results": results,
             "error": None
         }
     except Exception as exc:
