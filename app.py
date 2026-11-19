@@ -4298,9 +4298,18 @@ function updateRadar(d){
     updateCurrentPriceAxisTag();
 
     const direction=d.direction || "RECOPILANDO";
+    // La dirección estabilizada puede tardar unos segundos en cambiar.
+    // Si la puntuación actual ya apunta al lado contrario, mostrar transición
+    // sin alterar la señal interna ni las condiciones de entrada.
+    const rawBullish=Number(d.raw_bullish_score ?? d.bullish_score ?? 50);
+    const directionTransition=(
+        (direction==="ALCISTA" && rawBullish < 50) ||
+        (direction==="BAJISTA" && rawBullish > 50)
+    );
     const predictedElement=$("predictedPrice");
     predictedElement.textContent=money(d.predicted_price);
     predictedElement.className="price predicted "+(
+        directionTransition ? "uncertain" :
         direction==="ALCISTA" ? "bullish" :
         direction==="BAJISTA" ? "bearish" :
         "uncertain"
@@ -4338,10 +4347,13 @@ function updateRadar(d){
         : "BRTI actualizado hace " + d.brti_age + " s";
 
 
-    $("direction").textContent=direction;
+    $("direction").textContent=directionTransition
+        ? "TRANSICIÓN · OBSERVAR"
+        : direction;
 
     $("direction").className="signal "+
         (
+            directionTransition ? "yellow" :
             direction==="ALCISTA" ? "green":
             direction==="BAJISTA" ? "red":
             "yellow"
