@@ -637,6 +637,93 @@ def stabilize_direction(normalized, seconds_to_close):
 
 
 
+def calculate_gbm_baseline(spot, strike, seconds_remaining, ticks):
+    """
+    Modelo GBM sin deriva para P(BRTI al cierre >= strike).
+    Usa cierres de minuto reconstruidos de ticks BRTI; no sustituye la señal
+    principal y no calcula probabilidad si el historial es insuficiente.
+    """
+    result = {
+        "gbm_status": "SIN OBJETIVO",
+        "gbm_yes_probability": None,
+        "gbm_no_probability": None,
+        "gbm_volatility_annualized_pct": None,
+        "gbm_volatility_samples": 0
+    }
+    if not valid_price(spot) or not valid_price(strike):
+        return result
+
+    try:
+        horizon = max(1.0, min(900.0, float(seconds_remaining or 0)))
+        now = time.time()
+        current_minute = int(now // 60)
+        minute_closes = {}
+
+        for item in ticks or []:
+            try:
+                ts, value = float(item[0]), float(item[1])
+                if (
+                    not math.isfinite(ts)
+                    or not valid_price(value)
+                    or ts > now + 2
+                    or ts < now - 181 * 60
+                ):
+                    continue
+                minute = int(ts // 60)
+                previous = minute_closes.get(minute)
+                if previous is None or ts > previous[0]:
+                    minute_closes[minute] = (ts, value)
+            except (TypeError, ValueError, IndexError, OverflowError):
+                continue
+
+        ordered = sorted(minute_closes.items())
+        log_returns = []
+        for index in range(1, len(ordered)):
+            previous_minute, previous_row = ordered[index - 1]
+            minute, row = ordered[index]
+            if minute != previous_minute + 1:
+                continue
+            previous_price = previous_row[1]
+            current_price = row[1]
+            if previous_price > 0 and current_price > 0:
+                log_returns.append(math.log(current_price / previous_price))
+
+        sample_count = len(log_returns)
+        result["gbm_volatility_samples"] = sample_count
+        if sample_count < 20:
+            result["gbm_status"] = "HISTORIAL_INSUFICIENTE"
+            return result
+
+        mean_return = sum(log_returns) / sample_count
+        variance = sum((value - mean_return) ** 2 for value in log_returns) / (sample_count - 1)
+        sigma_per_minute = math.sqrt(max(0.0, variance))
+        sigma_per_second = sigma_per_minute / math.sqrt(60.0)
+        sigma_horizon = sigma_per_second * math.sqrt(horizon)
+
+        annualized = sigma_per_second * math.sqrt(365 * 24 * 60 * 60) * 100
+        result["gbm_volatility_annualized_pct"] = round(annualized, 2)
+
+        if sigma_horizon <= 1e-10:
+            probability_yes = 0.99 if float(spot) >= float(strike) else 0.01
+        else:
+            z_score = (
+                math.log(float(spot) / float(strike))
+                - 0.5 * sigma_horizon ** 2
+            ) / sigma_horizon
+            probability_yes = 0.5 * (1.0 + math.erf(z_score / math.sqrt(2.0)))
+
+        probability_yes = max(0.01, min(0.99, probability_yes))
+        result.update({
+            "gbm_status": "OK",
+            "gbm_yes_probability": round(probability_yes * 100, 1),
+            "gbm_no_probability": round((1.0 - probability_yes) * 100, 1)
+        })
+        return result
+    except (TypeError, ValueError, OverflowError, ZeroDivisionError):
+        result["gbm_status"] = "ERROR_CALCULO"
+        return result
+
+
 def calculate_prediction(
     price,
     ticks,
@@ -2636,6 +2723,13 @@ def get_data():
         analysis_candles
     )
     indicators["forecast_horizon_seconds"] = prediction_horizon
+    # Modelo GBM independiente: referencia probabilística, sin alterar la señal actual.
+    indicators.update(calculate_gbm_baseline(
+        analysis_price,
+        market_target if contract_active else None,
+        prediction_horizon,
+        ticks
+    ))
 
     indicators["signal_source"] = signal_source
     indicators["candle_source"] = candle_source
@@ -2920,6 +3014,11 @@ def health():
         "pattern_learning_used": data.get("pattern_learning_used", False),
         "short_change_1m_pct": data.get("short_change_1m_pct"),
         "short_change_3m_pct": data.get("short_change_3m_pct"),
+        "gbm_status": data.get("gbm_status"),
+        "gbm_yes_probability": data.get("gbm_yes_probability"),
+        "gbm_no_probability": data.get("gbm_no_probability"),
+        "gbm_volatility_annualized_pct": data.get("gbm_volatility_annualized_pct"),
+        "gbm_volatility_samples": data.get("gbm_volatility_samples"),
         "prediction_data_quality": data.get("prediction_data_quality"),
         "contiguous_candles_used": data.get("contiguous_candles_used"),
         "candle_gap_detected": data.get("candle_gap_detected"),
