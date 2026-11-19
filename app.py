@@ -2833,6 +2833,17 @@ def get_data():
                     }
                 })
 
+                # Guarda ambos modelos en paralelo para evaluarlos contra el cierre oficial.
+                pattern_memory.save_model_comparison_snapshot(
+                    market_ticker=market_ticker,
+                    signal_ts=now,
+                    market_close_ts=market_close,
+                    price=bp,
+                    market_target=market_target,
+                    main_direction=indicators.get("direction"),
+                    gbm_yes_probability=indicators.get("gbm_yes_probability")
+                )
+
         
     average, average_count = calculate_brti_average(
         ticks
@@ -3038,7 +3049,9 @@ def health():
         "prediction_accuracy": pattern_memory.get_prediction_accuracy(),
         "prediction_accuracy_by_source": pattern_memory.get_prediction_accuracy_by_source(),
         "official_market_accuracy":
-            pattern_memory.get_official_market_accuracy()
+            pattern_memory.get_official_market_accuracy(),
+        "model_comparison_accuracy":
+            pattern_memory.get_model_comparison_accuracy()
 
     })
 
@@ -3086,7 +3099,10 @@ def stats():
             ),
 
          "official_market_accuracy":
-            pattern_memory.get_official_market_accuracy()
+            pattern_memory.get_official_market_accuracy(),
+
+         "model_comparison_accuracy":
+            pattern_memory.get_model_comparison_accuracy()
 
     })
 
