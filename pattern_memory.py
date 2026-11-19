@@ -177,6 +177,64 @@ def get_brti_candles(limit=300):
         return []
 
 
+def get_brti_candle_diagnostics():
+    """Resumen de solo lectura del historial BRTI persistido."""
+    empty = {
+        "count": 0,
+        "first_candle_ts": None,
+        "last_candle_ts": None,
+        "span_hours": 0,
+        "gaps_over_90_seconds": 0,
+        "missing_minutes_estimate": 0,
+        "error": None
+    }
+    try:
+        with _connect() as conn:
+            row = conn.execute("""
+                WITH ordered AS (
+                    SELECT candle_time,
+                           LAG(candle_time) OVER (ORDER BY candle_time) AS prev_time
+                    FROM brti_minute_candles
+                )
+                SELECT
+                    COUNT(*),
+                    MIN(candle_time),
+                    MAX(candle_time),
+                    COUNT(*) FILTER (
+                        WHERE prev_time IS NOT NULL
+                          AND candle_time - prev_time > 90
+                    ),
+                    COALESCE(SUM(
+                        GREATEST(
+                            FLOOR((candle_time - prev_time) / 60.0) - 1,
+                            0
+                        )
+                    ) FILTER (WHERE prev_time IS NOT NULL), 0)
+                FROM ordered
+            """).fetchone()
+
+        count = int(row[0] or 0)
+        first_ts = int(row[1]) if row[1] is not None else None
+        last_ts = int(row[2]) if row[2] is not None else None
+        span_hours = (
+            round((last_ts - first_ts) / 3600.0, 2)
+            if first_ts is not None and last_ts is not None else 0
+        )
+        return {
+            "count": count,
+            "first_candle_ts": first_ts,
+            "last_candle_ts": last_ts,
+            "span_hours": span_hours,
+            "gaps_over_90_seconds": int(row[3] or 0),
+            "missing_minutes_estimate": int(row[4] or 0),
+            "error": None
+        }
+    except Exception as exc:
+        result = dict(empty)
+        result["error"] = str(exc)[:180]
+        return result
+
+
 def save_snapshot(data):
     """
     Guarda una predicción BRTI por minuto, independientemente de Kalshi.
