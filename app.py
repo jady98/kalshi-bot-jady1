@@ -2843,6 +2843,10 @@ def get_data():
                         last_direction,
                         source="kalshi_api"
                     )
+                    if saved_official:
+                        pattern_memory.resolve_paper_trade(
+                            queued_ticker, "SI" if official == "yes" else "NO"
+                        )
                 # Si no hubo señal, no inventar evaluación; si falla la BD,
                 # mantener el contrato pendiente para reintentar el registro.
                 if last_direction not in ("ALCISTA", "BAJISTA") or saved_official:
@@ -3061,6 +3065,29 @@ def get_data():
         alert_data = guidance_alert
     indicators.update(guidance)
 
+    entry_economics = calculate_entry_economics(
+        indicators.get("direction"), indicators.get("bullish_score"),
+        indicators.get("bearish_score"), orderbook
+    )
+    # Registro idempotente: solo contratos reales con ENTRADA confirmada
+    # y precio/fee disponibles. La clave única impide duplicar el mismo ticker.
+    if (
+        contract_active
+        and guidance.get("entry_stage") == "ENTRADA"
+        and entry_economics.get("available")
+    ):
+        pattern_memory.record_paper_trade(
+            market_ticker=market_ticker,
+            side=entry_economics.get("side"),
+            direction=guidance.get("entry_direction"),
+            entry_ts=now,
+            entry_price=entry_economics.get("entry_ask"),
+            estimated_fee=entry_economics.get("estimated_taker_fee"),
+            total_cost=entry_economics.get("estimated_total_cost"),
+            model_probability_pct=entry_economics.get("model_probability_pct"),
+            estimated_ev=entry_economics.get("estimated_net_ev_per_contract")
+        )
+
     return {
 
         "ok": True,
@@ -3116,10 +3143,7 @@ def get_data():
         "seconds_to_close": countdown,
         "kalshi_market_error": market_error,
         "kalshi_orderbook": orderbook,
-        "entry_economics": calculate_entry_economics(
-            indicators.get("direction"), indicators.get("bullish_score"),
-            indicators.get("bearish_score"), orderbook
-        ),
+        "entry_economics": entry_economics,
 
         "countdown": countdown,
 
@@ -3220,6 +3244,7 @@ def health():
         "database_status": pattern_memory.database_status(),
         "brti_candle_history": pattern_memory.get_brti_candle_diagnostics(),
         "database_counts": pattern_memory.get_database_counts(),
+        "paper_trade_audit": pattern_memory.get_paper_trade_stats(),
         "pattern_learning_diagnostics":
             pattern_memory.get_pattern_learning_diagnostics(),
         "prediction_accuracy": pattern_memory.get_prediction_accuracy(),
@@ -3227,7 +3252,10 @@ def health():
         "official_market_accuracy":
             pattern_memory.get_official_market_accuracy(),
         "model_comparison_accuracy":
-            pattern_memory.get_model_comparison_accuracy()
+            pattern_memory.get_model_comparison_accuracy(),
+
+         "paper_trade_audit":
+            pattern_memory.get_paper_trade_stats()
 
     })
 
