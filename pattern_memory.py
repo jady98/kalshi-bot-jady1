@@ -147,7 +147,7 @@ def init_db():
                     resolved_ts DOUBLE PRECISION,
                     pnl DOUBLE PRECISION,
                     status TEXT NOT NULL DEFAULT 'PENDIENTE'
-                        CHECK (status IN ('PENDIENTE', 'GANADA', 'PERDIDA'))
+                        CHECK (status IN ('PENDIENTE', 'GANADA', 'PERDIDA', 'ANULADA'))
                 )
             """)
             conn.execute("""
@@ -1715,6 +1715,30 @@ def resolve_paper_trade(market_ticker, official_result):
         return False
 
 
+def void_paper_trade(market_ticker):
+    """Marca como anulada una entrada si Kalshi declara void/cancelación."""
+    global _db_status
+    ticker = str(market_ticker or "").strip()
+    if not ticker:
+        return False
+    try:
+        with _connect() as conn:
+            row = conn.execute("""
+                UPDATE btc_paper_trades
+                SET status = 'ANULADA',
+                    official_result = NULL,
+                    resolved_ts = %s,
+                    pnl = 0
+                WHERE market_ticker = %s AND status = 'PENDIENTE'
+                RETURNING market_ticker
+            """, (time.time(), ticker)).fetchone()
+        _db_status = "CONECTADA"
+        return row is not None
+    except Exception as exc:
+        _db_status = "ERROR: " + str(exc)[:180]
+        return False
+
+
 def get_paper_trade_stats():
     """Auditoría de rentabilidad simulada neta de comisiones."""
     empty = {
@@ -1732,6 +1756,7 @@ def get_paper_trade_stats():
                     COUNT(*),
                     COUNT(*) FILTER (WHERE status IN ('GANADA', 'PERDIDA')),
                     COUNT(*) FILTER (WHERE status = 'PENDIENTE'),
+                    COUNT(*) FILTER (WHERE status = 'ANULADA'),
                     COUNT(*) FILTER (WHERE status = 'GANADA'),
                     COUNT(*) FILTER (WHERE status = 'PERDIDA'),
                     COALESCE(SUM(pnl) FILTER (WHERE status IN ('GANADA', 'PERDIDA')), 0),
@@ -1750,19 +1775,19 @@ def get_paper_trade_stats():
                 FROM btc_paper_trades
                 GROUP BY side ORDER BY side
             """).fetchall()
-        total, resolved, pending, wins, losses = [int(x or 0) for x in row[:5]]
-        pnl = float(row[5] or 0)
-        invested = float(row[6]) if row[6] is not None else None
+        total, resolved, pending, voided, wins, losses = [int(x or 0) for x in row[:6]]
+        pnl = float(row[6] or 0)
+        invested = float(row[7]) if row[7] is not None else None
         return {
             "measurement": empty["measurement"],
             "trades_total": total, "resolved": resolved, "pending": pending,
-            "wins": wins, "losses": losses,
+            "voided": voided, "wins": wins, "losses": losses,
             "win_rate_pct": round(wins * 100 / resolved, 1) if resolved else None,
             "realized_pnl": round(pnl, 4),
             "roi_pct": round(pnl * 100 / invested, 2) if invested else None,
-            "average_entry_price": round(float(row[7]), 4) if row[7] is not None else None,
-            "fees_total": round(float(row[8] or 0), 4),
-            "average_estimated_ev": round(float(row[9]), 4) if row[9] is not None else None,
+            "average_entry_price": round(float(row[8]), 4) if row[8] is not None else None,
+            "fees_total": round(float(row[9] or 0), 4),
+            "average_estimated_ev": round(float(row[10]), 4) if row[10] is not None else None,
             "by_side": [
                 {"side": str(r[0]), "trades": int(r[1]), "resolved": int(r[2]),
                  "wins": int(r[3]), "losses": int(r[4]), "realized_pnl": round(float(r[5] or 0), 4)}
