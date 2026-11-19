@@ -2899,6 +2899,12 @@ def stats():
          "prediction_accuracy_15m_by_source":
             pattern_memory.get_15m_prediction_accuracy_by_source(),
 
+         "prediction_accuracy_15m_by_contract":
+            pattern_memory.get_15m_prediction_accuracy_by_contract(),
+
+         "prediction_15m_error_diagnostics":
+            pattern_memory.get_15m_error_diagnostics(),
+
          "probability_calibration_bands":
             get_cached_probability_calibration(),
 
