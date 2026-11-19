@@ -132,6 +132,29 @@ def init_db():
                 )
             """)
 
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS btc_paper_trades (
+                    market_ticker TEXT PRIMARY KEY,
+                    side TEXT NOT NULL CHECK (side IN ('YES', 'NO')),
+                    direction TEXT NOT NULL CHECK (direction IN ('ALCISTA', 'BAJISTA')),
+                    entry_ts DOUBLE PRECISION NOT NULL,
+                    entry_price DOUBLE PRECISION NOT NULL CHECK (entry_price > 0 AND entry_price < 1),
+                    estimated_fee DOUBLE PRECISION NOT NULL DEFAULT 0 CHECK (estimated_fee >= 0),
+                    total_cost DOUBLE PRECISION NOT NULL CHECK (total_cost > 0),
+                    model_probability DOUBLE PRECISION NOT NULL CHECK (model_probability >= 0 AND model_probability <= 1),
+                    estimated_ev DOUBLE PRECISION,
+                    official_result TEXT CHECK (official_result IN ('SI', 'NO')),
+                    resolved_ts DOUBLE PRECISION,
+                    pnl DOUBLE PRECISION,
+                    status TEXT NOT NULL DEFAULT 'PENDIENTE'
+                        CHECK (status IN ('PENDIENTE', 'GANADA', 'PERDIDA'))
+                )
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_btc_paper_trades_status
+                ON btc_paper_trades(status, entry_ts DESC)
+            """)
+
         _db_status = "CONECTADA"
         return True
 
@@ -1613,6 +1636,142 @@ def record_official_market_result(
     except Exception as exc:
         _db_status = "ERROR: " + str(exc)[:180]
         return False
+
+
+def record_paper_trade(
+    market_ticker, side, direction, entry_ts, entry_price,
+    estimated_fee, total_cost, model_probability_pct, estimated_ev
+):
+    """Guarda una única entrada simulada por contrato; nunca envía órdenes."""
+    global _db_status
+    try:
+        ticker = str(market_ticker or "").strip()
+        side = str(side or "").upper()
+        direction = str(direction or "").upper()
+        values = [
+            float(entry_ts), float(entry_price), float(estimated_fee),
+            float(total_cost), float(model_probability_pct) / 100.0,
+            float(estimated_ev)
+        ]
+        entry_ts, price, fee, cost, probability, ev = values
+        if (
+            not ticker or side not in ("YES", "NO")
+            or direction not in ("ALCISTA", "BAJISTA")
+            or not all(math.isfinite(v) for v in values)
+            or entry_ts <= 0 or not (0 < price < 1)
+            or fee < 0 or cost <= 0 or not (0 <= probability <= 1)
+            or abs((price + fee) - cost) > 0.011
+        ):
+            return False
+        with _connect() as conn:
+            row = conn.execute("""
+                INSERT INTO btc_paper_trades (
+                    market_ticker, side, direction, entry_ts, entry_price,
+                    estimated_fee, total_cost, model_probability, estimated_ev
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (market_ticker) DO NOTHING
+                RETURNING market_ticker
+            """, (
+                ticker, side, direction, entry_ts, price, fee, cost,
+                probability, ev
+            )).fetchone()
+        _db_status = "CONECTADA"
+        return row is not None
+    except Exception as exc:
+        _db_status = "ERROR: " + str(exc)[:180]
+        return False
+
+
+def resolve_paper_trade(market_ticker, official_result):
+    """Liquida una entrada simulada usando únicamente el resultado oficial SI/NO."""
+    global _db_status
+    ticker = str(market_ticker or "").strip()
+    result = str(official_result or "").strip().upper()
+    if not ticker or result not in ("SI", "NO"):
+        return False
+    try:
+        with _connect() as conn:
+            row = conn.execute("""
+                UPDATE btc_paper_trades
+                SET official_result = %s,
+                    resolved_ts = %s,
+                    pnl = CASE
+                        WHEN side = %s THEN 1.0 - total_cost
+                        ELSE -total_cost
+                    END,
+                    status = CASE
+                        WHEN side = %s THEN 'GANADA'
+                        ELSE 'PERDIDA'
+                    END
+                WHERE market_ticker = %s
+                  AND status = 'PENDIENTE'
+                RETURNING market_ticker
+            """, (result, time.time(), result, result, ticker)).fetchone()
+        _db_status = "CONECTADA"
+        return row is not None
+    except Exception as exc:
+        _db_status = "ERROR: " + str(exc)[:180]
+        return False
+
+
+def get_paper_trade_stats():
+    """Auditoría de rentabilidad simulada neta de comisiones."""
+    empty = {
+        "measurement": "ENTRADAS CONFIRMADAS SIMULADAS · PRECIO ASK OBSERVADO · RESULTADO OFICIAL KALSHI",
+        "trades_total": 0, "resolved": 0, "pending": 0,
+        "wins": 0, "losses": 0, "win_rate_pct": None,
+        "realized_pnl": 0.0, "roi_pct": None,
+        "average_entry_price": None, "fees_total": 0.0,
+        "average_estimated_ev": None, "by_side": [], "error": None
+    }
+    try:
+        with _connect() as conn:
+            row = conn.execute("""
+                SELECT
+                    COUNT(*),
+                    COUNT(*) FILTER (WHERE status IN ('GANADA', 'PERDIDA')),
+                    COUNT(*) FILTER (WHERE status = 'PENDIENTE'),
+                    COUNT(*) FILTER (WHERE status = 'GANADA'),
+                    COUNT(*) FILTER (WHERE status = 'PERDIDA'),
+                    COALESCE(SUM(pnl) FILTER (WHERE status IN ('GANADA', 'PERDIDA')), 0),
+                    SUM(total_cost) FILTER (WHERE status IN ('GANADA', 'PERDIDA')),
+                    AVG(entry_price),
+                    COALESCE(SUM(estimated_fee), 0),
+                    AVG(estimated_ev)
+                FROM btc_paper_trades
+            """).fetchone()
+            side_rows = conn.execute("""
+                SELECT side, COUNT(*),
+                       COUNT(*) FILTER (WHERE status IN ('GANADA', 'PERDIDA')),
+                       COUNT(*) FILTER (WHERE status = 'GANADA'),
+                       COUNT(*) FILTER (WHERE status = 'PERDIDA'),
+                       COALESCE(SUM(pnl) FILTER (WHERE status IN ('GANADA', 'PERDIDA')), 0)
+                FROM btc_paper_trades
+                GROUP BY side ORDER BY side
+            """).fetchall()
+        total, resolved, pending, wins, losses = [int(x or 0) for x in row[:5]]
+        pnl = float(row[5] or 0)
+        invested = float(row[6]) if row[6] is not None else None
+        return {
+            "measurement": empty["measurement"],
+            "trades_total": total, "resolved": resolved, "pending": pending,
+            "wins": wins, "losses": losses,
+            "win_rate_pct": round(wins * 100 / resolved, 1) if resolved else None,
+            "realized_pnl": round(pnl, 4),
+            "roi_pct": round(pnl * 100 / invested, 2) if invested else None,
+            "average_entry_price": round(float(row[7]), 4) if row[7] is not None else None,
+            "fees_total": round(float(row[8] or 0), 4),
+            "average_estimated_ev": round(float(row[9]), 4) if row[9] is not None else None,
+            "by_side": [
+                {"side": str(r[0]), "trades": int(r[1]), "resolved": int(r[2]),
+                 "wins": int(r[3]), "losses": int(r[4]), "realized_pnl": round(float(r[5] or 0), 4)}
+                for r in side_rows
+            ],
+            "error": None
+        }
+    except Exception as exc:
+        return {**empty, "error": str(exc)[:180]}
 
 
 def get_official_market_accuracy():
