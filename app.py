@@ -1257,7 +1257,7 @@ def calculate_prediction(
     pattern_learning_weight = 0.0
     pattern_learning_used = False
     if (
-        pattern_samples >= 20
+        pattern_samples >= 12
         and historical_bullish_pct is not None
         and historical_bearish_pct is not None
     ):
@@ -1268,22 +1268,21 @@ def calculate_prediction(
                 - float(historical_bearish_pct)
             ) / 100.0)
         )
-        # Evita aprender ruido: exige una diferencia mínima de 8 puntos.
-        if abs(historical_bias) >= 0.08:
-            # El peso crece gradualmente y nunca domina la lectura actual.
-            # Se exige una base mayor porque cada muestra debe ser un contrato
-            # distinto ya resuelto oficialmente por su promedio BRTI de cierre.
+        # Exige una ventaja histórica mínima de 10 puntos porcentuales.
+        # Cada muestra representa un contrato distinto ya resuelto por BRTI.
+        if abs(historical_bias) >= 0.10:
+            # Aprendizaje prudente: empieza con 4% a partir de 12 contratos
+            # y sube gradualmente hasta un máximo de 8%; nunca domina la señal.
             sample_reliability = min(
                 1.0,
-                max(0.0, (pattern_samples - 19) / 41.0)
+                max(0.0, (pattern_samples - 12) / 28.0)
             )
-            pattern_learning_weight = 0.18 * sample_reliability
-            if pattern_learning_weight > 0:
-                normalized = (
-                    normalized * (1.0 - pattern_learning_weight)
-                    + historical_bias * pattern_learning_weight
-                )
-                pattern_learning_used = True
+            pattern_learning_weight = 0.04 + (0.04 * sample_reliability)
+            normalized = (
+                normalized * (1.0 - pattern_learning_weight)
+                + historical_bias * pattern_learning_weight
+            )
+            pattern_learning_used = True
 
     # El aprendizaje histórico puede modular la confianza, pero no invertir
     # el lado del contrato cuando la proyección ya está claramente sobre/bajo
