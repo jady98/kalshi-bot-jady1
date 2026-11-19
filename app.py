@@ -2409,6 +2409,9 @@ def build_forward_guidance(
     if not valid_price(price):
         stage = "BRTI SIN DATOS"
         note = "No se emite señal: el índice BRTI no está disponible."
+    elif not contract_active:
+        stage = "SIN CONTRATO KALSHI ACTIVO"
+        note = "El radar mantiene el análisis direccional, pero no hay un contrato KXBTC15M vigente. No se confirma una entrada."
     elif seconds_left < 120:
         stage = "CIERRE PRÓXIMO · SIN ENTRADA"
         note = "Quedan menos de 2 minutos. Evita una entrada tardía en este contrato."
@@ -2462,7 +2465,7 @@ def build_forward_guidance(
         "guidance_3m_aligned": align_3m,
         "guidance_ema_aligned": ema_aligned,
         "guidance_note": note,
-        "short_direction": direction if stage in ("PREALERTA", "ENTRADA") else "INDECISO",
+        "short_direction": direction if direction in ("ALCISTA", "BAJISTA") else "INDECISO",
         "entry_stage": stage,
         "entry_direction": direction if stage in ("PREALERTA", "ENTRADA") else None,
         "entry_ticker": ticker,
@@ -2892,8 +2895,8 @@ def get_data():
     )
     guidance = build_forward_guidance(
         ticks, bp if brti_live else None, indicators, candles,
-        contract_active=True,
-        ticker=guidance_ticker,
+        contract_active=contract_active,
+        ticker=market_ticker if contract_active else None,
         close_ts=guidance_close
     )
     guidance_alert = update_guidance_alert(
