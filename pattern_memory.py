@@ -406,6 +406,90 @@ def record_price(price, timestamp=None):
         return False
 
 
+
+def get_resolution_diagnostics():
+    """Audita la migración y los resultados tardíos sin alterar métricas predictivas."""
+    empty = {
+        "schema_ready": False, "late_total": 0, "late_15m_total": 0,
+        "timely_total": 0, "pending_over_60s": 0,
+        "average_delay_seconds": None, "max_delay_seconds": None,
+        "late_labels": [], "recent_late": [], "error": None
+    }
+    try:
+        with _connect() as conn:
+            schema = conn.execute("""
+                SELECT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_schema = current_schema()
+                      AND table_name = 'btc_signal_outcomes'
+                      AND column_name = 'resolution_delay_seconds'
+                )
+            """).fetchone()[0]
+            if not schema:
+                return {**empty, "error": "Falta la columna resolution_delay_seconds"}
+
+            totals = conn.execute("""
+                SELECT
+                    COUNT(*) FILTER (WHERE result IN (
+                        'TARDIO_ALCISTA', 'TARDIO_BAJISTA', 'TARDIO_SIN_CAMBIO'
+                    )),
+                    COUNT(*) FILTER (WHERE horizon_seconds = 900 AND result IN (
+                        'TARDIO_ALCISTA', 'TARDIO_BAJISTA', 'TARDIO_SIN_CAMBIO'
+                    )),
+                    COUNT(*) FILTER (
+                        WHERE future_price IS NOT NULL
+                          AND resolution_delay_seconds <= 60
+                    ),
+                    COUNT(*) FILTER (
+                        WHERE future_price IS NULL AND horizon_seconds > 0
+                          AND target_ts < EXTRACT(EPOCH FROM NOW()) - 60
+                    ),
+                    AVG(resolution_delay_seconds) FILTER (WHERE future_price IS NOT NULL),
+                    MAX(resolution_delay_seconds) FILTER (WHERE future_price IS NOT NULL)
+                FROM btc_signal_outcomes
+                WHERE horizon_seconds > 0
+            """).fetchone()
+
+            labels = conn.execute("""
+                SELECT result, COUNT(*)
+                FROM btc_signal_outcomes
+                WHERE result IN ('TARDIO_ALCISTA', 'TARDIO_BAJISTA', 'TARDIO_SIN_CAMBIO')
+                GROUP BY result ORDER BY result
+            """).fetchall()
+
+            recent = conn.execute("""
+                SELECT s.market_ticker, s.pattern, o.horizon_seconds, o.result,
+                       o.resolution_delay_seconds, o.target_ts, o.resolved_ts
+                FROM btc_signal_outcomes AS o
+                JOIN btc_signal_snapshots AS s ON s.id = o.snapshot_id
+                WHERE o.result IN ('TARDIO_ALCISTA', 'TARDIO_BAJISTA', 'TARDIO_SIN_CAMBIO')
+                ORDER BY o.resolved_ts DESC
+                LIMIT 10
+            """).fetchall()
+
+        return {
+            "schema_ready": True,
+            "late_total": int(totals[0] or 0),
+            "late_15m_total": int(totals[1] or 0),
+            "timely_total": int(totals[2] or 0),
+            "pending_over_60s": int(totals[3] or 0),
+            "average_delay_seconds": round(float(totals[4]), 2) if totals[4] is not None else None,
+            "max_delay_seconds": round(float(totals[5]), 2) if totals[5] is not None else None,
+            "late_labels": [{"result": str(r[0]), "count": int(r[1])} for r in labels],
+            "recent_late": [
+                {
+                    "market_ticker": r[0], "pattern": r[1],
+                    "horizon_seconds": int(r[2]), "result": r[3],
+                    "resolution_delay_seconds": float(r[4]) if r[4] is not None else None,
+                    "target_ts": float(r[5]) if r[5] is not None else None,
+                    "resolved_ts": float(r[6]) if r[6] is not None else None
+                } for r in recent
+            ],
+            "error": None
+        }
+    except Exception as exc:
+        return {**empty, "error": str(exc)[:180]}
+
 def get_pattern_learning_diagnostics():
     """Diagnóstico del aprendizaje con resultados BRTI resueltos a +900s."""
     empty = {
