@@ -118,6 +118,20 @@ def init_db():
                 )
             """)
 
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS btc_model_comparison_snapshots (
+                    id BIGSERIAL PRIMARY KEY,
+                    market_ticker TEXT NOT NULL,
+                    signal_ts DOUBLE PRECISION NOT NULL,
+                    market_close_ts DOUBLE PRECISION NOT NULL,
+                    price DOUBLE PRECISION NOT NULL,
+                    market_target DOUBLE PRECISION,
+                    main_direction TEXT,
+                    gbm_yes_probability DOUBLE PRECISION,
+                    UNIQUE (market_ticker, signal_ts)
+                )
+            """)
+
         _db_status = "CONECTADA"
         return True
 
@@ -1327,6 +1341,119 @@ def get_last_contract_signal(market_ticker):
         global _db_status
         _db_status = "ERROR: " + str(exc)[:180]
         return None
+
+
+
+def save_model_comparison_snapshot(
+    market_ticker, signal_ts, market_close_ts, price,
+    market_target, main_direction, gbm_yes_probability
+):
+    """Guarda en paralelo las dos predicciones, sin alterar la señal principal."""
+    global _db_status
+    ticker = str(market_ticker or "").strip()
+    direction = str(main_direction or "").strip().upper()
+    try:
+        signal_ts = float(signal_ts)
+        market_close_ts = float(market_close_ts)
+        price = float(price)
+        target = float(market_target) if market_target is not None else None
+        gbm_yes = (
+            float(gbm_yes_probability)
+            if gbm_yes_probability is not None else None
+        )
+        if (
+            not ticker or signal_ts <= 0 or market_close_ts <= signal_ts
+            or price <= 0 or not math.isfinite(price)
+            or direction not in ("ALCISTA", "BAJISTA", "INDECISO", "RECOPILANDO")
+            or (gbm_yes is not None and (
+                not math.isfinite(gbm_yes) or gbm_yes < 0 or gbm_yes > 100
+            ))
+        ):
+            return False
+        with _connect() as conn:
+            conn.execute("""
+                INSERT INTO btc_model_comparison_snapshots (
+                    market_ticker, signal_ts, market_close_ts, price,
+                    market_target, main_direction, gbm_yes_probability
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (market_ticker, signal_ts) DO NOTHING
+            """, (
+                ticker, signal_ts, market_close_ts, price, target,
+                direction, gbm_yes
+            ))
+        _db_status = "CONECTADA"
+        return True
+    except Exception as exc:
+        _db_status = "ERROR: " + str(exc)[:180]
+        return False
+
+
+def get_model_comparison_accuracy():
+    """Compara la última predicción previa al cierre contra el resultado oficial."""
+    empty = {
+        "measurement": "ULTIMA PREDICCION GUARDADA ANTES DEL CIERRE POR CONTRATO",
+        "main_predictor": {"contracts_evaluated": 0, "correct": 0, "incorrect": 0, "accuracy_pct": None},
+        "gbm": {"contracts_evaluated": 0, "correct": 0, "incorrect": 0, "accuracy_pct": None},
+        "contracts_with_comparison": 0,
+        "results": [],
+        "error": None
+    }
+    try:
+        with _connect() as conn:
+            rows = conn.execute("""
+                WITH latest AS (
+                    SELECT DISTINCT ON (s.market_ticker)
+                        s.market_ticker, s.main_direction,
+                        s.gbm_yes_probability, o.official_result,
+                        s.signal_ts
+                    FROM btc_model_comparison_snapshots AS s
+                    JOIN btc_official_market_results AS o
+                      ON o.market_ticker = s.market_ticker
+                     AND o.source = 'kalshi_api'
+                    WHERE s.signal_ts <= s.market_close_ts
+                    ORDER BY s.market_ticker, s.signal_ts DESC, s.id DESC
+                )
+                SELECT market_ticker, main_direction, gbm_yes_probability,
+                       official_result, signal_ts
+                FROM latest
+                ORDER BY signal_ts DESC
+            """).fetchall()
+        main_rows = [r for r in rows if r[1] in ("ALCISTA", "BAJISTA")]
+        gbm_rows = [r for r in rows if r[2] is not None]
+        def summary(items, direction_fn):
+            correct = sum(
+                1 for r in items
+                if direction_fn(r) == ("ALCISTA" if r[3] == "SI" else "BAJISTA")
+            )
+            total = len(items)
+            return {
+                "contracts_evaluated": total,
+                "correct": correct,
+                "incorrect": total - correct,
+                "accuracy_pct": round(correct * 100 / total, 1) if total else None
+            }
+        main = summary(main_rows, lambda r: r[1])
+        gbm = summary(gbm_rows, lambda r: "ALCISTA" if float(r[2]) >= 50 else "BAJISTA")
+        return {
+            "measurement": empty["measurement"],
+            "main_predictor": main,
+            "gbm": gbm,
+            "contracts_with_comparison": len(rows),
+            "results": [{
+                "market_ticker": r[0],
+                "main_direction": r[1],
+                "gbm_yes_probability": round(float(r[2]), 2) if r[2] is not None else None,
+                "gbm_direction": (
+                    "ALCISTA" if float(r[2]) >= 50 else "BAJISTA"
+                ) if r[2] is not None else None,
+                "official_result": r[3],
+                "signal_ts": float(r[4])
+            } for r in rows[:20]],
+            "error": None
+        }
+    except Exception as exc:
+        return {**empty, "error": str(exc)[:180]}
 
 
 def record_official_market_result(
