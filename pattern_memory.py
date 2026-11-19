@@ -450,10 +450,13 @@ def record_price(price, timestamp=None):
 
         second = int(ts)
 
+        # No adelantar el marcador de persistencia antes de confirmar
+        # PostgreSQL: si la escritura falla, la siguiente muestra puede reintentar
+        # sin esperar otros cinco segundos. La clave por segundo hace idempotente
+        # una posible escritura repetida.
         with _lock:
             if second < _last_tick_second + 5:
                 return False
-            _last_tick_second = second
 
         with _connect() as conn:
             conn.execute("""
@@ -494,6 +497,7 @@ def record_price(price, timestamp=None):
           """, (price, price, ts, price, price, price, price, ts, ts, ts, ts))
 
         with _lock:
+            _last_tick_second = max(_last_tick_second, second)
             _tick_save_count += 1
             prune_ticks = (_tick_save_count % 1000 == 0)
         if prune_ticks:
