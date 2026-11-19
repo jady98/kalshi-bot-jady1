@@ -802,10 +802,7 @@ def calculate_prediction(
         bullish, bearish, probability_calibrated, probability_calibration_samples, probability_calibration_method = calibrate_directional_scores(
             raw_bullish, raw_bearish
         )
-        if direction == "ALCISTA" and bullish < 50:
-            direction = "INDECISO"
-        elif direction == "BAJISTA" and bearish < 50:
-            direction = "INDECISO"
+        direction = "ALCISTA" if bullish >= bearish else "BAJISTA"
 
         return {
             "direction": direction,
@@ -3248,7 +3245,6 @@ button{border:1px solid #35476b;background:#182640;color:white;border-radius:9px
         <div class="accuracy-counts">
             <span class="accuracy-correct">ACIERTOS <b id="accuracyCorrect">--</b></span>
             <span class="accuracy-wrong">ERRORES <b id="accuracyIncorrect">--</b></span>
-            <span class="accuracy-pending">INDECISOS <b id="accuracyIndecisive">--</b></span>
         </div>
         <div class="accuracy-note" id="accuracyNote">Se calcula con contratos de 15 minutos ya resueltos.</div>
     </div>
@@ -4063,12 +4059,10 @@ async function refreshAccuracy(){
         const pct=result.accuracy_pct;
         const correct=Number(result.correct || 0);
         const incorrect=Number(result.incorrect || 0);
-        const indecisive=Number(result.indecisive_contracts ?? result.indecisive_predictions ?? 0);
         const evaluated=Number(result.predictions_evaluated || 0);
         $("accuracyPercent").textContent=pct==null?"--":Number(pct).toFixed(1)+"%";
         $("accuracyCorrect").textContent=String(correct);
         $("accuracyIncorrect").textContent=String(incorrect);
-        $("accuracyIndecisive").textContent=String(indecisive);
         $("accuracyBasis").textContent="POR CONTRATO · "+Number(result.contracts_evaluated || 0)+" EVALUADOS";
         $("accuracyUpdated").textContent="ACTUALIZADO";
         $("accuracyNote").textContent=evaluated>0
