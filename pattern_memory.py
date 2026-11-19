@@ -201,7 +201,7 @@ def rebuild_brti_candles_from_ticks():
                         MAX(tick_ts) AS close_ts,
                         COUNT(*) AS sample_count
                     FROM brti_price_ticks
-                    WHERE tick_ts > EXTRACT(EPOCH FROM NOW()) - 21600
+                    WHERE tick_ts > EXTRACT(EPOCH FROM NOW()) - 259200
                     GROUP BY FLOOR(tick_ts / 60.0)::BIGINT * 60
                     HAVING COUNT(*) >= 2
                 ),
@@ -500,7 +500,7 @@ def record_price(price, timestamp=None):
             with _connect() as conn:
                 conn.execute(
                     "DELETE FROM brti_price_ticks WHERE tick_ts < %s",
-                    (ts - 21600,)
+                    (ts - 259200,)
                 )
 
         _db_status = "CONECTADA"
