@@ -2826,6 +2826,17 @@ def stats():
 
     })
 
+@app.route("/candle-diagnostics")
+def candle_diagnostics():
+    start_services()
+    return jsonify({
+        "database_status": pattern_memory.database_status(),
+        "brti_candle_history": pattern_memory.get_brti_candle_diagnostics(),
+        "loaded_in_memory": len(brti_candles),
+        "memory_limit": MAX_CANDLES
+    })
+
+
 @app.route("/history")
 def history():
     start_services()
