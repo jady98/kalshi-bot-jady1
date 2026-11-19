@@ -2778,6 +2778,11 @@ def get_data():
         "brti_live": brti_live,
         "brti_age": brti_age,
         "brti_samples": len(ticks),
+        "brti_tick_history_samples": len(ticks),
+        "brti_tick_history_seconds": (
+            round(float(ticks[-1][0]) - float(ticks[0][0]), 1)
+            if len(ticks) >= 2 else 0
+        ),
 
         "kalshi_connected": kc,
         "kalshi_error": ke,
