@@ -3447,6 +3447,16 @@ let chartTargetLine = null;
 let patternMarkers = [];
 let chartFollowLive = true;
 let chartInitialized = false;
+let chartTimeLookup = new Map();
+function realChartTime(displayTime){
+    const real=chartTimeLookup.get(Number(displayTime));
+    const timestamp=Number(real==null?displayTime:real);
+    return new Date(timestamp*1000);
+}
+function formatChartTime(displayTime){
+    const date=realChartTime(displayTime);
+    return new Intl.DateTimeFormat("es-US",{hour:"2-digit",minute:"2-digit",month:"2-digit",day:"2-digit"}).format(date);
+}
 let busy = false;
 let serverClockOffsetMs = 0;
 let contractCloseEpochMs = null;
@@ -3526,7 +3536,8 @@ function initChart(){
             barSpacing:5,
             minBarSpacing:1,
             maxBarSpacing:14,
-            lockVisibleTimeRangeOnResize:true
+            lockVisibleTimeRangeOnResize:true,
+            tickMarkFormatter:(time)=>formatChartTime(time)
         },
         crosshair:{
             mode:LightweightCharts.CrosshairMode.Normal,
@@ -3545,6 +3556,7 @@ function initChart(){
             pinch:true
         },
         localization:{
+            timeFormatter: time => formatChartTime(time),
             priceFormatter: price => Number(price).toLocaleString("en-US", {
                 minimumFractionDigits:2,
                 maximumFractionDigits:2
@@ -3639,14 +3651,19 @@ function drawChart(data){
         .sort((a,b)=>a.time-b.time)
         .filter((c,i,arr)=>i===0 || c.time!==arr[i-1].time);
 
-    // Conserva todas las velas históricas en la gráfica profesional.
-    // Los timestamps reales mantienen visibles los huecos; no se inventan velas.
-    const chartRows = rows;
+    // Comprime solo el eje visual: cada vela conserva su timestamp real en chartTimeLookup.
+    // No se crean velas ni se modifica el historial usado por el predictor.
+    const gaps = rows.reduce((total,c,i)=>total + (i>0 && c.time-rows[i-1].time>90 ? 1 : 0),0);
+    chartTimeLookup = new Map();
+    const chartRows = rows.map((c,i)=>{
+        const displayTime = rows.length ? rows[0].time + i*60 : c.time;
+        chartTimeLookup.set(displayTime,c.time);
+        return {...c,time:displayTime};
+    });
     const countLabel = $("candleCount");
     if(countLabel){
-        const gaps = rows.reduce((total,c,i)=>total + (i>0 && c.time-rows[i-1].time>90 ? 1 : 0),0);
         countLabel.textContent = rows.length + " velas BRTI" +
-            (gaps ? " · " + gaps + " huecos visibles" : "");
+            (gaps ? " · " + gaps + " interrupciones comprimidas" : "");
     }
     if(!chartRows.length){
         candleSeries.setData([]);
@@ -3665,12 +3682,6 @@ function drawChart(data){
     const ema9Data = [];
     const ema21Data = [];
     chartRows.forEach((c,i)=>{
-        if(i>0 && c.time-chartRows[i-1].time>90){
-            // Punto vacío para cortar las EMA: no unir datos a través de un hueco.
-            const breakTime = chartRows[i-1].time + 60;
-            ema9Data.push({time:breakTime});
-            ema21Data.push({time:breakTime});
-        }
         ema9Data.push({time:c.time,value:e9[i]});
         ema21Data.push({time:c.time,value:e21[i]});
     });
@@ -3863,7 +3874,7 @@ function updatePatternGuide(pattern, candleRows, mainDirection, samples){
                 lesson.direction==="bear"?"aboveBar":
                 (Number(c.close)>=Number(c.open)?"belowBar":"aboveBar");
             patternMarkers.push({
-                time:Number(c.time),
+                time:(()=>{ const index=rows.findIndex(row=>Number(row.time)===Number(c.time)); return index>=0 ? chartRows[index].time : Number(c.time); })(),
                 position:position,
                 color:color,
                 shape:bullish?"arrowUp":lesson.direction==="bear"?"arrowDown":"circle",
