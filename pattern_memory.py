@@ -377,9 +377,9 @@ def record_price(price, timestamp=None):
     """
     Resuelve objetivos con el precio BRTI observado igual o después
     del momento objetivo. BRTI es la fuente única de evaluación.
-    Guarda como máximo una muestra por segundo.
+    Persiste una muestra BRTI cada cinco segundos y resuelve objetivos.
     """
-    global _last_tick_second, _db_status
+    global _last_tick_second, _db_status, _tick_save_count
 
     try:
         price = float(price)
@@ -436,7 +436,6 @@ def record_price(price, timestamp=None):
                   AND %s > s.signal_ts
           """, (price, price, ts, price, price, price, price, ts, ts, ts, ts))
 
-        global _tick_save_count
         with _lock:
             _tick_save_count += 1
             prune_ticks = (_tick_save_count % 1000 == 0)
