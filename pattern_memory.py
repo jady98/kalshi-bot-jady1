@@ -396,7 +396,7 @@ def record_price(price, timestamp=None):
                   AND o.horizon_seconds > 0
                   AND o.target_ts <= %s
                   AND %s > s.signal_ts
-          """, (price, price, ts, price, price, price, price, price, ts, ts, ts, ts))
+          """, (price, price, ts, price, price, price, price, ts, ts, ts, ts))
 
         _db_status = "CONECTADA"
         return True
