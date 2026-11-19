@@ -1386,6 +1386,14 @@ def get_official_market_accuracy():
         "correct": 0,
         "incorrect": 0,
         "accuracy_pct": None,
+        "kalshi_api": {
+            "contracts_evaluated": 0, "correct": 0,
+            "incorrect": 0, "accuracy_pct": None
+        },
+        "manual_confirmation": {
+            "contracts_evaluated": 0, "correct": 0,
+            "incorrect": 0, "accuracy_pct": None
+        },
         "results": []
     }
 
