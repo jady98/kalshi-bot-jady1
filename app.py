@@ -2858,7 +2858,9 @@ def get_data():
                         )
                         _market_result_last_check.pop(queued_ticker, None)
             elif status in ("finalized", "determined", "settled") and official:
-                # Resolver/void: no contabilizarlo como acierto o fallo binario.
+                # Un mercado anulado no suma como victoria ni derrota simulada.
+                if official not in ("yes", "no"):
+                    pattern_memory.void_paper_trade(queued_ticker)
                 with lock:
                     market_resolution_queue = deque(
                         (item for item in market_resolution_queue if item[0] != queued_ticker),
