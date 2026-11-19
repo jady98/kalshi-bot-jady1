@@ -277,6 +277,19 @@ def set_brti(price, timestamp=None):
 
     price = float(price)
     timestamp = normalize_timestamp(timestamp)
+    wall_now = time.time()
+
+    # Evita que mensajes retrasados o con reloj incorrecto hagan retroceder
+    # el precio actual y contaminen el historial reciente.
+    if (
+        not math.isfinite(timestamp)
+        or timestamp <= 0
+        or timestamp > wall_now + 2
+    ):
+        return
+    with lock:
+        if brti_time and timestamp < brti_time - 5:
+            return
 
     completed_candle = None
     current_snapshot = None
@@ -298,9 +311,9 @@ def set_brti(price, timestamp=None):
         if previous is not None and int(previous["time"]) == bucket - 60:
             completed_candle = previous
 
-        # Guarda también la vela en formación cada 10 segundos.
-        # Así un reinicio no borra toda la vela del minuto actual.
-        if monotonic_now - _last_brti_candle_save >= 10:
+        # Guarda la vela en formación cada 5 segundos para reducir
+        # la pérdida de datos ante reinicios de Render.
+        if monotonic_now - _last_brti_candle_save >= 5:
             current_snapshot = dict(brti_candles[-1])
             _last_brti_candle_save = monotonic_now
 
@@ -675,7 +688,11 @@ def calculate_prediction(
             if min(open_price, high, low, close) <= 0:
                 continue
 
-            if high < low:
+            if (
+                high < low
+                or high < max(open_price, close)
+                or low > min(open_price, close)
+            ):
                 continue
 
             candle_time = int(candle.get("time", 0) or 0)
@@ -2126,10 +2143,13 @@ def _tick_change_over_seconds(ticks, seconds, now):
             break
     if reference is None:
         return None
-    age = current_ts - reference[0]
-    if age < seconds * 0.65 or age > seconds + 45:
+    elapsed = current_ts - reference[0]
+    # Acepta irregularidad moderada del feed sin comparar ventanas
+    # demasiado cortas ni extrapolar desde referencias demasiado antiguas.
+    if elapsed < seconds * 0.65 or elapsed > seconds * 1.50:
         return None
-    return ((current_price / reference[1]) - 1.0) * 100.0
+    observed_change = ((current_price / reference[1]) - 1.0) * 100.0
+    return observed_change * (float(seconds) / elapsed)
 
 
 def _candle_change_over_seconds(candles, price, seconds, now):
