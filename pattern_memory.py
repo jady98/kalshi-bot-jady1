@@ -1259,3 +1259,179 @@ def get_official_market_accuracy():
             **empty,
             "error": str(exc)[:180]
             }
+
+
+def get_15m_prediction_accuracy_by_contract():
+    """Evalúa solo el pronóstico fijo de 900s más reciente por contrato/ventana."""
+    empty = {
+        "predictions_evaluated": 0, "correct": 0, "incorrect": 0,
+        "no_change": 0, "indecisive_predictions": 0,
+        "contracts_evaluated": 0, "accuracy_pct": None,
+        "measurement": "ULTIMO PRONOSTICO 15M POR CONTRATO/VENTANA"
+    }
+    try:
+        with _connect() as conn:
+            row = conn.execute("""
+                WITH latest AS (
+                    SELECT DISTINCT ON (
+                        COALESCE(s.market_ticker, s.snapshot_key)
+                    )
+                        COALESCE(s.market_ticker, s.snapshot_key) AS contract_key,
+                        s.direction,
+                        o.result
+                    FROM btc_signal_snapshots AS s
+                    JOIN btc_signal_outcomes AS o
+                      ON o.snapshot_id = s.id
+                     AND o.horizon_seconds = 900
+                     AND o.future_price IS NOT NULL
+                    WHERE s.features->>'forecast_horizon_seconds' = '900'
+                    ORDER BY COALESCE(s.market_ticker, s.snapshot_key),
+                             s.signal_ts DESC, s.id DESC
+                )
+                SELECT
+                    COUNT(*) FILTER (
+                        WHERE direction IN ('ALCISTA', 'BAJISTA')
+                          AND result IN ('ALCISTA', 'BAJISTA')
+                    ),
+                    COUNT(*) FILTER (
+                        WHERE direction IN ('ALCISTA', 'BAJISTA')
+                          AND direction = result
+                    ),
+                    COUNT(*) FILTER (
+                        WHERE direction IN ('ALCISTA', 'BAJISTA')
+                          AND result IN ('ALCISTA', 'BAJISTA')
+                          AND direction <> result
+                    ),
+                    COUNT(*) FILTER (
+                        WHERE direction IN ('ALCISTA', 'BAJISTA')
+                          AND result = 'SIN CAMBIO'
+                    ),
+                    COUNT(*) FILTER (
+                        WHERE direction IN ('INDECISO', 'RECOPILANDO')
+                           OR direction IS NULL
+                    ),
+                    COUNT(DISTINCT contract_key)
+                FROM latest
+            """).fetchone()
+        evaluated, correct, incorrect, no_change, indecisive, contracts = row
+        total = int(correct or 0) + int(incorrect or 0)
+        return {
+            "predictions_evaluated": int(evaluated or 0),
+            "correct": int(correct or 0),
+            "incorrect": int(incorrect or 0),
+            "no_change": int(no_change or 0),
+            "indecisive_predictions": int(indecisive or 0),
+            "contracts_evaluated": int(contracts or 0),
+            "accuracy_pct": round(int(correct or 0) * 100 / total, 1) if total else None,
+            "measurement": "ULTIMO PRONOSTICO 15M POR CONTRATO/VENTANA"
+        }
+    except Exception as exc:
+        return {**empty, "error": str(exc)[:180]}
+
+
+def get_15m_error_diagnostics():
+    """Resume fallos reales de pronósticos BRTI a +900s sin modificar el historial."""
+    empty = {"by_pattern": [], "by_confidence": [], "recent_errors": [], "error": None}
+    try:
+        with _connect() as conn:
+            pattern_rows = conn.execute("""
+                WITH resolved AS (
+                    SELECT
+                        COALESCE(NULLIF(BTRIM(s.pattern), ''), 'SIN PATRON') AS pattern,
+                        CASE WHEN s.direction = o.result THEN 1 ELSE 0 END AS correct
+                    FROM btc_signal_snapshots AS s
+                    JOIN btc_signal_outcomes AS o
+                      ON o.snapshot_id = s.id
+                     AND o.horizon_seconds = 900
+                     AND o.future_price IS NOT NULL
+                    WHERE s.features->>'forecast_horizon_seconds' = '900'
+                      AND s.direction IN ('ALCISTA', 'BAJISTA')
+                      AND o.result IN ('ALCISTA', 'BAJISTA')
+                      AND (
+                        UPPER(COALESCE(s.features->>'signal_source', '')) LIKE '%BRTI%'
+                        OR UPPER(COALESCE(s.features->>'direction_method', '')) LIKE '%BRTI%'
+                      )
+                )
+                SELECT pattern, COUNT(*) AS samples, SUM(correct) AS correct
+                FROM resolved
+                GROUP BY pattern
+                ORDER BY COUNT(*) DESC
+                LIMIT 12
+            """).fetchall()
+
+            confidence_rows = conn.execute("""
+                WITH resolved AS (
+                    SELECT
+                        FLOOR((
+                            GREATEST(
+                                COALESCE(NULLIF(s.features->>'raw_bullish_score', '')::DOUBLE PRECISION, s.bullish_score, 50),
+                                COALESCE(NULLIF(s.features->>'raw_bearish_score', '')::DOUBLE PRECISION, s.bearish_score, 50)
+                            ) - 50
+                        ) / 5.0) * 5 + 50 AS band_floor,
+                        CASE WHEN s.direction = o.result THEN 1 ELSE 0 END AS correct
+                    FROM btc_signal_snapshots AS s
+                    JOIN btc_signal_outcomes AS o
+                      ON o.snapshot_id = s.id
+                     AND o.horizon_seconds = 900
+                     AND o.future_price IS NOT NULL
+                    WHERE s.features->>'forecast_horizon_seconds' = '900'
+                      AND s.direction IN ('ALCISTA', 'BAJISTA')
+                      AND o.result IN ('ALCISTA', 'BAJISTA')
+                      AND (
+                        UPPER(COALESCE(s.features->>'signal_source', '')) LIKE '%BRTI%'
+                        OR UPPER(COALESCE(s.features->>'direction_method', '')) LIKE '%BRTI%'
+                      )
+                )
+                SELECT band_floor, COUNT(*) AS samples, SUM(correct) AS correct
+                FROM resolved
+                GROUP BY band_floor
+                ORDER BY band_floor
+            """).fetchall()
+
+            error_rows = conn.execute("""
+                SELECT
+                    s.signal_ts, s.market_ticker, s.direction,
+                    GREATEST(
+                        COALESCE(NULLIF(s.features->>'raw_bullish_score', '')::DOUBLE PRECISION, s.bullish_score, 50),
+                        COALESCE(NULLIF(s.features->>'raw_bearish_score', '')::DOUBLE PRECISION, s.bearish_score, 50)
+                    ) AS confidence,
+                    s.pattern, s.price, o.future_price, o.change_pct, o.result
+                FROM btc_signal_snapshots AS s
+                JOIN btc_signal_outcomes AS o
+                  ON o.snapshot_id = s.id
+                 AND o.horizon_seconds = 900
+                 AND o.future_price IS NOT NULL
+                WHERE s.features->>'forecast_horizon_seconds' = '900'
+                  AND s.direction IN ('ALCISTA', 'BAJISTA')
+                  AND o.result IN ('ALCISTA', 'BAJISTA')
+                  AND s.direction <> o.result
+                ORDER BY s.signal_ts DESC, s.id DESC
+                LIMIT 20
+            """).fetchall()
+
+        return {
+            "by_pattern": [
+                {"pattern": str(r[0]), "samples": int(r[1]), "correct": int(r[2]),
+                 "incorrect": int(r[1]) - int(r[2]),
+                 "accuracy_pct": round(int(r[2]) * 100 / int(r[1]), 1) if r[1] else None}
+                for r in pattern_rows
+            ],
+            "by_confidence": [
+                {"band_floor": int(r[0]), "samples": int(r[1]), "correct": int(r[2]),
+                 "incorrect": int(r[1]) - int(r[2]),
+                 "accuracy_pct": round(int(r[2]) * 100 / int(r[1]), 1) if r[1] else None}
+                for r in confidence_rows
+            ],
+            "recent_errors": [
+                {"signal_ts": float(r[0]), "market_ticker": r[1], "direction": r[2],
+                 "confidence_pct": round(float(r[3]), 1) if r[3] is not None else None,
+                 "pattern": r[4], "entry_price": float(r[5]),
+                 "future_price_15m": float(r[6]),
+                 "change_pct_15m": float(r[7]) if r[7] is not None else None,
+                 "actual_result": r[8]}
+                for r in error_rows
+            ],
+            "error": None
+        }
+    except Exception as exc:
+        return {**empty, "error": str(exc)[:180]}
