@@ -156,7 +156,7 @@ def get_kalshi_orderbook(ticker):
 
     try:
         response = session.get(
-            f"{KALSHI_REST}/markets/{ticker}/orderbook",
+            f"{KALSHI_MARKET_DATA_REST}/markets/{ticker}/orderbook",
             timeout=5
         )
         response.raise_for_status()
