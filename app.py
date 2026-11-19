@@ -3054,6 +3054,7 @@ def health():
         "kalshi_market_ticker": data["kalshi_market_ticker"],
 
         "database_status": pattern_memory.database_status(),
+        "brti_candle_history": pattern_memory.get_brti_candle_diagnostics(),
         "database_counts": pattern_memory.get_database_counts(),
         "pattern_learning_diagnostics":
             pattern_memory.get_pattern_learning_diagnostics(),
