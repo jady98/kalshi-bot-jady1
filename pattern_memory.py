@@ -833,7 +833,7 @@ def get_15m_probability_calibration():
                         OR UPPER(COALESCE(s.features->>'direction_method', '')) LIKE '%BRTI%'
                       )
                       AND o.result IN ('ALCISTA', 'BAJISTA')
-                    ORDER BY s.market_ticker, s.signal_ts ASC, s.id ASC
+                    ORDER BY s.market_ticker, s.signal_ts DESC, s.id DESC
                 ),
                 scored AS (
                     SELECT
@@ -865,7 +865,7 @@ def get_15m_prediction_accuracy():
         "predictions_evaluated": 0, "correct": 0, "incorrect": 0,
         "no_change": 0, "indecisive_contracts": 0,
         "contracts_evaluated": 0, "accuracy_pct": None,
-        "measurement": "SOLO PRONÓSTICOS CON HORIZONTE REAL DE 900S"
+        "measurement": "TODAS LAS SEÑALES INDIVIDUALES CON HORIZONTE REAL DE 900S · PUEDE REPETIR CONTRATO"
     }
     try:
         with _connect() as conn:
@@ -918,7 +918,7 @@ def get_15m_prediction_accuracy():
             "indecisive_contracts": indecisive_contracts,
             "contracts_evaluated": contracts,
             "accuracy_pct": round(correct * 100 / total, 1) if total else None,
-            "measurement": "SOLO PRONÓSTICOS CON HORIZONTE REAL DE 900S"
+            "measurement": "TODAS LAS SEÑALES INDIVIDUALES CON HORIZONTE REAL DE 900S · PUEDE REPETIR CONTRATO"
         }
     except Exception as exc:
         return {**empty, "error": str(exc)[:180]}
@@ -999,12 +999,12 @@ def get_15m_prediction_accuracy_by_source():
                 "indecisive_predictions": indecisive,
                 "indecisive_contracts": indecisive_contracts,
                 "accuracy_pct": round(correct * 100 / total, 1) if total else None,
-                "measurement": "SOLO PRONÓSTICOS CON HORIZONTE REAL DE 900S · POR FUENTE"
+                "measurement": "TODAS LAS SEÑALES INDIVIDUALES CON HORIZONTE REAL DE 900S · PUEDE REPETIR CONTRATO · POR FUENTE"
             })
         return {
             "sources": result,
             "error": None,
-            "measurement": "SOLO PRONÓSTICOS CON HORIZONTE REAL DE 900S · POR FUENTE"
+            "measurement": "TODAS LAS SEÑALES INDIVIDUALES CON HORIZONTE REAL DE 900S · PUEDE REPETIR CONTRATO · POR FUENTE"
         }
     except Exception as exc:
         return {"sources": [], "error": str(exc)[:180]}
