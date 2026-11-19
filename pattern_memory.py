@@ -1415,6 +1415,10 @@ def get_official_market_accuracy():
 
         correct = sum(1 for row in rows if row[4])
         total = len(rows)
+        api_rows = [row for row in rows if row[3] == "kalshi_api"]
+        manual_rows = [row for row in rows if row[3] != "kalshi_api"]
+        api_correct = sum(1 for row in api_rows if row[4])
+        manual_correct = sum(1 for row in manual_rows if row[4])
 
         return {
             "contracts_evaluated": total,
@@ -1424,6 +1428,20 @@ def get_official_market_accuracy():
                 round(correct * 100 / total, 1)
                 if total else None
             ),
+            # Separa los resultados confirmados por API de los registrados
+            # manualmente para que una confirmación manual no infle el dato oficial.
+            "kalshi_api": {
+                "contracts_evaluated": len(api_rows),
+                "correct": api_correct,
+                "incorrect": len(api_rows) - api_correct,
+                "accuracy_pct": round(api_correct * 100 / len(api_rows), 1) if api_rows else None
+            },
+            "manual_confirmation": {
+                "contracts_evaluated": len(manual_rows),
+                "correct": manual_correct,
+                "incorrect": len(manual_rows) - manual_correct,
+                "accuracy_pct": round(manual_correct * 100 / len(manual_rows), 1) if manual_rows else None
+            },
             "results": [
                 {
                     "market_ticker": row[0],
