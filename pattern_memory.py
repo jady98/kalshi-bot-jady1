@@ -1354,6 +1354,8 @@ def save_model_comparison_snapshot(
     direction = str(main_direction or "").strip().upper()
     try:
         signal_ts = float(signal_ts)
+        # Una sola muestra por contrato y minuto, aunque get_data se ejecute varias veces.
+        signal_ts = float(int(signal_ts // 60) * 60)
         market_close_ts = float(market_close_ts)
         price = float(price)
         target = float(market_target) if market_target is not None else None
