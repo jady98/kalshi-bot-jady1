@@ -736,9 +736,10 @@ def calculate_prediction(
         for candle in valid_candles
     ]
 
-    if len(valid_candles) < 3:
-        # Arranque rápido: mientras se forman tres velas de 1 minuto,
-        # calcula una señal provisional con los ticks BRTI recientes.
+    if len(valid_candles) < 22:
+        # No calcular EMA21/RSI14 con un tramo incompleto: exigir al menos
+        # 22 velas consecutivas. Mientras se reconstruye, usar ticks BRTI
+        # recientes como señal provisional y evitar patrones con poco historial.
         now = time.time()
         recent_ticks = []
         for item in (ticks or []):
