@@ -3553,6 +3553,7 @@ button{border:1px solid #35476b;background:#182640;color:white;border-radius:9px
     <div class="small" id="signalStage">
         BRTI · FUENTE ÚNICA DE PREDICCIÓN
     </div>
+    <div class="small" id="entryEconomics">Precio ejecutable Kalshi: esperando libro de órdenes</div>
 
     <div class="accuracy-strip" id="accuracyStrip">
         <div class="accuracy-head">
@@ -4525,6 +4526,23 @@ function updateRadar(d){
         (d.pattern_learning_used
             ? " · patrón validado con " + d.pattern_samples + " resultados"
             : " · aprendizaje histórico en recopilación");
+
+    const economics = d.entry_economics || {};
+    const book = d.kalshi_orderbook || {};
+    if (economics.available) {
+        const ev = Number(economics.estimated_net_ev_per_contract);
+        const evText = (ev >= 0 ? "+" : "") + "$" + ev.toFixed(4);
+        $("entryEconomics").textContent =
+            "KALSHI " + economics.side + " · entrada " +
+            "$" + Number(economics.entry_ask).toFixed(4) +
+            " · tarifa " + "$" + Number(economics.estimated_taker_fee).toFixed(4) +
+            " · EV estimado " + evText + "/contrato";
+        $("entryEconomics").style.color = ev > 0 ? "#55e0a6" : "#ff7c8d";
+    } else {
+        $("entryEconomics").textContent =
+            "ECONOMÍA KALSHI · " + (economics.reason || book.error || "esperando precio ejecutable");
+        $("entryEconomics").style.color = "#aab2c5";
+    }
 
     handleRadarAlert(d);
 
