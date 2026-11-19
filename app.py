@@ -223,6 +223,37 @@ def get_kalshi_orderbook(ticker):
         return data
 
 
+def kalshi_orderbook_worker():
+    """Actualiza el libro en segundo plano para no retrasar /api ni la pantalla."""
+    while True:
+        try:
+            with lock:
+                ticker = kalshi_market_ticker
+                close_ts = kalshi_market_close
+            if ticker and close_ts and float(close_ts) > time.time():
+                get_kalshi_orderbook(ticker)
+            else:
+                with lock:
+                    if orderbook_cache.get("ticker"):
+                        orderbook_cache.update({
+                            "ticker": None, "updated_ts": 0.0, "data": None
+                        })
+        except Exception as exc:
+            print("ERROR LIBRO KALSHI:", str(exc), flush=True)
+        time.sleep(2.5)
+
+
+def get_cached_kalshi_orderbook(ticker):
+    if not ticker:
+        return {"available": False, "error": "SIN CONTRATO"}
+    with lock:
+        cached = dict(orderbook_cache)
+    if cached.get("ticker") == ticker and cached.get("data"):
+        data = dict(cached["data"])
+        if time.time() - float(cached.get("updated_ts") or 0) <= 8:
+            return data
+    return {"available": False, "ticker": ticker, "error": "ESPERANDO LIBRO ACTUALIZADO"}
+
 def calculate_entry_economics(direction, bullish_probability, bearish_probability, orderbook):
     """EV indicativo por contrato, usando ask del libro y tarifa taker publicada."""
     if not orderbook or not orderbook.get("available"):
@@ -2225,6 +2256,11 @@ def start_services():
     ).start()
 
     threading.Thread(
+        target=kalshi_orderbook_worker,
+        daemon=True
+    ).start()
+
+    threading.Thread(
         target=coinbase_worker,
         daemon=True
     ).start()
@@ -2740,7 +2776,7 @@ def get_data():
         market_target = None
         market_close = None
     countdown = max(0, int(market_close - now)) if contract_active else 0
-    orderbook = get_kalshi_orderbook(market_ticker) if contract_active else {"available": False, "error": "SIN CONTRATO"}
+    orderbook = get_cached_kalshi_orderbook(market_ticker) if contract_active else {"available": False, "error": "SIN CONTRATO"}
 
     brti_age = (
         round(now - bt, 1)
