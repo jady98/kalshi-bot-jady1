@@ -2135,7 +2135,7 @@ def build_forward_guidance(
     """Proyección corta separada del pronóstico principal al cierre de 15 minutos."""
     now = time.time()
     seconds_left = max(0, int(float(close_ts) - now)) if close_ts else 0
-    if not contract_active or not ticker or not close_ts or seconds_left <= 0:
+    if not close_ts or seconds_left <= 0:
         return {
             "short_change_1m_pct": None,
             "short_change_3m_pct": None,
@@ -2309,10 +2309,10 @@ def update_guidance_alert(guidance, ticker, contract_active=False):
             stage != "ENTRADA" or direction != previous_direction
         ):
             alert = {
-                "type": "PROTEGER",
+                "type": "SALIDA",
                 "level": "CRITICA",
-                "message": "SEÑAL PERDIÓ CONFIRMACIÓN · VALORA SALIR",
-                "detail": str(guidance.get("guidance_note") or "La señal perdió confirmación en los movimientos cortos.") + " Quedan " + str(seconds_left) + " segundos; reevalúa el riesgo.",
+                "message": "SALIDA · LA ENTRADA PERDIÓ CONFIRMACIÓN",
+                "detail": str(guidance.get("guidance_note") or "La señal perdió confirmación en los movimientos cortos.") + " Quedan " + str(seconds_left) + " segundos; revisa la salida y protege el riesgo.",
                 "ticker": str(ticker),
                 "seconds_remaining": seconds_left,
                 "timestamp": now
@@ -2324,7 +2324,7 @@ def update_guidance_alert(guidance, ticker, contract_active=False):
                 "type": "ENTRADA",
                 "level": "AVISO",
                 "message": "ENTRADA CONFIRMADA · " + str(direction),
-                "detail": str(guidance.get("guidance_note") or "Dirección principal y movimientos cortos alineados.") + " Contrato " + str(ticker) + ". Quedan " + str(seconds_left) + " segundos.",
+                "detail": str(guidance.get("guidance_note") or "Dirección principal y movimientos cortos alineados.") + " " + ("Contrato " + str(ticker) if not str(ticker).startswith("RADAR-15M-") else "Ventana predictiva de 15 minutos") + ". Quedan " + str(seconds_left) + " segundos.",
                 "ticker": str(ticker),
                 "seconds_remaining": seconds_left,
                 "timestamp": now
@@ -2334,7 +2334,7 @@ def update_guidance_alert(guidance, ticker, contract_active=False):
                 "type": "PREALERTA",
                 "level": "AVISO",
                 "message": "PREALERTA · POSIBLE " + str(direction),
-                "detail": str(guidance.get("guidance_note") or "Se está formando una dirección; todavía no es entrada confirmada.") + " Contrato " + str(ticker) + ". Quedan " + str(seconds_left) + " segundos.",
+                "detail": str(guidance.get("guidance_note") or "Se está formando una dirección; todavía no es entrada confirmada.") + " " + ("Contrato " + str(ticker) if not str(ticker).startswith("RADAR-15M-") else "Ventana predictiva de 15 minutos") + ". Quedan " + str(seconds_left) + " segundos.",
                 "ticker": str(ticker),
                 "seconds_remaining": seconds_left,
                 "timestamp": now
@@ -2663,15 +2663,25 @@ def get_data():
         brti_live,
         coinbase_live
     )
+    # Las alertas de entrada/salida también funcionan cuando Kalshi aún
+    # no publica un contrato activo: se usa una ventana móvil de 15 minutos.
+    guidance_ticker = (
+        market_ticker if contract_active
+        else "RADAR-15M-" + str(int(now // 900))
+    )
+    guidance_close = (
+        market_close if contract_active
+        else (int(now // 900) + 1) * 900
+    )
     guidance = build_forward_guidance(
         ticks, bp if brti_live else None, indicators, candles,
-        contract_active=contract_active,
-        ticker=market_ticker if contract_active else None,
-        close_ts=market_close if contract_active else None
+        contract_active=True,
+        ticker=guidance_ticker,
+        close_ts=guidance_close
     )
     guidance_alert = update_guidance_alert(
-        guidance, market_ticker if contract_active else None,
-        contract_active=contract_active
+        guidance, guidance_ticker,
+        contract_active=True
     )
     if guidance_alert is not None:
         alert_data = guidance_alert
@@ -3008,6 +3018,17 @@ button{border:1px solid #35476b;background:#182640;color:white;border-radius:9px
  .alert-card{height:58px;padding:3px 2px}
  .chart-legend{margin:2px 0!important}
 }
+
+.radar-alert-panel{border:1px solid #35415b;background:linear-gradient(135deg,rgba(20,27,48,.98),rgba(9,14,29,.98))}
+.radar-alert-heading{gap:10px;align-items:center}
+.radar-alert-heading button{white-space:nowrap;font-size:10px;padding:9px 11px}
+.radar-alert-state{display:inline-flex;align-items:center;justify-content:center;margin:10px 0 7px;padding:7px 11px;border-radius:8px;font-size:12px;font-weight:950;letter-spacing:.5px;background:#293246;color:#d9e2f3}
+.radar-alert-state.prealert{background:#594616;color:#ffe08a}
+.radar-alert-state.entry{background:#0c583b;color:#79ffc0}
+.radar-alert-state.exit{background:#681f31;color:#ffb1bf}
+.radar-alert-message{font-size:16px;font-weight:950;line-height:1.25;margin:2px 0 5px}
+.radar-alert-detail{font-size:11px;line-height:1.4;color:#dce4f4}
+@media(max-width:380px){.radar-alert-heading button{font-size:9px;padding:8px 7px}.radar-alert-message{font-size:14px}}
 </style>
 </head>
 
@@ -3145,28 +3166,17 @@ button{border:1px solid #35476b;background:#182640;color:white;border-radius:9px
 
 </section>
 
-<section class="alert-stack" id="alertStack" aria-label="Alertas del radar">
-    <article class="alert-card prealert" id="prealertCard">
-        <div class="alert-icon">!</div>
-        <div class="alert-copy">
-            <div class="alert-title" id="prealertTitle">PREALERTA</div>
-            <div class="alert-detail" id="prealertDetail">Aviso temprano cuando empieza a formarse una dirección.</div>
+<section class="card radar-alert-panel" id="radarAlertPanel" aria-live="polite">
+    <div class="row radar-alert-heading">
+        <div>
+            <div class="section-title">ALERTAS INTELIGENTES · ENTRADA Y SALIDA</div>
+            <div class="small" id="radarAlertStatus">Vigilando señales BRTI de 15 minutos</div>
         </div>
-    </article>
-    <article class="alert-card entry" id="entryCard">
-        <div class="alert-icon">✓</div>
-        <div class="alert-copy">
-            <div class="alert-title" id="entryTitle">ENTRADA CONFIRMADA</div>
-            <div class="alert-detail" id="entryDetail">Se activa cuando la señal principal y los movimientos de 1 y 3 minutos coinciden.</div>
-        </div>
-    </article>
-    <article class="alert-card protect" id="protectCard">
-        <div class="alert-icon">!</div>
-        <div class="alert-copy">
-            <div class="alert-title" id="protectTitle">PROTEGER TU ENTRADA</div>
-            <div class="alert-detail" id="protectDetail">Se activa si una entrada confirmada pierde su confirmación.</div>
-        </div>
-    </article>
+        <button id="alertsEnableButton" onclick="enableRadarAlerts()">ACTIVAR AVISOS</button>
+    </div>
+    <div class="radar-alert-state neutral" id="radarAlertState">ESPERANDO UNA SEÑAL</div>
+    <div class="radar-alert-message" id="radarAlertMessage">El radar avisará cuando confirme una entrada o detecte una salida.</div>
+    <div class="small radar-alert-detail" id="radarAlertDetail">Activa los avisos para recibir notificación y sonido mientras el radar esté abierto.</div>
 </section>
 
 
@@ -3788,6 +3798,105 @@ function goLive(){
 }
 
 // ==========================================
+// AVISOS DEL RADAR · NOTIFICACIÓN, SONIDO Y VIBRACIÓN
+// ==========================================
+let radarAudioContext = null;
+let radarAlertsEnabled = false;
+let lastRadarAlertKey = "";
+
+function enableRadarAlerts(){
+    radarAlertsEnabled = true;
+    try{
+        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+        if(AudioContextClass){
+            radarAudioContext = radarAudioContext || new AudioContextClass();
+            if(radarAudioContext.state === "suspended") radarAudioContext.resume();
+        }
+    }catch(error){ console.warn("Audio no disponible", error); }
+    if("Notification" in window){
+        Notification.requestPermission().then(permission=>{
+            const button = $("alertsEnableButton");
+            if(button) button.textContent = permission === "granted" ? "AVISOS ACTIVOS" : "SONIDO ACTIVO";
+            $("radarAlertStatus").textContent = permission === "granted"
+                ? "Notificaciones y sonido activados mientras el radar esté abierto"
+                : "Sonido activado; permiso de notificaciones no concedido";
+        });
+    }else{
+        $("alertsEnableButton").textContent = "SONIDO ACTIVO";
+        $("radarAlertStatus").textContent = "Sonido activado en esta pantalla";
+    }
+    playRadarTone("entry");
+}
+
+function playRadarTone(kind){
+    if(!radarAlertsEnabled || !radarAudioContext) return;
+    try{
+        const now = radarAudioContext.currentTime;
+        const frequencies = kind === "exit" ? [440,330] : [660,880];
+        frequencies.forEach((frequency,index)=>{
+            const oscillator = radarAudioContext.createOscillator();
+            const gain = radarAudioContext.createGain();
+            oscillator.frequency.value = frequency;
+            oscillator.type = "sine";
+            gain.gain.setValueAtTime(0.0001,now + index * 0.16);
+            gain.gain.exponentialRampToValueAtTime(0.12,now + index * 0.16 + 0.025);
+            gain.gain.exponentialRampToValueAtTime(0.0001,now + index * 0.16 + 0.14);
+            oscillator.connect(gain);
+            gain.connect(radarAudioContext.destination);
+            oscillator.start(now + index * 0.16);
+            oscillator.stop(now + index * 0.16 + 0.15);
+        });
+    }catch(error){ console.warn("No se pudo reproducir el aviso",error); }
+}
+
+function handleRadarAlert(data){
+    const alertData = data.alert || {};
+    const type = String(alertData.type || "").toUpperCase();
+    const stage = String(data.entry_stage || "").toUpperCase();
+    const isExit = type === "SALIDA" || type === "PROTEGER";
+    const isEntry = type === "ENTRADA" || stage === "ENTRADA";
+    const isPrealert = type === "PREALERTA" || stage === "PREALERTA";
+    const state = $("radarAlertState");
+    const message = $("radarAlertMessage");
+    const detail = $("radarAlertDetail");
+    const panel = $("radarAlertPanel");
+    if(!state || !message || !detail || !panel) return;
+
+    state.className = "radar-alert-state " + (isExit ? "exit" : isEntry ? "entry" : isPrealert ? "prealert" : "neutral");
+    state.textContent = isExit ? "SALIDA · PROTEGER" : isEntry ? "ENTRADA CONFIRMADA" : isPrealert ? "PREALERTA" : "ESPERANDO UNA SEÑAL";
+    message.textContent = alertData.message || (
+        isEntry ? "ENTRADA CONFIRMADA · " + (data.entry_direction || data.direction || "") :
+        isPrealert ? "POSIBLE " + (data.entry_direction || data.direction || "") :
+        isExit ? "La señal perdió confirmación. Revisa la salida." :
+        "El radar avisará cuando confirme una entrada o detecte una salida."
+    );
+    detail.textContent = alertData.detail || data.guidance_note ||
+        "Se evalúan BRTI, dirección, fuerza y confirmación de 1 y 3 minutos.";
+
+    const eventType = isExit ? "SALIDA" : isEntry ? "ENTRADA" : isPrealert ? "PREALERTA" : "";
+    if(!eventType || !alertData.timestamp) return;
+    const eventKey = [eventType,alertData.ticker || data.entry_ticker || "",alertData.timestamp,alertData.message || ""].join("|");
+    if(eventKey === lastRadarAlertKey) return;
+    lastRadarAlertKey = eventKey;
+
+    if(radarAlertsEnabled){
+        playRadarTone(isExit ? "exit" : "entry");
+        if(window.navigator && typeof window.navigator.vibrate === "function"){
+            window.navigator.vibrate(isExit ? [180,80,180] : [100,60,100]);
+        }
+    }
+    if("Notification" in window && Notification.permission === "granted"){
+        try{
+            new Notification(isExit ? "BTC Radar · SALIDA" : isEntry ? "BTC Radar · ENTRADA" : "BTC Radar · PREALERTA",{
+                body: (alertData.message || "") + (alertData.detail ? "\n" + alertData.detail : ""),
+                tag: eventKey,
+                renotify: false
+            });
+        }catch(error){ console.warn("Notificación no disponible",error); }
+    }
+}
+
+// ==========================================
 // ACTUALIZAR INFORMACIÓN DEL RADAR
 // ==========================================
 
@@ -3902,28 +4011,7 @@ function updateRadar(d){
             ? " · patrón validado con " + d.pattern_samples + " resultados"
             : " · aprendizaje histórico en recopilación");
 
-    const alertData = d.alert || {};
-    const alertType = String(alertData.type || "").toUpperCase();
-    const entryStage = String(d.entry_stage || "").toUpperCase();
-    const alertDirection = String(d.entry_direction || d.direction || "").toUpperCase();
-    const activePrealert = entryStage === "PREALERTA";
-    const activeEntry = entryStage === "ENTRADA";
-    const activeProtect = alertType === "PROTEGER" && !activeEntry;
-    $("prealertCard").classList.toggle("active", activePrealert);
-    $("entryCard").classList.toggle("active", activeEntry);
-    $("protectCard").classList.toggle("active", activeProtect);
-    $("prealertTitle").textContent = activePrealert
-        ? "PREALERTA " + (alertDirection || "") : "PREALERTA";
-    $("entryTitle").textContent = activeEntry
-        ? "ENTRADA CONFIRMADA " + (alertDirection || "") : "ENTRADA CONFIRMADA";
-    $("protectTitle").textContent = activeProtect
-        ? "PROTEGER · SEÑAL DEBILITADA" : "PROTEGER TU ENTRADA";
-    const guidanceNote = d.guidance_note || "El radar comprueba dirección, fuerza y movimientos de 1 y 3 minutos.";
-    $("prealertDetail").textContent = guidanceNote;
-    $("entryDetail").textContent = guidanceNote;
-    $("protectDetail").textContent = activeProtect
-        ? (alertData.detail || "La señal perdió confirmación. Reevalúa el riesgo.")
-        : "Se activa cuando una entrada confirmada pierde alineación o cambia de dirección.";
+    handleRadarAlert(d);
 
 
     $("ema9").textContent=
