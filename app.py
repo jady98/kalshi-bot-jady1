@@ -1947,6 +1947,33 @@ def start_services():
                 )
 
 
+            # Recupera también muestras BRTI de 5 segundos. Esto permite
+            # calcular ventanas reales de 1 y 3 minutos tras un reinicio,
+            # sin inventar ticks ni rellenar huecos con precios sintéticos.
+            restored_ticks = pattern_memory.get_brti_ticks(MAX_TICKS)
+            if restored_ticks:
+                with lock:
+                    merged_ticks = {
+                        float(ts): (float(ts), float(value))
+                        for ts, value in restored_ticks
+                    }
+                    for ts, value in brti_ticks:
+                        merged_ticks[float(ts)] = (float(ts), float(value))
+                    brti_ticks.clear()
+                    brti_ticks.extend(
+                        sorted(
+                            merged_ticks.values(),
+                            key=lambda row: row[0]
+                        )[-MAX_TICKS:]
+                    )
+                print(
+                    "BRTI: HISTORIAL DE TICKS RESTAURADO",
+                    len(restored_ticks),
+                    "muestras",
+                    flush=True
+                )
+
+
     threading.Thread(
         target=init_pattern_database,
         daemon=True
