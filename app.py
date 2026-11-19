@@ -56,6 +56,21 @@ coinbase_time = 0
 kalshi_connected = False
 coinbase_connected = False
 
+# Diagnóstico del flujo BRTI: conexión, recepción, lectura y persistencia.
+_brti_feed_diag = {
+    "ws_open_count": 0,
+    "ws_message_count": 0,
+    "brti_parsed_count": 0,
+    "db_save_attempts": 0,
+    "db_save_success": 0,
+    "db_save_failures": 0,
+    "last_ws_open_ts": None,
+    "last_ws_message_ts": None,
+    "last_brti_parsed_ts": None,
+    "last_db_save_ts": None,
+    "last_db_save_error": ""
+}
+
 kalshi_error = ""
 coinbase_error = ""
 kalshi_market_target = None
@@ -289,11 +304,25 @@ def set_brti(price, timestamp=None):
             current_snapshot = dict(brti_candles[-1])
             _last_brti_candle_save = monotonic_now
 
+    candles_to_save = []
     if completed_candle is not None:
-        pattern_memory.save_brti_candle(completed_candle)
-
+        candles_to_save.append(completed_candle)
     if current_snapshot is not None:
-        pattern_memory.save_brti_candle(current_snapshot)
+        candles_to_save.append(current_snapshot)
+
+    for candle in candles_to_save:
+        saved = pattern_memory.save_brti_candle(candle)
+        with lock:
+            _brti_feed_diag["db_save_attempts"] += 1
+            if saved:
+                _brti_feed_diag["db_save_success"] += 1
+                _brti_feed_diag["last_db_save_ts"] = time.time()
+                _brti_feed_diag["last_db_save_error"] = ""
+            else:
+                _brti_feed_diag["db_save_failures"] += 1
+                _brti_feed_diag["last_db_save_error"] = str(
+                    pattern_memory.database_status()
+                )[:180]
 
     pattern_memory.record_price(price, timestamp)
 
@@ -1578,6 +1607,8 @@ def kalshi_open(ws):
     with lock:
         kalshi_connected = True
         kalshi_error = ""
+        _brti_feed_diag["ws_open_count"] += 1
+        _brti_feed_diag["last_ws_open_ts"] = time.time()
 
     print(
         "KALSHI: SUSCRIPCIÓN BRTI ENVIADA",
@@ -1590,6 +1621,10 @@ def kalshi_message(ws, message):
     global kalshi_error
 
     try:
+
+        with lock:
+            _brti_feed_diag["ws_message_count"] += 1
+            _brti_feed_diag["last_ws_message_ts"] = time.time()
 
         data = json.loads(message)
 
@@ -1621,6 +1656,8 @@ def kalshi_message(ws, message):
             set_brti(value, timestamp)
 
             with lock:
+                _brti_feed_diag["brti_parsed_count"] += 1
+                _brti_feed_diag["last_brti_parsed_ts"] = time.time()
                 kalshi_error = ""
 
         elif isinstance(data, dict):
@@ -2829,9 +2866,25 @@ def stats():
 @app.route("/candle-diagnostics")
 def candle_diagnostics():
     start_services()
+    with lock:
+        feed_diagnostics = dict(_brti_feed_diag)
+        feed_diagnostics["kalshi_connected"] = kalshi_connected
+        feed_diagnostics["kalshi_error"] = kalshi_error
+    now = time.time()
+    for key in (
+        "last_ws_open_ts",
+        "last_ws_message_ts",
+        "last_brti_parsed_ts",
+        "last_db_save_ts"
+    ):
+        ts = feed_diagnostics.get(key)
+        feed_diagnostics[key.replace("_ts", "_age_seconds")] = (
+            round(max(0, now - ts), 2) if ts is not None else None
+        )
     return jsonify({
         "database_status": pattern_memory.database_status(),
         "brti_candle_history": pattern_memory.get_brti_candle_diagnostics(),
+        "brti_feed_diagnostics": feed_diagnostics,
         "loaded_in_memory": len(brti_candles),
         "memory_limit": MAX_CANDLES
     })
