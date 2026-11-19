@@ -646,7 +646,10 @@ def calculate_prediction(
             "ema21": None,
             "rsi": None,
             "pattern": "SIN DATOS",
-            "target_influence": "SIN DATOS"
+            "target_influence": "SIN DATOS",
+            "prediction_data_quality": "SIN DATOS BRTI",
+            "contiguous_candles_used": 0,
+            "candle_gap_detected": False
         }
 
     # --------------------------------------
@@ -675,7 +678,12 @@ def calculate_prediction(
             if high < low:
                 continue
 
+            candle_time = int(candle.get("time", 0) or 0)
+            if candle_time <= 0:
+                continue
+
             valid_candles.append({
+                "time": candle_time,
                 "open": open_price,
                 "high": high,
                 "low": low,
@@ -683,11 +691,28 @@ def calculate_prediction(
                 "volume": max(0, volume)
             })
 
-        except (TypeError, ValueError, KeyError):
+        except (TypeError, ValueError, KeyError, OverflowError):
             continue
 
-    # Orden cronológico: antiguas primero
-    valid_candles = valid_candles[-300:]
+    # Orden cronológico: no tratar velas separadas por huecos como minutos
+    # consecutivos. Protege EMA, RSI, patrones, momentum y proyección.
+    valid_candles = sorted(valid_candles[-300:], key=lambda row: row["time"])
+    candle_gap_detected = any(
+        valid_candles[i]["time"] - valid_candles[i - 1]["time"] > 90
+        for i in range(1, len(valid_candles))
+    )
+    contiguous_candles = []
+    for candle in reversed(valid_candles):
+        if contiguous_candles:
+            gap_seconds = contiguous_candles[-1]["time"] - candle["time"]
+            if gap_seconds < 50 or gap_seconds > 90:
+                break
+        contiguous_candles.append(candle)
+    valid_candles = list(reversed(contiguous_candles))
+    candle_data_quality = (
+        "HISTORIAL CON HUECOS · USANDO SOLO VELAS CONTIGUAS"
+        if candle_gap_detected else "VELAS CONTIGUAS"
+    )
 
     closes = [
         candle["close"]
@@ -720,7 +745,10 @@ def calculate_prediction(
                 "ema21": None,
                 "rsi": None,
                 "pattern": "ESPERANDO TICKS BRTI",
-                "target_influence": "PENDIENTE"
+                "target_influence": "PENDIENTE",
+                "prediction_data_quality": candle_data_quality,
+                "contiguous_candles_used": len(valid_candles),
+                "candle_gap_detected": candle_gap_detected
             }
 
         first_ts, first_price = recent_ticks[0]
@@ -799,7 +827,13 @@ def calculate_prediction(
             "probability_calibrated": probability_calibrated,
             "probability_calibration_samples": probability_calibration_samples,
             "probability_calibration_method": probability_calibration_method,
-            "direction_method": "BRTI_TICKS_BOOTSTRAP_15M"
+            "direction_method": "BRTI_TICKS_BOOTSTRAP_15M",
+            "prediction_data_quality": (
+                "TICKS RECIENTES · " + candle_data_quality
+                if candle_gap_detected else "TICKS BRTI RECIENTES"
+            ),
+            "contiguous_candles_used": len(valid_candles),
+            "candle_gap_detected": candle_gap_detected
         }
 
     # --------------------------------------
@@ -1336,7 +1370,10 @@ def calculate_prediction(
             "BRTI_PRIMARY_KALSHI_15M"
             if valid_price(market_target)
             else "BRTI_PRIMARY_NO_TARGET"
-        )
+        ),
+        "prediction_data_quality": candle_data_quality,
+        "contiguous_candles_used": len(valid_candles),
+        "candle_gap_detected": candle_gap_detected
     }
 
 
