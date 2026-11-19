@@ -3093,6 +3093,18 @@ button{border:1px solid #35476b;background:#182640;color:white;border-radius:9px
 .compact-pattern.expanded .pattern-description,.compact-pattern.expanded .pattern-history{display:block;font-size:10px!important;line-height:1.25;margin-top:3px}
 @media(max-width:380px){.radar-alert-heading button{font-size:8px;padding:6px 7px}.radar-alert-message{font-size:11px}}
 
+
+.accuracy-strip{margin-top:8px;padding:8px 10px;border:1px solid #34415b;border-radius:10px;background:linear-gradient(110deg,rgba(19,31,52,.92),rgba(13,18,34,.96))}
+.accuracy-head{display:flex;justify-content:space-between;gap:8px;color:#aebbd1;font-size:9px;font-weight:850;letter-spacing:.45px}
+.accuracy-main{display:flex;align-items:baseline;gap:8px;margin:3px 0}
+.accuracy-main strong{font-size:clamp(20px,5vw,27px);line-height:1;color:#f4f7ff;font-variant-numeric:tabular-nums}
+.accuracy-main span{font-size:8px;color:#9eabc2;font-weight:800}
+.accuracy-counts{display:flex;gap:12px;flex-wrap:wrap;font-size:9px;font-weight:800}
+.accuracy-counts b{font-variant-numeric:tabular-nums;color:#fff}
+.accuracy-correct{color:#55e0a6}.accuracy-wrong{color:#ff7c8d}.accuracy-pending{color:#f2ce72}
+.accuracy-note{margin-top:4px;color:#8f9bb1;font-size:8px;line-height:1.25}
+@media(max-width:600px){.accuracy-strip{margin-top:5px;padding:6px 8px}.accuracy-head{font-size:8px}.accuracy-main strong{font-size:21px}.accuracy-counts{gap:9px;font-size:8px}.accuracy-note{font-size:7px}}
+
 </style>
 </head>
 
@@ -3226,6 +3238,23 @@ button{border:1px solid #35476b;background:#182640;color:white;border-radius:9px
 
     <div class="small" id="signalStage">
         BRTI · FUENTE ÚNICA DE PREDICCIÓN
+    </div>
+
+    <div class="accuracy-strip" id="accuracyStrip">
+        <div class="accuracy-head">
+            <span>PRECISIÓN REAL · 15 MIN</span>
+            <span id="accuracyUpdated">CARGANDO...</span>
+        </div>
+        <div class="accuracy-main">
+            <strong id="accuracyPercent">--</strong>
+            <span id="accuracyBasis">POR CONTRATO</span>
+        </div>
+        <div class="accuracy-counts">
+            <span class="accuracy-correct">ACIERTOS <b id="accuracyCorrect">--</b></span>
+            <span class="accuracy-wrong">ERRORES <b id="accuracyIncorrect">--</b></span>
+            <span class="accuracy-pending">INDECISOS <b id="accuracyIndecisive">--</b></span>
+        </div>
+        <div class="accuracy-note" id="accuracyNote">Se calcula con contratos de 15 minutos ya resueltos.</div>
     </div>
 
 </section>
@@ -4029,6 +4058,33 @@ function handleRadarAlert(data){
 // ACTUALIZAR INFORMACIÓN DEL RADAR
 // ==========================================
 
+async function refreshAccuracy(){
+    try{
+        const response=await fetch("/stats?t="+Date.now(),{cache:"no-store"});
+        if(!response.ok) throw new Error("HTTP "+response.status);
+        const stats=await response.json();
+        const result=stats.prediction_accuracy_15m_by_contract || {};
+        const pct=result.accuracy_pct;
+        const correct=Number(result.correct || 0);
+        const incorrect=Number(result.incorrect || 0);
+        const indecisive=Number(result.indecisive_contracts ?? result.indecisive_predictions ?? 0);
+        const evaluated=Number(result.predictions_evaluated || 0);
+        $("accuracyPercent").textContent=pct==null?"--":Number(pct).toFixed(1)+"%";
+        $("accuracyCorrect").textContent=String(correct);
+        $("accuracyIncorrect").textContent=String(incorrect);
+        $("accuracyIndecisive").textContent=String(indecisive);
+        $("accuracyBasis").textContent="POR CONTRATO · "+Number(result.contracts_evaluated || 0)+" EVALUADOS";
+        $("accuracyUpdated").textContent="ACTUALIZADO";
+        $("accuracyNote").textContent=evaluated>0
+            ? "Último pronóstico resuelto por contrato · "+evaluated+" pronósticos direccionales. Sin cambio cuenta como fallo."
+            : "Aún no hay suficientes contratos resueltos para calcular la precisión.";
+        $("accuracyPercent").style.color=pct==null?"#f4f7ff":(Number(pct)>=50?"#55e0a6":"#ff7c8d");
+    }catch(error){
+        $("accuracyUpdated").textContent="SIN DATOS";
+        $("accuracyNote").textContent="No se pudo leer /stats: "+String(error.message || error);
+    }
+}
+
 function updateRadar(d){
 
     const measuredOffset = Number(d._client_clock_offset_ms);
@@ -4301,11 +4357,13 @@ window.addEventListener("resize", () => {
 });
 
 refreshData();
+refreshAccuracy();
 
 setInterval(
     ()=>refreshData(false),
     1000
 );
+setInterval(refreshAccuracy,60000);
 
 setInterval(updateContractCountdown,250);
 
