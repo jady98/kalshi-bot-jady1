@@ -1536,6 +1536,7 @@ def get_model_comparison_accuracy():
                 "official_result": official
             })
 
+        results.sort(key=lambda item: item["signal_ts"], reverse=True)
         total = len(rows)
         accuracy_main = round(main_correct * 100 / total, 1) if total else None
         accuracy_gbm = round(gbm_correct * 100 / total, 1) if total else None
