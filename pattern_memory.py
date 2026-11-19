@@ -956,12 +956,13 @@ def get_15m_probability_calibration():
 
 
 def get_15m_prediction_accuracy():
-    """Precisión direccional a 15 minutos: evalúa cada señal individual al cumplirse +900 segundos."""
+    """Precisión direccional a 15 minutos; SIN CAMBIO cuenta como fallo y los tardíos se excluyen."""
     empty = {
         "predictions_evaluated": 0, "correct": 0, "incorrect": 0,
-        "no_change": 0, "indecisive_contracts": 0,
-        "contracts_evaluated": 0, "accuracy_pct": None,
-        "measurement": "TODAS LAS SEÑALES INDIVIDUALES CON HORIZONTE REAL DE 900S · PUEDE REPETIR CONTRATO"
+        "no_change": 0, "indecisive_predictions": 0,
+        "contracts_evaluated": 0, "indecisive_contracts": 0,
+        "late_predictions_excluded": 0, "accuracy_pct": None,
+        "measurement": "SEÑALES A +900S; SIN CAMBIO CUENTA COMO FALLO; TARDIAS EXCLUIDAS"
     }
     try:
         with _connect() as conn:
@@ -969,7 +970,7 @@ def get_15m_prediction_accuracy():
                 SELECT
                     COUNT(*) FILTER (
                         WHERE direction IN ('ALCISTA', 'BAJISTA')
-                          AND result IN ('ALCISTA', 'BAJISTA')
+                          AND result IN ('ALCISTA', 'BAJISTA', 'SIN CAMBIO')
                     ),
                     COUNT(*) FILTER (
                         WHERE direction IN ('ALCISTA', 'BAJISTA')
@@ -977,8 +978,10 @@ def get_15m_prediction_accuracy():
                     ),
                     COUNT(*) FILTER (
                         WHERE direction IN ('ALCISTA', 'BAJISTA')
-                          AND result IN ('ALCISTA', 'BAJISTA')
-                          AND direction <> result
+                          AND (
+                              (result IN ('ALCISTA', 'BAJISTA') AND direction <> result)
+                              OR result = 'SIN CAMBIO'
+                          )
                     ),
                     COUNT(*) FILTER (
                         WHERE direction IN ('ALCISTA', 'BAJISTA')
@@ -988,45 +991,53 @@ def get_15m_prediction_accuracy():
                         WHERE direction IN ('INDECISO', 'RECOPILANDO')
                            OR direction IS NULL
                     ),
-                    COUNT(DISTINCT COALESCE(s.market_ticker, s.snapshot_key)) FILTER (
+                    COUNT(DISTINCT COALESCE(NULLIF(s.market_ticker, ''), NULLIF(s.snapshot_key, ''), s.id::TEXT)) FILTER (
                         WHERE direction IN ('ALCISTA', 'BAJISTA')
-                          AND result IN ('ALCISTA', 'BAJISTA')
+                          AND result IN ('ALCISTA', 'BAJISTA', 'SIN CAMBIO')
                     ),
-                    COUNT(DISTINCT COALESCE(s.market_ticker, s.snapshot_key)) FILTER (
+                    COUNT(DISTINCT COALESCE(NULLIF(s.market_ticker, ''), NULLIF(s.snapshot_key, ''), s.id::TEXT)) FILTER (
                         WHERE direction IN ('INDECISO', 'RECOPILANDO')
                            OR direction IS NULL
+                    ),
+                    COUNT(*) FILTER (
+                        WHERE direction IN ('ALCISTA', 'BAJISTA')
+                          AND result IN ('TARDIO_ALCISTA', 'TARDIO_BAJISTA', 'TARDIO_SIN_CAMBIO')
                     )
                 FROM btc_signal_snapshots AS s
                 JOIN btc_signal_outcomes AS o
                   ON o.snapshot_id = s.id
                  AND o.horizon_seconds = 900
                  AND o.future_price IS NOT NULL
-                 AND s.features->>'forecast_horizon_seconds' = '900'
+                WHERE s.features->>'forecast_horizon_seconds' = '900'
             """).fetchone()
-        evaluated, correct, incorrect, no_change, indecisive, contracts, indecisive_contracts = row
+        evaluated, correct, incorrect, no_change, indecisive, contracts, indecisive_contracts, late = row
+        correct, incorrect = int(correct or 0), int(incorrect or 0)
         total = correct + incorrect
         return {
-            "predictions_evaluated": evaluated,
+            "predictions_evaluated": int(evaluated or 0),
             "correct": correct,
             "incorrect": incorrect,
-            "no_change": no_change,
-            "indecisive_predictions": indecisive,
-            "indecisive_contracts": indecisive_contracts,
-            "contracts_evaluated": contracts,
+            "no_change": int(no_change or 0),
+            "indecisive_predictions": int(indecisive or 0),
+            "contracts_evaluated": int(contracts or 0),
+            "indecisive_contracts": int(indecisive_contracts or 0),
+            "late_predictions_excluded": int(late or 0),
             "accuracy_pct": round(correct * 100 / total, 1) if total else None,
-            "measurement": "TODAS LAS SEÑALES INDIVIDUALES CON HORIZONTE REAL DE 900S · PUEDE REPETIR CONTRATO"
+            "measurement": "SEÑALES A +900S; SIN CAMBIO CUENTA COMO FALLO; TARDIAS EXCLUIDAS"
         }
     except Exception as exc:
         return {**empty, "error": str(exc)[:180]}
 
 
+
+
 def get_15m_prediction_accuracy_by_source():
-    """Precisión a 15 minutos por fuente, contando cada señal individual resuelta a +900 segundos."""
+    """Precisión a 15 minutos por fuente; SIN CAMBIO cuenta como fallo y tardíos se excluyen."""
     try:
         with _connect() as conn:
             rows = conn.execute("""
                 WITH candidates AS (
-                    SELECT s.market_ticker, s.snapshot_key, s.signal_ts, s.direction, o.result,
+                    SELECT s.market_ticker, s.snapshot_key, s.id, s.direction, o.result,
                         source.source
                     FROM btc_signal_snapshots AS s
                     JOIN btc_signal_outcomes AS o
@@ -1051,7 +1062,7 @@ def get_15m_prediction_accuracy_by_source():
                     source,
                     COUNT(*) FILTER (
                         WHERE direction IN ('ALCISTA', 'BAJISTA')
-                          AND result IN ('ALCISTA', 'BAJISTA')
+                          AND result IN ('ALCISTA', 'BAJISTA', 'SIN CAMBIO')
                     ),
                     COUNT(*) FILTER (
                         WHERE direction IN ('ALCISTA', 'BAJISTA')
@@ -1059,8 +1070,10 @@ def get_15m_prediction_accuracy_by_source():
                     ),
                     COUNT(*) FILTER (
                         WHERE direction IN ('ALCISTA', 'BAJISTA')
-                          AND result IN ('ALCISTA', 'BAJISTA')
-                          AND direction <> result
+                          AND (
+                              (result IN ('ALCISTA', 'BAJISTA') AND direction <> result)
+                              OR result = 'SIN CAMBIO'
+                          )
                     ),
                     COUNT(*) FILTER (
                         WHERE direction IN ('ALCISTA', 'BAJISTA')
@@ -1070,40 +1083,48 @@ def get_15m_prediction_accuracy_by_source():
                         WHERE direction IN ('INDECISO', 'RECOPILANDO')
                            OR direction IS NULL
                     ),
-                    COUNT(DISTINCT COALESCE(market_ticker, snapshot_key)) FILTER (
+                    COUNT(DISTINCT COALESCE(NULLIF(market_ticker, ''), NULLIF(snapshot_key, ''), id::TEXT)) FILTER (
                         WHERE direction IN ('ALCISTA', 'BAJISTA')
-                          AND result IN ('ALCISTA', 'BAJISTA')
+                          AND result IN ('ALCISTA', 'BAJISTA', 'SIN CAMBIO')
                     ),
-                    COUNT(DISTINCT COALESCE(market_ticker, snapshot_key)) FILTER (
+                    COUNT(DISTINCT COALESCE(NULLIF(market_ticker, ''), NULLIF(snapshot_key, ''), id::TEXT)) FILTER (
                         WHERE direction IN ('INDECISO', 'RECOPILANDO')
                            OR direction IS NULL
+                    ),
+                    COUNT(*) FILTER (
+                        WHERE direction IN ('ALCISTA', 'BAJISTA')
+                          AND result IN ('TARDIO_ALCISTA', 'TARDIO_BAJISTA', 'TARDIO_SIN_CAMBIO')
                     )
                 FROM candidates
                 GROUP BY source
                 ORDER BY source
             """).fetchall()
         result = []
-        for source, evaluated, correct, incorrect, no_change, indecisive, contracts, indecisive_contracts in rows:
+        for source, evaluated, correct, incorrect, no_change, indecisive, contracts, indecisive_contracts, late in rows:
+            correct, incorrect = int(correct or 0), int(incorrect or 0)
             total = correct + incorrect
             result.append({
                 "source": source,
-                "predictions_evaluated": evaluated,
-                "contracts_evaluated": contracts,
+                "predictions_evaluated": int(evaluated or 0),
+                "contracts_evaluated": int(contracts or 0),
                 "correct": correct,
                 "incorrect": incorrect,
-                "no_change": no_change,
-                "indecisive_predictions": indecisive,
-                "indecisive_contracts": indecisive_contracts,
+                "no_change": int(no_change or 0),
+                "indecisive_predictions": int(indecisive or 0),
+                "indecisive_contracts": int(indecisive_contracts or 0),
+                "late_predictions_excluded": int(late or 0),
                 "accuracy_pct": round(correct * 100 / total, 1) if total else None,
-                "measurement": "TODAS LAS SEÑALES INDIVIDUALES CON HORIZONTE REAL DE 900S · PUEDE REPETIR CONTRATO · POR FUENTE"
+                "measurement": "SEÑALES A +900S; SIN CAMBIO CUENTA COMO FALLO; TARDIAS EXCLUIDAS · POR FUENTE"
             })
         return {
             "sources": result,
             "error": None,
-            "measurement": "TODAS LAS SEÑALES INDIVIDUALES CON HORIZONTE REAL DE 900S · PUEDE REPETIR CONTRATO · POR FUENTE"
+            "measurement": "SEÑALES A +900S; SIN CAMBIO CUENTA COMO FALLO; TARDIAS EXCLUIDAS · POR FUENTE"
         }
     except Exception as exc:
         return {"sources": [], "error": str(exc)[:180]}
+
+
 
 
 def get_recent_predictions(limit=50):
@@ -1377,21 +1398,22 @@ def get_official_market_accuracy():
 
 
 def get_15m_prediction_accuracy_by_contract():
-    """Evalúa solo el pronóstico fijo de 900s más reciente por contrato/ventana."""
+    """Evalúa el último pronóstico 15m resuelto por contrato; SIN CAMBIO es fallo."""
     empty = {
         "predictions_evaluated": 0, "correct": 0, "incorrect": 0,
         "no_change": 0, "indecisive_predictions": 0,
-        "contracts_evaluated": 0, "accuracy_pct": None,
-        "measurement": "ULTIMO PRONOSTICO 15M POR CONTRATO/VENTANA"
+        "contracts_evaluated": 0, "indecisive_contracts": 0,
+        "late_predictions_excluded": 0, "accuracy_pct": None,
+        "measurement": "ULTIMO PRONOSTICO 15M RESUELTO POR CONTRATO; SIN CAMBIO CUENTA COMO FALLO"
     }
     try:
         with _connect() as conn:
             row = conn.execute("""
                 WITH latest AS (
                     SELECT DISTINCT ON (
-                        COALESCE(s.market_ticker, s.snapshot_key)
+                        COALESCE(NULLIF(s.market_ticker, ''), NULLIF(s.snapshot_key, ''), s.id::TEXT)
                     )
-                        COALESCE(s.market_ticker, s.snapshot_key) AS contract_key,
+                        COALESCE(NULLIF(s.market_ticker, ''), NULLIF(s.snapshot_key, ''), s.id::TEXT) AS contract_key,
                         s.direction,
                         o.result
                     FROM btc_signal_snapshots AS s
@@ -1400,13 +1422,13 @@ def get_15m_prediction_accuracy_by_contract():
                      AND o.horizon_seconds = 900
                      AND o.future_price IS NOT NULL
                     WHERE s.features->>'forecast_horizon_seconds' = '900'
-                    ORDER BY COALESCE(s.market_ticker, s.snapshot_key),
+                    ORDER BY COALESCE(NULLIF(s.market_ticker, ''), NULLIF(s.snapshot_key, ''), s.id::TEXT),
                              s.signal_ts DESC, s.id DESC
                 )
                 SELECT
                     COUNT(*) FILTER (
                         WHERE direction IN ('ALCISTA', 'BAJISTA')
-                          AND result IN ('ALCISTA', 'BAJISTA')
+                          AND result IN ('ALCISTA', 'BAJISTA', 'SIN CAMBIO')
                     ),
                     COUNT(*) FILTER (
                         WHERE direction IN ('ALCISTA', 'BAJISTA')
@@ -1414,8 +1436,10 @@ def get_15m_prediction_accuracy_by_contract():
                     ),
                     COUNT(*) FILTER (
                         WHERE direction IN ('ALCISTA', 'BAJISTA')
-                          AND result IN ('ALCISTA', 'BAJISTA')
-                          AND direction <> result
+                          AND (
+                              (result IN ('ALCISTA', 'BAJISTA') AND direction <> result)
+                              OR result = 'SIN CAMBIO'
+                          )
                     ),
                     COUNT(*) FILTER (
                         WHERE direction IN ('ALCISTA', 'BAJISTA')
@@ -1425,23 +1449,39 @@ def get_15m_prediction_accuracy_by_contract():
                         WHERE direction IN ('INDECISO', 'RECOPILANDO')
                            OR direction IS NULL
                     ),
-                    COUNT(DISTINCT contract_key)
+                    COUNT(DISTINCT contract_key) FILTER (
+                        WHERE direction IN ('ALCISTA', 'BAJISTA')
+                          AND result IN ('ALCISTA', 'BAJISTA', 'SIN CAMBIO')
+                    ),
+                    COUNT(DISTINCT contract_key) FILTER (
+                        WHERE direction IN ('INDECISO', 'RECOPILANDO')
+                           OR direction IS NULL
+                    ),
+                    COUNT(*) FILTER (
+                        WHERE direction IN ('ALCISTA', 'BAJISTA')
+                          AND result IN ('TARDIO_ALCISTA', 'TARDIO_BAJISTA', 'TARDIO_SIN_CAMBIO')
+                    )
                 FROM latest
             """).fetchone()
-        evaluated, correct, incorrect, no_change, indecisive, contracts = row
-        total = int(correct or 0) + int(incorrect or 0)
+        evaluated, correct, incorrect, no_change, indecisive, contracts, indecisive_contracts, late = row
+        correct, incorrect = int(correct or 0), int(incorrect or 0)
+        total = correct + incorrect
         return {
             "predictions_evaluated": int(evaluated or 0),
-            "correct": int(correct or 0),
-            "incorrect": int(incorrect or 0),
+            "correct": correct,
+            "incorrect": incorrect,
             "no_change": int(no_change or 0),
             "indecisive_predictions": int(indecisive or 0),
             "contracts_evaluated": int(contracts or 0),
-            "accuracy_pct": round(int(correct or 0) * 100 / total, 1) if total else None,
-            "measurement": "ULTIMO PRONOSTICO 15M POR CONTRATO/VENTANA"
+            "indecisive_contracts": int(indecisive_contracts or 0),
+            "late_predictions_excluded": int(late or 0),
+            "accuracy_pct": round(correct * 100 / total, 1) if total else None,
+            "measurement": "ULTIMO PRONOSTICO 15M RESUELTO POR CONTRATO; SIN CAMBIO CUENTA COMO FALLO"
         }
     except Exception as exc:
         return {**empty, "error": str(exc)[:180]}
+
+
 
 
 def get_15m_error_diagnostics():
@@ -1464,7 +1504,7 @@ def get_15m_error_diagnostics():
                      AND o.future_price IS NOT NULL
                     WHERE s.features->>'forecast_horizon_seconds' = '900'
                       AND s.direction IN ('ALCISTA', 'BAJISTA')
-                      AND o.result IN ('ALCISTA', 'BAJISTA')
+                      AND o.result IN ('ALCISTA', 'BAJISTA', 'SIN CAMBIO')
                       AND (
                         UPPER(COALESCE(s.features->>'signal_source', '')) LIKE '%BRTI%'
                         OR UPPER(COALESCE(s.features->>'direction_method', '')) LIKE '%BRTI%'
