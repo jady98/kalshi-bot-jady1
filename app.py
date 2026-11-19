@@ -919,8 +919,8 @@ def calculate_prediction(
         bullish, bearish, probability_calibrated, probability_calibration_samples, probability_calibration_method = calibrate_directional_scores(
             raw_bullish, raw_bearish
         )
-        direction = "ALCISTA" if bullish >= bearish else "BAJISTA"
-
+        # No sobrescribir la dirección estabilizada con el porcentaje mayor:
+        # un empate o una señal débil no debe convertirse artificialmente en lado.
         return {
             "direction": direction,
             "predicted_price": round(predicted, 2),
@@ -1435,18 +1435,15 @@ def calculate_prediction(
         raw_bullish, raw_bearish
     )
 
-    # La interfaz siempre muestra el lado con mayor probabilidad.
-    # La confirmación de entrada conserva sus filtros estrictos en build_forward_guidance.
-    display_direction = (
-        "ALCISTA" if bullish >= bearish else "BAJISTA"
-    )
+    # La dirección respeta el umbral y la estabilización anteriores.
+    # Los porcentajes pueden mostrar una inclinación sin convertirla en señal firme.
 
     # --------------------------------------
     # RESULTADO
     # --------------------------------------
 
     return {
-        "direction": display_direction,
+        "direction": direction,
         "predicted_price": round(predicted, 2),
         "bullish_score": bullish,
         "bearish_score": bearish,
