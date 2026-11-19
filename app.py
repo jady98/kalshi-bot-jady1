@@ -2900,8 +2900,8 @@ def get_data():
         close_ts=guidance_close
     )
     guidance_alert = update_guidance_alert(
-        guidance, guidance_ticker,
-        contract_active=True
+        guidance, market_ticker if contract_active else None,
+        contract_active=contract_active
     )
     if guidance_alert is not None:
         alert_data = guidance_alert
