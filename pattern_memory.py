@@ -1743,7 +1743,7 @@ def get_paper_trade_stats():
     """Auditoría de rentabilidad simulada neta de comisiones."""
     empty = {
         "measurement": "ENTRADAS CONFIRMADAS SIMULADAS · PRECIO ASK OBSERVADO · RESULTADO OFICIAL KALSHI",
-        "trades_total": 0, "resolved": 0, "pending": 0,
+        "trades_total": 0, "resolved": 0, "pending": 0, "voided": 0,
         "wins": 0, "losses": 0, "win_rate_pct": None,
         "realized_pnl": 0.0, "roi_pct": None,
         "average_entry_price": None, "fees_total": 0.0,
