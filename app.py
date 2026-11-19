@@ -2843,10 +2843,11 @@ def get_data():
                         last_direction,
                         source="kalshi_api"
                     )
-                    if saved_official:
-                        pattern_memory.resolve_paper_trade(
-                            queued_ticker, "SI" if official == "yes" else "NO"
-                        )
+                # El resultado oficial liquida la entrada simulada aunque no exista
+                # una señal direccional guardada para la métrica de precisión.
+                pattern_memory.resolve_paper_trade(
+                    queued_ticker, "SI" if official == "yes" else "NO"
+                )
                 # Si no hubo señal, no inventar evaluación; si falla la BD,
                 # mantener el contrato pendiente para reintentar el registro.
                 if last_direction not in ("ALCISTA", "BAJISTA") or saved_official:
