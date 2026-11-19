@@ -3253,10 +3253,7 @@ def health():
         "official_market_accuracy":
             pattern_memory.get_official_market_accuracy(),
         "model_comparison_accuracy":
-            pattern_memory.get_model_comparison_accuracy(),
-
-         "paper_trade_audit":
-            pattern_memory.get_paper_trade_stats()
+            pattern_memory.get_model_comparison_accuracy()
 
     })
 
@@ -3307,7 +3304,10 @@ def stats():
             pattern_memory.get_official_market_accuracy(),
 
          "model_comparison_accuracy":
-            pattern_memory.get_model_comparison_accuracy()
+            pattern_memory.get_model_comparison_accuracy(),
+
+         "paper_trade_audit":
+            pattern_memory.get_paper_trade_stats()
 
     })
 
