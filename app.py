@@ -785,17 +785,29 @@ def calculate_prediction(
         predicted = float(price) * (1 + projected_change / 100)
 
         target_gap_pct = None
+        target_expected_move_pct = None
+        target_z_score = None
         target_direction = "SIN OBJETIVO"
         target_influence = "SIN OBJETIVO"
         normalized = max(-1.0, min(1.0, momentum / 0.05)) * 0.55
 
         if valid_price(market_target):
             target_gap_pct = ((predicted - float(market_target)) / float(market_target)) * 100
-            target_normalized = max(-1.0, min(1.0, target_gap_pct / 0.05))
-            normalized = (
-                math.copysign(0.70 * abs(target_normalized) + 0.30 * abs(normalized), target_gap_pct)
-                if abs(target_gap_pct) > 0.005 else normalized * 0.30
+            tick_prices = [item[1] for item in recent_ticks if valid_price(item[1])]
+            tick_range_pct = (
+                (max(tick_prices) - min(tick_prices))
+                / (sum(tick_prices) / len(tick_prices)) * 100
+                if len(tick_prices) >= 3 else 0.0
             )
+            target_expected_move_pct = max(
+                0.015,
+                tick_range_pct * math.sqrt(max(1.0, remaining_minutes)) * 0.75
+            )
+            target_z_score = target_gap_pct / target_expected_move_pct
+            target_normalized = math.tanh(target_z_score)
+            # El strike se compara con el movimiento que todavía cabe en el tiempo restante.
+            # Evita que una distancia fija de 0.05% sature la señal en mercados volátiles.
+            normalized = 0.65 * target_normalized + 0.35 * normalized
             target_direction = (
                 "ALCISTA" if target_gap_pct > 0.005
                 else "BAJISTA" if target_gap_pct < -0.005
@@ -837,6 +849,8 @@ def calculate_prediction(
             "pattern": "SEÑAL INICIAL BRTI · TICKS",
             "target_influence": target_influence,
             "target_gap_pct": round(target_gap_pct, 5) if target_gap_pct is not None else None,
+            "target_expected_move_pct": round(target_expected_move_pct, 5) if target_expected_move_pct is not None else None,
+            "target_z_score": round(target_z_score, 4) if target_z_score is not None else None,
             "target_direction": target_direction,
             "technical_score": round(normalized, 4),
             "probability_calibrated": probability_calibrated,
@@ -1231,6 +1245,9 @@ def calculate_prediction(
 
     normalized = technical_normalized
     target_gap_pct = None
+    target_expected_move_pct = None
+    target_z_score = None
+    target_normalized = None
     target_direction = "SIN OBJETIVO"
 
     if valid_price(market_target):
@@ -1239,24 +1256,21 @@ def calculate_prediction(
             / float(market_target)
         ) * 100
 
-        # El precio proyectado respecto al strike determina el lado
-        # probable del contrato. La técnica también se calcula con velas BRTI.
-        target_normalized = max(
-            -1.0,
-            min(1.0, target_gap_pct / 0.05)
+        # Escala de riesgo basada en el rango BRTI observado y el tiempo restante.
+        # La distancia al strike deja de usar un umbral fijo para todos los mercados.
+        target_expected_move_pct = max(
+            0.015,
+            average_range_pct * math.sqrt(max(1.0, remaining_minutes)) * 0.75
         )
+        target_z_score = target_gap_pct / target_expected_move_pct
+        target_normalized = math.tanh(target_z_score)
 
-        if abs(target_gap_pct) > 0.005:
-            # BRTI determina el lado frente al strike; Coinbase solo confirma.
-            normalized = math.copysign(
-                0.70 * abs(target_normalized)
-                + 0.30 * abs(technical_normalized),
-                target_gap_pct
-            )
-        else:
-            # Si la proyección está prácticamente sobre el strike,
-            # no se fuerza un lado: la técnica puede dejarlo indeciso.
-            normalized = 0.30 * technical_normalized
+        # Combina la posición proyectada frente al strike con la estructura BRTI.
+        # El strike pesa más, pero no puede imponer el lado cuando la ventaja es pequeña.
+        normalized = (
+            0.65 * target_normalized
+            + 0.35 * technical_normalized
+        )
 
         tolerance_pct = 0.005
         if target_gap_pct > tolerance_pct:
@@ -1307,8 +1321,8 @@ def calculate_prediction(
     # el objetivo vigente de Kalshi.
     target_side_locked = bool(
         valid_price(market_target)
-        and target_gap_pct is not None
-        and abs(target_gap_pct) > 0.005
+        and target_normalized is not None
+        and abs(target_normalized) >= 0.90
     )
     if target_side_locked:
         normalized = math.copysign(abs(normalized), target_gap_pct)
@@ -1363,6 +1377,14 @@ def calculate_prediction(
         "target_gap_pct": (
             round(target_gap_pct, 5)
             if target_gap_pct is not None else None
+        ),
+        "target_expected_move_pct": (
+            round(target_expected_move_pct, 5)
+            if target_expected_move_pct is not None else None
+        ),
+        "target_z_score": (
+            round(target_z_score, 4)
+            if target_z_score is not None else None
         ),
         "target_direction": target_direction,
         "technical_score": round(technical_normalized, 4),
