@@ -3068,7 +3068,22 @@ button{border:1px solid #35476b;background:#182640;color:white;border-radius:9px
 .radar-alert-state.exit{background:#681f31;color:#ffb1bf}
 .radar-alert-message{font-size:16px;font-weight:950;line-height:1.25;margin:2px 0 5px}
 .radar-alert-detail{font-size:11px;line-height:1.4;color:#dce4f4}
-@media(max-width:380px){.radar-alert-heading button{font-size:9px;padding:8px 7px}.radar-alert-message{font-size:14px}}
+/* Vista compacta: conserva los avisos, libera altura para la gráfica. */
+.compact-radar-alert{padding:8px 10px!important;margin:5px 0!important}
+.compact-radar-alert .radar-alert-heading .section-title{margin:0;font-size:9px}
+.compact-radar-alert .radar-alert-heading .small{font-size:8px;line-height:1.2}
+.compact-radar-alert .radar-alert-heading button{padding:6px 8px;font-size:8px}
+.compact-radar-alert .radar-alert-state{margin:4px 0 0;padding:4px 7px;font-size:9px}
+.compact-radar-alert .radar-alert-message,.compact-radar-alert .radar-alert-detail{display:none}
+.compact-radar-alert.has-event .radar-alert-message{display:block;font-size:11px;line-height:1.25;margin:4px 0 0}
+.compact-radar-alert.has-event .radar-alert-detail{display:block;font-size:9px;line-height:1.25;margin-top:2px}
+.compact-pattern{grid-template-columns:minmax(0,1fr) auto;gap:3px 8px;margin:3px 0 5px!important;padding:6px 9px!important;cursor:pointer;min-height:0}
+.compact-pattern .pattern-name{font-size:11px!important;line-height:1.15}
+.compact-pattern .pattern-state{font-size:8px!important;line-height:1.1}
+.compact-pattern .pattern-description,.compact-pattern .pattern-history{display:none}
+.compact-pattern.expanded .pattern-description,.compact-pattern.expanded .pattern-history{display:block;font-size:10px!important;line-height:1.25;margin-top:3px}
+@media(max-width:380px){.radar-alert-heading button{font-size:8px;padding:6px 7px}.radar-alert-message{font-size:11px}}
+
 </style>
 </head>
 
@@ -3206,7 +3221,7 @@ button{border:1px solid #35476b;background:#182640;color:white;border-radius:9px
 
 </section>
 
-<section class="card radar-alert-panel" id="radarAlertPanel" aria-live="polite">
+<section class="card radar-alert-panel compact-radar-alert" id="radarAlertPanel" aria-live="polite">
     <div class="row radar-alert-heading">
         <div>
             <div class="section-title">ALERTAS INTELIGENTES · ENTRADA Y SALIDA</div>
@@ -3271,7 +3286,7 @@ button{border:1px solid #35476b;background:#182640;color:white;border-radius:9px
 
     </div>
 
-    <div class="pattern-guide none" id="patternGuide">
+    <div class="pattern-guide none compact-pattern" id="patternGuide" role="button" tabindex="0" aria-expanded="false" onclick="togglePatternGuide()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();togglePatternGuide()}">
         <div class="pattern-name" id="patternName">PATRÓN: ANALIZANDO VELAS</div>
         <div class="pattern-state" id="patternState">ESPERANDO</div>
         <div class="pattern-description" id="patternDescription">El radar señalará aquí las velas que forman el patrón y explicará qué puede indicar.</div>
@@ -3798,6 +3813,13 @@ function describePattern(pattern){
         next:"Sigue observando las velas; no fuerces una interpretación cuando el patrón no está claro."
     };
 }
+function togglePatternGuide(){
+    const guide=$("patternGuide");
+    if(!guide) return;
+    const expanded=guide.classList.toggle("expanded");
+    guide.setAttribute("aria-expanded",expanded?"true":"false");
+}
+
 function updatePatternGuide(pattern, candleRows, mainDirection, samples){
     const guide=$("patternGuide");
     const name=$("patternName");
@@ -3808,7 +3830,8 @@ function updatePatternGuide(pattern, candleRows, mainDirection, samples){
     const key=String(pattern || "SIN PATRÓN CLARO").toUpperCase();
     const lesson=describePattern(key);
     const isNone=lesson.bars===0;
-    guide.className="pattern-guide "+(isNone?"none":lesson.direction);
+    const wasExpanded=guide.classList.contains("expanded");
+    guide.className="pattern-guide compact-pattern "+(isNone?"none":lesson.direction)+(wasExpanded?" expanded":"");
     name.textContent=isNone?"PATRÓN: SIN PATRÓN CLARO":key;
     description.textContent=lesson.text+(lesson.next?" Qué observar: "+lesson.next:"");
     const history=$("patternHistory");
@@ -3925,6 +3948,7 @@ function handleRadarAlert(data){
 
     state.className = "radar-alert-state " + (isExit ? "exit" : isEntry ? "entry" : isPrealert ? "prealert" : "neutral");
     state.textContent = isExit ? "SALIDA · PROTEGER" : isEntry ? "ENTRADA CONFIRMADA" : isPrealert ? "PREALERTA" : "ESPERANDO UNA SEÑAL";
+    panel.classList.toggle("has-event", isExit || isEntry || isPrealert);
     message.textContent = alertData.message || (
         isEntry ? "ENTRADA CONFIRMADA · " + (data.entry_direction || data.direction || "") :
         isPrealert ? "POSIBLE " + (data.entry_direction || data.direction || "") :
