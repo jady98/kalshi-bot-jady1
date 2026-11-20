@@ -3686,6 +3686,18 @@ button{border:1px solid #35476b;background:#182640;color:white;border-radius:9px
 .manual-position-buttons button.selected{border-color:#00d995;background:#103b2b;color:#79ffc0;box-shadow:0 0 12px #00d99533}
 .manual-entry-price{display:block;width:100%;margin:6px 0 8px;padding:10px;border:1px solid #34415a;border-radius:8px;background:#080d18;color:#fff;font-size:16px}
 #manualPositionStatus{line-height:1.5;color:#aab6cc}
+.economics-panel{margin-top:8px;padding:9px;border:1px solid #3b4965;border-radius:11px;background:linear-gradient(135deg,#111d31,#0b1220)}
+.economics-heading{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:7px;font-size:9px;letter-spacing:.35px;color:#cbd7ed}
+.economics-heading span{font-size:8px;font-weight:900;text-align:right;color:#f4c95d}
+.economics-heading span.negative{color:#ff7c8d}.economics-heading span.positive{color:#55e0a6}
+.economics-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
+.economics-grid>div{min-width:0;padding:6px;border:1px solid #293750;border-radius:7px;background:#0b1424}
+.economics-grid span{display:block;color:#91a2bf;font-size:8px;line-height:1.2;margin-bottom:4px}
+.economics-grid b{display:block;color:#f4f6ff;font-size:clamp(10px,2.8vw,13px);line-height:1.15;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
+#economicsEV{font-weight:950}
+.economics-explain{margin-top:7px;color:#d4def0;font-size:9px;line-height:1.3}
+.economics-disclaimer{margin-top:4px;color:#8492aa;font-size:8px;line-height:1.25}
+@media(max-width:600px){.economics-panel{margin-top:5px;padding:6px}.economics-heading{font-size:8px;margin-bottom:5px}.economics-heading span{font-size:7px}.economics-grid{gap:4px}.economics-grid>div{padding:5px 4px}.economics-grid span{font-size:7px}.economics-grid b{font-size:10px}.economics-explain{font-size:8px;margin-top:5px}.economics-disclaimer{font-size:7px}}
 </style>
 </head>
 
@@ -3822,7 +3834,22 @@ button{border:1px solid #35476b;background:#182640;color:white;border-radius:9px
     </div>
     <div class="small" id="newsIntel">INTELIGENCIA EXTERNA · RECOPILANDO</div>
     <div class="small" id="newsHeadlines">Esperando titulares de fuentes públicas.</div>
-    <div class="small" id="entryEconomics">Precio ejecutable Kalshi: esperando libro de órdenes</div>
+    <div class="economics-panel" id="entryEconomicsPanel" aria-live="polite">
+        <div class="economics-heading">
+            <strong>PRECIO Y RENTABILIDAD ESTIMADA · KALSHI</strong>
+            <span id="economicsStatus">ESPERANDO LIBRO</span>
+        </div>
+        <div class="economics-grid">
+            <div><span>Probabilidad del modelo</span><b id="economicsProbability">--</b></div>
+            <div><span>Precio de entrada</span><b id="economicsAsk">--</b></div>
+            <div><span>Comisión estimada</span><b id="economicsFee">--</b></div>
+            <div><span>Costo total / contrato</span><b id="economicsTotal">--</b></div>
+            <div><span>Probabilidad de equilibrio</span><b id="economicsBreakEven">--</b></div>
+            <div><span>Ganancia/pérdida estimada</span><b id="economicsEV">--</b></div>
+        </div>
+        <div class="economics-explain" id="economicsExplanation">El cálculo aparecerá cuando Kalshi entregue un precio ejecutable.</div>
+        <div class="economics-disclaimer">Estimación del modelo, no garantía de acierto ni rentabilidad. No ejecuta órdenes.</div>
+    </div>
 
     <div id="accuracyStrip" hidden>
         <span id="accuracyUpdated">CARGANDO...</span>
@@ -4878,19 +4905,29 @@ function updateRadar(d){
 
     const economics = d.entry_economics || {};
     const book = d.kalshi_orderbook || {};
+    const economicsStatus = $("economicsStatus");
+    const economicsExplanation = $("economicsExplanation");
     if (economics.available) {
         const ev = Number(economics.estimated_net_ev_per_contract);
-        const evText = (ev >= 0 ? "+" : "") + "$" + ev.toFixed(4);
-        $("entryEconomics").textContent =
-            "KALSHI " + economics.side + " · entrada " +
-            "$" + Number(economics.entry_ask).toFixed(4) +
-            " · tarifa " + "$" + Number(economics.estimated_taker_fee).toFixed(4) +
-            " · EV estimado " + evText + "/contrato";
-        $("entryEconomics").style.color = ev > 0 ? "#55e0a6" : "#ff7c8d";
+        const probability = Number(economics.model_probability_pct);
+        const total = Number(economics.estimated_total_cost);
+        const breakEven = Number(economics.break_even_probability_pct);
+        const money = value => "$" + Number(value).toFixed(4);
+        $("economicsProbability").textContent = probability.toFixed(1) + "%";
+        $("economicsAsk").textContent = money(economics.entry_ask) + " (" + (Number(economics.entry_ask)*100).toFixed(1) + "¢)";
+        $("economicsFee").textContent = money(economics.estimated_taker_fee);
+        $("economicsTotal").textContent = money(total);
+        $("economicsBreakEven").textContent = breakEven.toFixed(1) + "%";
+        $("economicsEV").textContent = (ev >= 0 ? "+" : "−") + money(Math.abs(ev));
+        $("economicsEV").style.color = ev > 0 ? "#55e0a6" : "#ff7c8d";
+        economicsStatus.textContent = ev > 0 ? "VALOR ESPERADO POSITIVO" : "VALOR ESPERADO NEGATIVO · ENTRADA BLOQUEADA";
+        economicsStatus.className = ev > 0 ? "positive" : "negative";
+        economicsExplanation.textContent = "Para cubrir precio y comisión, el modelo necesita al menos " + breakEven.toFixed(1) + "% de probabilidad. Su estimación actual es " + probability.toFixed(1) + "%; diferencia: " + (probability-breakEven).toFixed(1) + " puntos.";
     } else {
-        $("entryEconomics").textContent =
-            "ECONOMÍA KALSHI · " + (economics.reason || book.error || "esperando precio ejecutable");
-        $("entryEconomics").style.color = "#aab2c5";
+        ["economicsProbability","economicsAsk","economicsFee","economicsTotal","economicsBreakEven","economicsEV"].forEach(id => $(id).textContent = "--");
+        economicsStatus.textContent = "ESPERANDO PRECIO EJECUTABLE";
+        economicsStatus.className = "";
+        economicsExplanation.textContent = economics.reason || book.error || "Esperando actualización del libro de órdenes de Kalshi.";
     }
 
     window.currentRadarTicker = d.kalshi_market_active ? d.kalshi_market_ticker : null;
