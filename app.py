@@ -4853,8 +4853,9 @@ function handleRadarAlert(data){
     panel.classList.toggle("has-event", isExit || isNewEntry || isPrealert || isDirectionChange);
 
     // Entrada y mantener permanecen iluminadas mientras la entrada siga vigente.
-    // Solo se ilumina una acción ejecutable: prealerta no equivale a entrada.
-    const activeSteps = isExit ? ["exit"] : isNewEntry ? ["entry"] : isHold ? ["hold"] : [];
+    // Al confirmar entrada, mantener encendidos ENTRAR y MANTENER durante toda la posición.
+    // Al activarse la salida, ambos se apagan y queda encendido únicamente SALIR.
+    const activeSteps = isExit ? ["exit"] : isNewEntry || isHold ? ["entry","hold"] : [];
     ["entry","hold","exit"].forEach(step=>{
         const item = $("radarStep" + step.charAt(0).toUpperCase() + step.slice(1));
         if(item) item.classList.toggle("active", activeSteps.includes(step));
