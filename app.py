@@ -2713,25 +2713,6 @@ def build_forward_guidance(
         note = "Fuerza técnica insuficiente para activar una prealerta."
     elif not align_1m:
         note = "El movimiento de 1 minuto todavía no acompaña la dirección."
-    # La señal técnica por sí sola no basta: se bloquea la entrada hasta
-    # validar precisión post-reinicio con al menos 30 contratos resueltos.
-    if stage == "ENTRADA" and not validation.get("qualified"):
-        stage = "ENTRADA BLOQUEADA · VALIDACIÓN"
-        if validation.get("status") == "MUESTRA INSUFICIENTE":
-            note += (
-                " Entrada bloqueada: validación post-reinicio "
-                + str(validation.get("samples", 0)) + "/"
-                + str(validation.get("minimum_samples", 30))
-                + " contratos resueltos."
-            )
-        else:
-            note += (
-                " Entrada bloqueada: precisión observada "
-                + str(validation.get("accuracy_pct"))
-                + "%; se exige al menos "
-                + str(validation.get("minimum_accuracy_pct", 55.0)) + "%."
-            )
-
     return {
         "short_change_1m_pct": round(change_1m, 5) if change_1m is not None else None,
         "short_change_3m_pct": round(change_3m, 5) if change_3m is not None else None,
@@ -3204,8 +3185,6 @@ def get_data():
             entry_blocks.append("libro de Kalshi no disponible")
         elif not entry_economics.get("is_positive_estimated_ev"):
             entry_blocks.append("valor esperado neto no positivo")
-        if not entry_validation.get("qualified"):
-            entry_blocks.append("validación estadística pendiente")
         if entry_blocks:
             guidance["entry_stage"] = "ENTRADA BLOQUEADA · CONFIRMACIÓN"
             guidance["entry_direction"] = None
