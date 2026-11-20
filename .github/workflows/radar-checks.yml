@@ -21,4 +21,6 @@ jobs:
       - name: Check Python syntax
         run: python -m compileall -q app.py pattern_memory.py market_intelligence.py tests
       - name: Run BRTI feed regression tests
-        run: pytest -q
+        env:
+          PYTHONPATH: .
+        run: python -m pytest -q
