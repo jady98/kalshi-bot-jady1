@@ -2801,6 +2801,14 @@ def update_guidance_alert(guidance, ticker, contract_active=False):
                         "El radar espera confirmación del deterioro antes de indicar salida. "
                         + str(guidance.get("guidance_note") or "")
                     )
+                    if state["danger_count"] == 1:
+                        alert = {
+                            "type": "MANTENER", "level": "AVISO",
+                            "message": "MANTENER · " + str(previous_direction),
+                            "detail": "La entrada sigue activa; el radar detectó una lectura débil aislada y vigila si se confirma el deterioro.",
+                            "ticker": str(ticker), "seconds_remaining": seconds_left,
+                            "timestamp": now
+                        }
 
         should_exit = previous_stage == "ENTRADA" and (
             stage != "ENTRADA" or direction != previous_direction
@@ -4779,7 +4787,7 @@ function handleRadarAlert(data){
     }
     if(radarAlertsEnabled && "Notification" in window && Notification.permission === "granted"){
         try{
-            new Notification(isExit ? "BTC Radar · SALIDA" : "BTC Radar · ENTRADA",{
+            new Notification(isExit ? "BTC Radar · SALIDA" : eventType === "MANTENER" ? "BTC Radar · MANTENER" : "BTC Radar · ENTRADA",{
                 body: (alertData.message || "") + (alertData.detail ? "\n" + alertData.detail : ""),
                 tag: eventKey,
                 renotify: true
