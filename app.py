@@ -4613,18 +4613,21 @@ function updatePatternGuide(pattern, candleRows, mainDirection, samples){
     if(!conflicts) state.textContent=isNone?"OBSERVANDO":(forming?"EN FORMACIÓN":"VELA CERRADA");
 
     patternMarkers=[];
-    if(!isNone && rows.length){
-        // Una sola etiqueta breve y en español sobre la última vela del patrón.
-        // Así se identifica la figura sin llenar ni tapar la gráfica.
+    if(rows.length){
+        // Siempre identifica la última vela. Si no hay patrón reconocido,
+        // muestra únicamente su dirección para no dejar la gráfica sin señales.
         const c=rows[rows.length-1];
-        const bullish=lesson.direction==="bull";
-        const bearish=lesson.direction==="bear";
+        const candleBullish=Number(c.close)>Number(c.open);
+        const candleBearish=Number(c.close)<Number(c.open);
+        const bullish=isNone?candleBullish:lesson.direction==="bull";
+        const bearish=isNone?candleBearish:lesson.direction==="bear";
+        const fallbackLabel=candleBullish?"Vela alcista":(candleBearish?"Vela bajista":"Vela indecisa");
         patternMarkers.push({
             time:displayChartTime(c.time),
-            position:"aboveBar",
+            position:bullish?"aboveBar":"belowBar",
             color:bullish?"#00d995":(bearish?"#ff5269":"#f4c95d"),
             shape:bullish?"arrowUp":(bearish?"arrowDown":"circle"),
-            text:lesson.label
+            text:isNone?fallbackLabel:lesson.label
         });
     }
     if(chart && candleSeries) candleSeries.setMarkers(patternMarkers);
