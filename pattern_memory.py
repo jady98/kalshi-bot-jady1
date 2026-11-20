@@ -2012,6 +2012,7 @@ def get_15m_prediction_accuracy_by_contract():
                      AND o.horizon_seconds = 900
                      AND o.future_price IS NOT NULL
                     WHERE s.features->>'forecast_horizon_seconds' = '900'
+                      AND NULLIF(BTRIM(s.market_ticker), '') IS NOT NULL
                       AND s.signal_ts >= COALESCE(
                           (SELECT reset_ts FROM btc_prediction_stats_control WHERE id = 1), 0
                       )
@@ -2027,6 +2028,7 @@ def get_15m_prediction_accuracy_by_contract():
                      AND o.horizon_seconds = 900
                      AND o.future_price IS NOT NULL
                     WHERE s.features->>'forecast_horizon_seconds' = '900'
+                      AND NULLIF(BTRIM(s.market_ticker), '') IS NOT NULL
                       AND s.signal_ts >= COALESCE(
                           (SELECT reset_ts FROM btc_prediction_stats_control WHERE id = 1), 0
                       )
