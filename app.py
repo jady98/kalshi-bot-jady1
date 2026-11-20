@@ -3156,6 +3156,7 @@ def get_data():
         "kalshi_market_active": contract_active,
         "kalshi_market_target": market_target,
         "kalshi_market_ticker": market_ticker if contract_active else None,
+        "manual_position": pattern_memory.get_manual_position(market_ticker if contract_active else None),
         "kalshi_market_close": market_close,
         "seconds_to_close": countdown,
         "kalshi_market_error": market_error,
@@ -4742,11 +4743,28 @@ function updateRadar(d){
     }
 
     window.currentRadarTicker = d.kalshi_market_active ? d.kalshi_market_ticker : null;
+    const manualPanel = $("manualPosition");
     const manualStatus = $("manualPositionStatus");
-    if(manualStatus && !manualStatus.dataset.saved){
-        manualStatus.textContent = window.currentRadarTicker
-            ? "Contrato activo: " + window.currentRadarTicker + ". Registra YES o NO cuando compres."
-            : "Esperando un contrato activo de Kalshi.";
+    const manualPosition = d.manual_position || null;
+    const canRegister = String(d.entry_stage || "").toUpperCase() === "ENTRADA";
+    if(manualPanel) manualPanel.hidden = !canRegister && !manualPosition;
+    if(manualPosition){
+        $("manualYes").classList.toggle("selected",manualPosition.side==="YES");
+        $("manualNo").classList.toggle("selected",manualPosition.side==="NO");
+        if(manualPosition.entry_price != null) $("manualEntryPrice").value = Number(manualPosition.entry_price).toFixed(2);
+        if(manualStatus) manualStatus.textContent = "TU POSICIÓN: " + manualPosition.side +
+            (manualPosition.entry_price != null ? " · compra a " + Number(manualPosition.entry_price).toFixed(2) : " · precio no indicado") +
+            " · " + manualPosition.status;
+        if($("manualYes")) $("manualYes").disabled = true;
+        if($("manualNo")) $("manualNo").disabled = true;
+    }else{
+        if($("manualYes")) $("manualYes").disabled = !canRegister;
+        if($("manualNo")) $("manualNo").disabled = !canRegister;
+        if(manualStatus) manualStatus.textContent = canRegister
+            ? "Entrada confirmada. Selecciona YES o NO y, si puedes, indica el precio pagado."
+            : window.currentRadarTicker
+                ? "Se habilitará cuando el radar confirme la entrada."
+                : "Esperando un contrato activo de Kalshi.";
     }
     handleRadarAlert(d);
 
