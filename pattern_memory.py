@@ -1921,6 +1921,9 @@ def get_official_market_accuracy():
                         ELSE FALSE
                     END AS correct
                 FROM btc_official_market_results
+                WHERE recorded_ts >= COALESCE(
+                    (SELECT reset_ts FROM btc_prediction_stats_control WHERE id = 1), 0
+                )
                 ORDER BY recorded_ts DESC
             """).fetchall()
 
@@ -1999,6 +2002,9 @@ def get_15m_prediction_accuracy_by_contract():
                      AND o.horizon_seconds = 900
                      AND o.future_price IS NOT NULL
                     WHERE s.features->>'forecast_horizon_seconds' = '900'
+                      AND s.signal_ts >= COALESCE(
+                          (SELECT reset_ts FROM btc_prediction_stats_control WHERE id = 1), 0
+                      )
                     ORDER BY COALESCE(NULLIF(s.market_ticker, ''), NULLIF(s.snapshot_key, ''), s.id::TEXT),
                              s.signal_ts DESC, s.id DESC
                 )
