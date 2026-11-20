@@ -938,6 +938,9 @@ def get_prediction_accuracy():
                      AND o.horizon_seconds = -1
                      AND o.future_price IS NOT NULL
                     WHERE s.market_ticker IS NOT NULL
+                      AND s.signal_ts >= COALESCE(
+                          (SELECT reset_ts FROM btc_prediction_stats_control WHERE id = 1), 0
+                      )
                     ORDER BY s.market_ticker, s.signal_ts DESC, s.id DESC
                 )
                 SELECT
@@ -1008,6 +1011,9 @@ def get_prediction_accuracy_by_source():
                      AND o.horizon_seconds = -1
                      AND o.future_price IS NOT NULL
                     WHERE s.market_ticker IS NOT NULL
+                      AND s.signal_ts >= COALESCE(
+                          (SELECT reset_ts FROM btc_prediction_stats_control WHERE id = 1), 0
+                      )
                     ORDER BY s.market_ticker, s.signal_ts DESC, s.id DESC
                 ),
                 classified AS (
@@ -1238,6 +1244,9 @@ def get_15m_prediction_accuracy_by_source():
                      AND o.horizon_seconds = 900
                      AND o.future_price IS NOT NULL
                      AND s.features->>'forecast_horizon_seconds' = '900'
+                     AND s.signal_ts >= COALESCE(
+                         (SELECT reset_ts FROM btc_prediction_stats_control WHERE id = 1), 0
+                     )
                     CROSS JOIN LATERAL (
                         SELECT CASE
                             WHEN UPPER(COALESCE(s.features->>'signal_source', '')) LIKE '%BRTI%'
@@ -1397,6 +1406,21 @@ def get_recent_predictions(limit=50):
 
 def database_status():
     return _db_status
+
+
+def get_prediction_stats_reset_ts():
+    """Momento desde el que se cuentan las nuevas estadísticas; no borra el archivo histórico."""
+    try:
+        with _connect() as conn:
+            row = conn.execute("""
+                SELECT reset_ts
+                FROM btc_prediction_stats_control
+                WHERE id = 1
+            """).fetchone()
+        return float(row[0]) if row else None
+    except Exception:
+        return None
+
 
 def get_database_counts():
     empty = {
