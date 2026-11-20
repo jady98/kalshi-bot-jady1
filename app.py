@@ -3475,12 +3475,11 @@ button{border:1px solid #35476b;background:#182640;color:white;border-radius:9px
 
 .radar-alert-panel{border:1px solid #35415b;background:linear-gradient(135deg,rgba(20,27,48,.98),rgba(9,14,29,.98))}
 .radar-alert-heading{gap:7px;align-items:center}
-.radar-alert-tools{display:flex;align-items:center;gap:6px;min-width:0}
 .radar-alert-heading button{white-space:nowrap;font-size:9px;padding:6px 7px}
 .compact-radar-alert{padding:7px 8px!important;margin:3px 0!important}
 .compact-radar-alert .radar-alert-heading .section-title{margin:0;font-size:11px}
 .compact-radar-alert .radar-alert-heading .small{font-size:8px;line-height:1.15}
-.accuracy-mini{display:flex;flex-direction:column;gap:2px;padding:4px 6px;border:1px solid #34415b;border-radius:7px;background:#101a2b;font-size:7px;font-weight:850;white-space:nowrap}
+.accuracy-mini{display:flex;align-items:center;gap:12px;width:max-content;max-width:100%;margin:5px 0 4px;padding:4px 7px;border:1px solid #34415b;border-radius:7px;background:#101a2b;font-size:8px;font-weight:850;white-space:nowrap}
 .accuracy-mini b{font-size:9px;color:#fff;font-variant-numeric:tabular-nums}
 .accuracy-mini .accuracy-correct{color:#55e0a6}.accuracy-mini .accuracy-wrong{color:#ff7c8d}
 .radar-stage-list{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:5px;margin:6px 0 0}
@@ -3492,7 +3491,7 @@ button{border:1px solid #35476b;background:#182640;color:white;border-radius:9px
 #radarStepHold.active b{background:#f4c95d;color:#251900}
 #radarStepExit.active{border-color:#ff5269;background:#4a1825;color:#ffb1bf}
 #radarStepExit.active b{background:#ff5269;color:#2b0710}
-@media(max-width:380px){.radar-alert-tools{gap:4px}.radar-alert-heading button{font-size:7px;padding:5px 5px}.accuracy-mini{padding:3px 4px;font-size:6px}.accuracy-mini b{font-size:8px}.radar-stage-list{gap:3px}.radar-stage-item{font-size:7px;padding:4px 2px;gap:2px}}
+@media(max-width:380px){.radar-alert-heading button{font-size:7px;padding:5px 5px}.accuracy-mini{gap:8px;padding:3px 5px;font-size:7px}.accuracy-mini b{font-size:8px}.radar-stage-list{gap:3px}.radar-stage-item{font-size:7px;padding:4px 2px;gap:2px}}
 .compact-pattern{grid-template-columns:minmax(0,1fr) auto;gap:3px 8px;margin:3px 0 5px!important;padding:6px 9px!important;cursor:pointer;min-height:0}
 .compact-pattern .pattern-name{font-size:11px!important;line-height:1.15}
 .compact-pattern .pattern-state{font-size:8px!important;line-height:1.1}
@@ -3663,13 +3662,11 @@ button{border:1px solid #35476b;background:#182640;color:white;border-radius:9px
             <div class="section-title">ALERTAS</div>
             <div class="small" id="radarAlertStatus">BRTI · 15 MIN</div>
         </div>
-        <div class="radar-alert-tools">
-            <div class="accuracy-mini" aria-label="Precisión real: aciertos y errores">
-                <span class="accuracy-correct">ACIERTOS <b id="accuracyCorrect">--</b></span>
-                <span class="accuracy-wrong">ERRORES <b id="accuracyIncorrect">--</b></span>
-            </div>
-            <button id="alertsEnableButton" onclick="enableRadarAlerts()">ACTIVAR AVISOS</button>
-        </div>
+        <button id="alertsEnableButton" onclick="enableRadarAlerts()">ACTIVAR AVISOS</button>
+    </div>
+    <div class="accuracy-mini" aria-label="Precisión real: aciertos y errores">
+        <span class="accuracy-correct">ACIERTOS <b id="accuracyCorrect">--</b></span>
+        <span class="accuracy-wrong">ERRORES <b id="accuracyIncorrect">--</b></span>
     </div>
     <div class="radar-stage-list" aria-label="Estados de alerta">
         <div class="radar-stage-item" id="radarStepEntry"><b>✓</b><span>ENTRADA CONFIRMADA</span></div>
