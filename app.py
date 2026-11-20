@@ -3808,6 +3808,29 @@ button{border:1px solid #35476b;background:#182640;color:white;border-radius:9px
 .manual-entry-price{display:block;width:100%;margin:6px 0 8px;padding:10px;border:1px solid #34415a;border-radius:8px;background:#080d18;color:#fff;font-size:16px}
 #manualPositionStatus{line-height:1.5;color:#aab6cc}
 
+
+/* Alertas compactas: la explicación nunca debe empujar la gráfica fuera de pantalla. */
+.compact-radar-alert .radar-alert-state{
+  margin:4px 0 2px!important;padding:4px 7px!important;
+  font-size:9px!important;line-height:1.15!important;
+}
+.compact-radar-alert .radar-alert-message{
+  margin:3px 0 0!important;padding:4px 6px!important;
+  font-size:8px!important;line-height:1.2!important;
+  max-height:2.4em;overflow:hidden;
+  display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;
+}
+.compact-radar-alert .radar-alert-detail{
+  margin:2px 0 0!important;padding:0 6px!important;
+  font-size:7px!important;line-height:1.15!important;
+  max-height:1.2em;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;
+}
+@media(max-width:600px){
+  .compact-radar-alert .radar-alert-message{font-size:7px!important;max-height:2.4em}
+  .compact-radar-alert .radar-alert-detail{display:none!important}
+  .compact-radar-alert .manual-position{margin-top:4px!important;padding:5px!important}
+}
+
 </style>
 </head>
 
