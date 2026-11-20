@@ -3483,12 +3483,19 @@ button{border:1px solid #35476b;background:#182640;color:white;border-radius:9px
 .radar-alert-message{font-size:16px;font-weight:950;line-height:1.25;margin:2px 0 5px}
 .radar-alert-detail{font-size:11px;line-height:1.4;color:#dce4f4}
 /* Vista compacta: conserva los avisos, libera altura para la gráfica. */
-.compact-radar-alert{padding:8px 10px!important;margin:5px 0!important}
-.compact-radar-alert .radar-alert-heading .section-title{margin:0;font-size:9px}
-.compact-radar-alert .radar-alert-heading .small{font-size:8px;line-height:1.2}
-.compact-radar-alert .radar-alert-heading button{padding:6px 8px;font-size:8px}
-.compact-radar-alert .radar-alert-state{margin:4px 0 0;padding:5px 8px;font-size:10px}
-.compact-radar-alert .radar-alert-message,.compact-radar-alert .radar-alert-detail{display:none!important}
+.compact-radar-alert{padding:12px!important;margin:5px 0!important}
+.compact-radar-alert .radar-alert-heading .section-title{margin:0;font-size:13px}
+.compact-radar-alert .radar-alert-heading .small{font-size:10px;line-height:1.3}
+.compact-radar-alert .radar-alert-heading button{padding:8px 10px;font-size:10px}
+.compact-radar-alert .radar-alert-state{margin:8px 0;padding:9px 12px;font-size:15px}
+.compact-radar-alert .radar-alert-message{display:block!important;font-size:14px;line-height:1.35}
+.compact-radar-alert .radar-alert-detail{display:block!important;font-size:12px;line-height:1.4}
+.radar-stage-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;margin:8px 0}
+.radar-stage-item{display:flex;align-items:center;gap:8px;min-width:0;padding:9px 8px;border:1px solid #34425b;border-radius:9px;background:#101a2b;color:#aab8ce;font-size:11px;font-weight:800}
+.radar-stage-item b{display:grid;place-items:center;flex:0 0 22px;width:22px;height:22px;border-radius:50%;background:#29344a;color:#dce4f4;font-size:11px}
+.radar-stage-item.active{border-color:#45b98a;background:#103329;color:#d9ffec}
+.radar-stage-item.active b{background:#00d995;color:#062519}
+@media(max-width:380px){.radar-stage-list{grid-template-columns:1fr}.radar-stage-item{font-size:12px;padding:8px}}
 .compact-pattern{grid-template-columns:minmax(0,1fr) auto;gap:3px 8px;margin:3px 0 5px!important;padding:6px 9px!important;cursor:pointer;min-height:0}
 .compact-pattern .pattern-name{font-size:11px!important;line-height:1.15}
 .compact-pattern .pattern-state{font-size:8px!important;line-height:1.1}
@@ -3671,8 +3678,15 @@ button{border:1px solid #35476b;background:#182640;color:white;border-radius:9px
         <button id="alertsEnableButton" onclick="enableRadarAlerts()">ACTIVAR AVISOS</button>
     </div>
     <div class="radar-alert-state neutral" id="radarAlertState">OBSERVAR</div>
+    <div class="radar-stage-list" aria-label="Etapas de señal">
+        <div class="radar-stage-item active" id="radarStepObserve"><b>1</b><span>OBSERVAR</span></div>
+        <div class="radar-stage-item" id="radarStepPrealert"><b>2</b><span>PREALERTA</span></div>
+        <div class="radar-stage-item" id="radarStepEntry"><b>3</b><span>ENTRADA CONFIRMADA</span></div>
+        <div class="radar-stage-item" id="radarStepHold"><b>4</b><span>MANTENER</span></div>
+        <div class="radar-stage-item" id="radarStepExit"><b>5</b><span>SALIDA</span></div>
+    </div>
     <div class="radar-alert-message" id="radarAlertMessage"></div>
-    <div class="small radar-alert-detail" id="radarAlertDetail"></div>
+    <div class="radar-alert-detail" id="radarAlertDetail"></div>
 </section>
 
 
@@ -4432,6 +4446,11 @@ function handleRadarAlert(data){
     state.className = "radar-alert-state " + (isExit ? "exit" : isEntry ? "entry" : isPrealert ? "prealert" : "neutral");
     state.textContent = isExit ? "SALIDA" : isEntry ? "ENTRADA CONFIRMADA" : isPrealert ? "PREALERTA" : "OBSERVAR";
     panel.classList.toggle("has-event", isExit || isEntry || isPrealert);
+    const activeStep = isExit ? "exit" : isEntry ? "entry" : isPrealert ? "prealert" : "observe";
+    ["observe","prealert","entry","hold","exit"].forEach(step=>{
+        const item = $("radarStep" + step.charAt(0).toUpperCase() + step.slice(1));
+        if(item) item.classList.toggle("active", step === activeStep || (step === "hold" && isEntry));
+    });
     message.textContent = alertData.message || (
         isEntry ? "ENTRADA CONFIRMADA · " + (data.entry_direction || data.direction || "") :
         isPrealert ? "POSIBLE " + (data.entry_direction || data.direction || "") :
