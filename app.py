@@ -3318,6 +3318,7 @@ def health():
         "kalshi_market_target": data.get("kalshi_market_target"),
         "seconds_to_close": data.get("seconds_to_close", 0),
         "entry_stage": data.get("entry_stage"),
+        "entry_validation": data.get("entry_validation"),
         "entry_ticker": data.get("entry_ticker"),
         "kalshi_orderbook": data.get("kalshi_orderbook"),
         "entry_economics": data.get("entry_economics"),
@@ -3397,6 +3398,9 @@ def stats():
 
         "database_status":
             pattern_memory.database_status(),
+
+        "entry_validation":
+            get_entry_validation(),
 
         "database_counts":
             pattern_memory.get_database_counts(),
