@@ -4669,23 +4669,38 @@ function updatePatternGuide(pattern, candleRows, mainDirection, samples){
     if(!conflicts) state.textContent=isNone?"OBSERVANDO":(forming?"EN FORMACIÓN":"VELA CERRADA");
 
     patternMarkers=[];
-    if(rows.length){
-        // Siempre identifica la última vela. Si no hay patrón reconocido,
-        // muestra únicamente su dirección para no dejar la gráfica sin señales.
-        const c=rows[rows.length-1];
-        const candleBullish=Number(c.close)>Number(c.open);
-        const candleBearish=Number(c.close)<Number(c.open);
-        const bullish=isNone?candleBullish:lesson.direction==="bull";
-        const bearish=isNone?candleBearish:lesson.direction==="bear";
-        const fallbackLabel=candleBullish?"Vela alcista":(candleBearish?"Vela bajista":"Vela indecisa");
+    // Señaliza cada vela visible con su dirección y, cuando se reconoce,
+    // el patrón propio de esa vela (no solo el patrón de la última vela).
+    rows.forEach((c,index)=>{
+        const open=Number(c.open), close=Number(c.close);
+        const high=Number(c.high), low=Number(c.low);
+        if(![open,close,high,low].every(Number.isFinite)) return;
+        const bullish=close>open;
+        const bearish=close<open;
+        const body=Math.abs(close-open);
+        const range=Math.max(high-low,0.00000001);
+        const upper=high-Math.max(open,close);
+        const lower=Math.min(open,close)-low;
+        let candlePattern="";
+        const prev=rows[index-1];
+        if(prev){
+            const po=Number(prev.open), pc=Number(prev.close);
+            if(pc<po && bullish && open<=pc && close>=po) candlePattern="ENVOLVENTE ALCISTA";
+            else if(pc>po && bearish && open>=pc && close<=po) candlePattern="ENVOLVENTE BAJISTA";
+        }
+        if(!candlePattern && lower>=body*2 && upper<=Math.max(body,0.00000001) && body/range<=0.40) candlePattern="MARTILLO";
+        else if(!candlePattern && upper>=body*2 && lower<=Math.max(body,0.00000001) && body/range<=0.40) candlePattern="ESTRELLA FUGAZ";
+        else if(!candlePattern && body/range<=0.10) candlePattern="DOJI";
+        const direction=bullish?"ALCISTA":(bearish?"BAJISTA":"INDECISA");
+        const color=bullish?"#00d995":(bearish?"#ff5269":"#f4c95d");
         patternMarkers.push({
             time:displayChartTime(c.time),
-            position:bullish?"aboveBar":"belowBar",
-            color:bullish?"#00d995":(bearish?"#ff5269":"#f4c95d"),
+            position:bullish?"belowBar":(bearish?"aboveBar":"belowBar"),
+            color,
             shape:bullish?"arrowUp":(bearish?"arrowDown":"circle"),
-            text:isNone?fallbackLabel:lesson.label
+            text:candlePattern ? direction+" · "+candlePattern : "Vela "+direction.toLowerCase()
         });
-    }
+    });
     if(chart && candleSeries) candleSeries.setMarkers(patternMarkers);
 }
 
