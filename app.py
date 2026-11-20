@@ -4428,7 +4428,10 @@ function initChart(){
 
 function buildCandleMarkers(chartRows){
     const markers=[];
-    chartRows.forEach((c,index)=>{
+    // Mostrar señales únicamente en las dos velas más recientes.
+    const firstVisibleMarker=Math.max(0,chartRows.length-2);
+    for(let index=firstVisibleMarker;index<chartRows.length;index++){
+        const c=chartRows[index];
         const open=Number(c.open), close=Number(c.close);
         const high=Number(c.high), low=Number(c.low);
         if(![open,close,high,low].every(Number.isFinite)) return;
@@ -4457,7 +4460,7 @@ function buildCandleMarkers(chartRows){
             size:2,
             text:candlePattern ? direction+" · "+candlePattern : direction
         });
-    });
+    }
     return markers;
 }
 
