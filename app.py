@@ -16,6 +16,7 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 import pattern_memory
 import market_intelligence
+import coinbase_gbm
 app = Flask(__name__)
 
 @app.route("/service-worker.js")
@@ -3101,6 +3102,14 @@ def get_data():
         market_target if contract_active else None,
         prediction_horizon,
         ticks
+    ))
+    # Independent cross-check: Coinbase estimates volatility; BRTI remains
+    # the settlement reference. This does not override the primary signal.
+    indicators.update(coinbase_gbm.calculate_coinbase_gbm_baseline(
+        analysis_price,
+        market_target if contract_active else None,
+        prediction_horizon,
+        coin_candles
     ))
 
     indicators["signal_source"] = signal_source
