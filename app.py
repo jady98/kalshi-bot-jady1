@@ -3762,7 +3762,7 @@ button{border:1px solid #35476b;background:#182640;color:white;border-radius:9px
             </div>
 
             <div class="small">
-                BRTI · Velas de 1 minuto
+                COINBASE · Velas reales de 1 minuto · EMA 9 / EMA 21
             </div>
 
         </div>
@@ -4209,7 +4209,7 @@ function drawChart(data){
     });
     const countLabel = $("candleCount");
     if(countLabel){
-        countLabel.textContent = rows.length + " velas BRTI" +
+        countLabel.textContent = rows.length + " velas Coinbase" +
             (gaps ? " · " + gaps + " interrupciones comprimidas" : "");
     }
     if(!chartRows.length){
@@ -4641,7 +4641,7 @@ function updateRadar(d){
 
     $("brtiPrice").textContent =
         money(d.brti_price);
-    chartCurrentPrice = Number(d.brti_price);
+    chartCurrentPrice = Number(d.coinbase_price);
     if(!Number.isFinite(chartCurrentPrice) || chartCurrentPrice<=0) chartCurrentPrice=null;
     updateCurrentPriceAxisTag();
 
@@ -4862,7 +4862,7 @@ function updateRadar(d){
 
 
     $("sourceConnection").textContent =
-        "Fuente única de predicción y gráfica: BRTI";
+        "Gráfica: velas Coinbase · Confirmación de precio: BRTI";
 
 
     $("errors").textContent=
@@ -4873,7 +4873,7 @@ function updateRadar(d){
         .join(" | ");
 
 
-    drawChart(d.brti_candles || []);
+    drawChart(d.coinbase_candles || []);
     updatePatternGuide(d.pattern, d.brti_candles || [], d.direction, d.pattern_samples);
 
     // El contador se actualiza dentro de drawChart con las velas realmente visibles.
