@@ -30,6 +30,18 @@ def init_db():
     try:
         with _connect() as conn:
             conn.execute("""
+                CREATE TABLE IF NOT EXISTS btc_prediction_stats_control (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    reset_ts DOUBLE PRECISION NOT NULL
+                )
+            """)
+            conn.execute("""
+                INSERT INTO btc_prediction_stats_control (id, reset_ts)
+                VALUES (1, EXTRACT(EPOCH FROM NOW()))
+                ON CONFLICT (id) DO NOTHING
+            """)
+
+            conn.execute("""
                 CREATE TABLE IF NOT EXISTS brti_minute_candles (
                     candle_time BIGINT PRIMARY KEY,
                     open_price DOUBLE PRECISION NOT NULL,
@@ -1096,7 +1108,10 @@ def get_15m_probability_calibration():
                       ON o.snapshot_id = s.id
                      AND o.horizon_seconds = 900
                      AND o.future_price IS NOT NULL
-                    WHERE s.market_ticker IS NOT NULL
+                    WHERE s.signal_ts >= COALESCE(
+                          (SELECT reset_ts FROM btc_prediction_stats_control WHERE id = 1), 0
+                      )
+                      AND s.market_ticker IS NOT NULL
                       AND s.direction IN ('ALCISTA', 'BAJISTA')
                       AND s.features->>'forecast_horizon_seconds' = '900'
                       AND (
@@ -1184,6 +1199,9 @@ def get_15m_prediction_accuracy():
                  AND o.horizon_seconds = 900
                  AND o.future_price IS NOT NULL
                 WHERE s.features->>'forecast_horizon_seconds' = '900'
+                  AND s.signal_ts >= COALESCE(
+                      (SELECT reset_ts FROM btc_prediction_stats_control WHERE id = 1), 0
+                  )
             """).fetchone()
         evaluated, correct, incorrect, no_change, indecisive, contracts, indecisive_contracts, late = row
         correct, incorrect = int(correct or 0), int(incorrect or 0)
@@ -1332,6 +1350,9 @@ def get_recent_predictions(limit=50):
                   ON o.snapshot_id = s.id
                  AND o.horizon_seconds = 900
                 WHERE s.features->>'forecast_horizon_seconds' = '900'
+                  AND s.signal_ts >= COALESCE(
+                      (SELECT reset_ts FROM btc_prediction_stats_control WHERE id = 1), 0
+                  )
                 ORDER BY s.signal_ts DESC
                 LIMIT %s
             """, (limit,)).fetchall()
@@ -1391,13 +1412,19 @@ def get_database_counts():
             row = conn.execute("""
                 SELECT
                     (SELECT COUNT(*)
-                     FROM btc_signal_snapshots),
+                     FROM btc_signal_snapshots
+                     WHERE signal_ts >= COALESCE(
+                         (SELECT reset_ts FROM btc_prediction_stats_control WHERE id = 1), 0
+                     )),
 
                     (SELECT COUNT(*)
                      FROM btc_signal_outcomes AS o
                      JOIN btc_signal_snapshots AS s ON s.id = o.snapshot_id
                      WHERE o.horizon_seconds = 900
                        AND o.future_price IS NOT NULL
+                       AND s.signal_ts >= COALESCE(
+                           (SELECT reset_ts FROM btc_prediction_stats_control WHERE id = 1), 0
+                       )
                        AND s.features->>'forecast_horizon_seconds' = '900'),
 
                     (SELECT COUNT(*)
@@ -1405,17 +1432,28 @@ def get_database_counts():
                      JOIN btc_signal_snapshots AS s ON s.id = o.snapshot_id
                      WHERE o.horizon_seconds = 900
                        AND o.future_price IS NULL
+                       AND s.signal_ts >= COALESCE(
+                           (SELECT reset_ts FROM btc_prediction_stats_control WHERE id = 1), 0
+                       )
                        AND s.features->>'forecast_horizon_seconds' = '900'),
 
                     (SELECT COUNT(*)
-                     FROM btc_signal_outcomes
-                     WHERE horizon_seconds = -1
-                     AND future_price IS NOT NULL),
+                     FROM btc_signal_outcomes AS o
+                     JOIN btc_signal_snapshots AS s ON s.id = o.snapshot_id
+                     WHERE o.horizon_seconds = -1
+                       AND o.future_price IS NOT NULL
+                       AND s.signal_ts >= COALESCE(
+                           (SELECT reset_ts FROM btc_prediction_stats_control WHERE id = 1), 0
+                       )),
 
                     (SELECT COUNT(*)
-                     FROM btc_signal_outcomes
-                     WHERE horizon_seconds = -1
-                     AND future_price IS NULL)
+                     FROM btc_signal_outcomes AS o
+                     JOIN btc_signal_snapshots AS s ON s.id = o.snapshot_id
+                     WHERE o.horizon_seconds = -1
+                       AND o.future_price IS NULL
+                       AND s.signal_ts >= COALESCE(
+                           (SELECT reset_ts FROM btc_prediction_stats_control WHERE id = 1), 0
+                       ))
             """).fetchone()
 
         return {
@@ -1423,7 +1461,8 @@ def get_database_counts():
             "outcomes_resolved_15m": row[1],
             "outcomes_pending_15m": row[2],
             "close_outcomes_resolved": row[3],
-            "close_outcomes_pending": row[4]
+            "close_outcomes_pending": row[4],
+            "stats_reset_ts": get_prediction_stats_reset_ts()
         }
 
     except Exception as exc:
