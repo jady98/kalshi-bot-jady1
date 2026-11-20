@@ -18,6 +18,13 @@ import pattern_memory
 import market_intelligence
 app = Flask(__name__)
 
+@app.route("/service-worker.js")
+def radar_service_worker():
+    response = app.send_static_file("radar-sw.js")
+    response.headers["Service-Worker-Allowed"] = "/"
+    response.headers["Cache-Control"] = "no-cache"
+    return response
+
 # ==========================================
 # CONFIGURACIÓN
 # ==========================================
@@ -4644,6 +4651,7 @@ function goLive(){
 // AVISOS DEL RADAR · NOTIFICACIÓN, SONIDO Y VIBRACIÓN
 // ==========================================
 let radarAudioContext = null;
+let radarServiceWorkerRegistration = null;
 let radarAlertsEnabled = false;
 let lastRadarAlertKey = "";
 let lastExitTicker = null;
@@ -4675,6 +4683,14 @@ async function enableRadarAlerts(){
         radarAudioContext = radarAudioContext || new AudioContextClass();
         if(radarAudioContext.state === "suspended") await radarAudioContext.resume();
         if(radarAudioContext.state !== "running") throw new Error("Android no habilitó el audio. Vuelve a pulsar el botón.");
+        if("serviceWorker" in navigator){
+            try{
+                radarServiceWorkerRegistration = await navigator.serviceWorker.register("/service-worker.js",{scope:"/"});
+                await navigator.serviceWorker.ready;
+            }catch(swError){
+                console.warn("No se pudo preparar la notificación en segundo plano",swError);
+            }
+        }
         radarAlertsEnabled = true;
         paintRadarAlertToggle();
         playRadarTone("entry");
@@ -4817,13 +4833,24 @@ function handleRadarAlert(data){
         }
     }
     if(radarAlertsEnabled && "Notification" in window && Notification.permission === "granted"){
-        try{
-            new Notification(isExit ? "BTC Radar · SALIDA" : eventType === "MANTENER" ? "BTC Radar · MANTENER" : "BTC Radar · ENTRADA",{
-                body: (alertData.message || "") + (alertData.detail ? "\n" + alertData.detail : ""),
-                tag: eventKey,
-                renotify: true
-            });
-        }catch(error){ console.warn("Notificación no disponible",error); }
+        const title = isExit ? "BTC Radar · SALIDA" :
+            eventType === "MANTENER" ? "BTC Radar · MANTENER" : "BTC Radar · ENTRADA";
+        const options = {
+            body: (alertData.message || "") + (alertData.detail ? "\n" + alertData.detail : ""),
+            tag: eventKey,
+            renotify: true,
+            silent: false,
+            requireInteraction: isExit,
+            vibrate: isExit ? [220,100,220,100,220] :
+                eventType === "MANTENER" ? [100,60,100] : [160,80,160]
+        };
+        if(radarServiceWorkerRegistration && radarServiceWorkerRegistration.showNotification){
+            radarServiceWorkerRegistration.showNotification(title,options)
+                .catch(error=>console.warn("No se pudo mostrar la notificación del sistema",error));
+        }else{
+            try{ new Notification(title,options); }
+            catch(error){ console.warn("Notificación no disponible",error); }
+        }
     }
 }
 
