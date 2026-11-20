@@ -3693,6 +3693,8 @@ button{border:1px solid #35476b;background:#182640;color:white;border-radius:9px
     <div class="small" id="signalStage">
         BRTI · FUENTE ÚNICA DE PREDICCIÓN
     </div>
+    <div class="small" id="newsIntel">INTELIGENCIA EXTERNA · RECOPILANDO</div>
+    <div class="small" id="newsHeadlines">Esperando titulares de fuentes públicas.</div>
     <div class="small" id="entryEconomics">Precio ejecutable Kalshi: esperando libro de órdenes</div>
 
     <div id="accuracyStrip" hidden>
@@ -4730,6 +4732,22 @@ function updateRadar(d){
         (d.pattern_learning_used
             ? " · patrón validado con " + d.pattern_samples + " resultados"
             : " · aprendizaje histórico en recopilación");
+
+    const news = d.news_intelligence || {};
+    const newsStatus = $("newsIntel");
+    const newsHeadlines = $("newsHeadlines");
+    if(newsStatus){
+        const age = news.age_seconds == null ? "sin actualización" : Math.round(Number(news.age_seconds)/60) + " min";
+        newsStatus.textContent = "INTELIGENCIA EXTERNA · " + (news.bias || "SIN DATOS") +
+            " · " + Number(news.headline_count || 0) + " TITULARES · " + age +
+            " · SOLO CONTEXTO, NO ALTERA LA PREDICCIÓN";
+    }
+    if(newsHeadlines){
+        const items = Array.isArray(news.headlines) ? news.headlines.slice(0,3) : [];
+        newsHeadlines.textContent = items.length
+            ? items.map(item => "[" + item.source + "] " + item.title).join(" | ")
+            : (news.last_error || "Esperando titulares de fuentes públicas.");
+    }
 
     const economics = d.entry_economics || {};
     const book = d.kalshi_orderbook || {};
