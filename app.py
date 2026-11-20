@@ -15,6 +15,7 @@ from flask import Flask, jsonify, render_template_string, request
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 import pattern_memory
+import market_intelligence
 app = Flask(__name__)
 
 # ==========================================
@@ -2166,6 +2167,7 @@ def start_services():
             return
 
         started = True
+        market_intelligence.start_worker()
         
         def init_pattern_database():
             while not pattern_memory.init_db():
@@ -3173,6 +3175,7 @@ def get_data():
         "brti_average_samples": average_count,
         "brti_tick_count": len(ticks),
         "signal_source": signal_source,
+        "news_intelligence": market_intelligence.snapshot(),
         "candle_source": candle_source,
 
         **indicators
@@ -3227,6 +3230,7 @@ def health():
         "pattern": data.get("pattern"),
         "pattern_samples": data.get("pattern_samples", 0),
         "pattern_learning_used": data.get("pattern_learning_used", False),
+        "news_intelligence": data.get("news_intelligence"),
 
         "coinbase_live": data["coinbase_live"],
         "coinbase_price": data["coinbase_price"],
@@ -3273,6 +3277,12 @@ def health():
             pattern_memory.get_model_comparison_accuracy()
 
     })
+
+@app.route("/intelligence")
+def intelligence():
+    start_services()
+    return jsonify(market_intelligence.snapshot())
+
 
 @app.route("/stats")
 def stats():
