@@ -4747,9 +4747,8 @@ function updateRadar(d){
     if(manualPosition){
         $("manualYes").classList.toggle("selected",manualPosition.side==="YES");
         $("manualNo").classList.toggle("selected",manualPosition.side==="NO");
-        if(manualPosition.entry_price != null) $("manualEntryPrice").value = Number(manualPosition.entry_price).toFixed(2);
         if(manualStatus) manualStatus.textContent = "TU POSICIÓN: " + manualPosition.side +
-            (manualPosition.entry_price != null ? " · compra a " + Number(manualPosition.entry_price).toFixed(2) : " · precio no indicado") +
+            " · sin precio de compra" +
             " · " + manualPosition.status;
         if($("manualYes")) $("manualYes").disabled = true;
         if($("manualNo")) $("manualNo").disabled = true;
@@ -4757,7 +4756,7 @@ function updateRadar(d){
         if($("manualYes")) $("manualYes").disabled = !canRegister;
         if($("manualNo")) $("manualNo").disabled = !canRegister;
         if(manualStatus) manualStatus.textContent = canRegister
-            ? "Entrada confirmada. Selecciona YES o NO y, si puedes, indica el precio pagado."
+            ? "Entrada confirmada. Selecciona YES o NO. No necesitas introducir el precio."
             : window.currentRadarTicker
                 ? "Se habilitará cuando el radar confirme la entrada."
                 : "Esperando un contrato activo de Kalshi.";
