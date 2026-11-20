@@ -4819,6 +4819,10 @@ function handleRadarAlert(data){
     const detail = $("radarAlertDetail");
     const panel = $("radarAlertPanel");
     if(!state || !message || !detail || !panel) return;
+    // Estos elementos estaban ocultos desde el HTML y nunca se mostraban.
+    state.hidden = false;
+    message.hidden = false;
+    detail.hidden = false;
 
     const visibleKind = isExit ? "exit" : isNewEntry ? "entry" :
         isHold ? "hold" : isPrealert ? "prealert" : "neutral";
@@ -4850,14 +4854,15 @@ function handleRadarAlert(data){
 
     // Sonido distinto al entrar, mantener y salir; solo una vez por cambio.
     const eventType = isExit ? "SALIDA" : isNewEntry ? "ENTRADA" :
-        (isHold && hasFreshEvent && type === "MANTENER") ? "MANTENER" : "";
+        (isHold && hasFreshEvent && type === "MANTENER") ? "MANTENER" :
+        (isPrealert && hasFreshEvent && type === "PREALERTA") ? "PREALERTA" : "";
     if(!eventType || !hasFreshEvent) return;
     const eventKey = [eventType,alertData.ticker || data.entry_ticker || "",alertData.timestamp].join("|");
     if(eventKey === lastRadarAlertKey) return;
     lastRadarAlertKey = eventKey;
 
     if(radarAlertsEnabled){
-        playRadarTone(isExit ? "exit" : eventType === "MANTENER" ? "hold" : "entry");
+        playRadarTone(isExit ? "exit" : eventType === "MANTENER" ? "hold" : eventType === "PREALERTA" ? "bearish" : "entry");
         if(window.navigator && typeof window.navigator.vibrate === "function"){
             window.navigator.vibrate(isExit ? [180,80,180] : eventType === "MANTENER" ? [70] : [100,60,100]);
         }
