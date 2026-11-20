@@ -3474,28 +3474,25 @@ button{border:1px solid #35476b;background:#182640;color:white;border-radius:9px
 }
 
 .radar-alert-panel{border:1px solid #35415b;background:linear-gradient(135deg,rgba(20,27,48,.98),rgba(9,14,29,.98))}
-.radar-alert-heading{gap:10px;align-items:center}
-.radar-alert-heading button{white-space:nowrap;font-size:10px;padding:9px 11px}
-.radar-alert-state{display:inline-flex;align-items:center;justify-content:center;margin:10px 0 7px;padding:7px 11px;border-radius:8px;font-size:12px;font-weight:950;letter-spacing:.5px;background:#293246;color:#d9e2f3}
-.radar-alert-state.prealert{background:#594616;color:#ffe08a}
-.radar-alert-state.entry{background:#0c583b;color:#79ffc0}
-.radar-alert-state.exit{background:#681f31;color:#ffb1bf}
-.radar-alert-message{font-size:16px;font-weight:950;line-height:1.25;margin:2px 0 5px}
-.radar-alert-detail{font-size:11px;line-height:1.4;color:#dce4f4}
-/* Vista compacta: conserva los avisos, libera altura para la gráfica. */
-.compact-radar-alert{padding:12px!important;margin:5px 0!important}
-.compact-radar-alert .radar-alert-heading .section-title{margin:0;font-size:13px}
-.compact-radar-alert .radar-alert-heading .small{font-size:10px;line-height:1.3}
-.compact-radar-alert .radar-alert-heading button{padding:8px 10px;font-size:10px}
-.compact-radar-alert .radar-alert-state{margin:8px 0;padding:9px 12px;font-size:15px}
-.compact-radar-alert .radar-alert-message{display:block!important;font-size:14px;line-height:1.35}
-.compact-radar-alert .radar-alert-detail{display:block!important;font-size:12px;line-height:1.4}
-.radar-stage-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;margin:8px 0}
-.radar-stage-item{display:flex;align-items:center;gap:8px;min-width:0;padding:9px 8px;border:1px solid #34425b;border-radius:9px;background:#101a2b;color:#aab8ce;font-size:11px;font-weight:800}
-.radar-stage-item b{display:grid;place-items:center;flex:0 0 22px;width:22px;height:22px;border-radius:50%;background:#29344a;color:#dce4f4;font-size:11px}
-.radar-stage-item.active{border-color:#45b98a;background:#103329;color:#d9ffec}
-.radar-stage-item.active b{background:#00d995;color:#062519}
-@media(max-width:380px){.radar-stage-list{grid-template-columns:1fr}.radar-stage-item{font-size:12px;padding:8px}}
+.radar-alert-heading{gap:7px;align-items:center}
+.radar-alert-tools{display:flex;align-items:center;gap:6px;min-width:0}
+.radar-alert-heading button{white-space:nowrap;font-size:9px;padding:6px 7px}
+.compact-radar-alert{padding:7px 8px!important;margin:3px 0!important}
+.compact-radar-alert .radar-alert-heading .section-title{margin:0;font-size:11px}
+.compact-radar-alert .radar-alert-heading .small{font-size:8px;line-height:1.15}
+.accuracy-mini{display:flex;flex-direction:column;gap:2px;padding:4px 6px;border:1px solid #34415b;border-radius:7px;background:#101a2b;font-size:7px;font-weight:850;white-space:nowrap}
+.accuracy-mini b{font-size:9px;color:#fff;font-variant-numeric:tabular-nums}
+.accuracy-mini .accuracy-correct{color:#55e0a6}.accuracy-mini .accuracy-wrong{color:#ff7c8d}
+.radar-stage-list{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:5px;margin:6px 0 0}
+.radar-stage-item{display:flex;align-items:center;justify-content:center;gap:4px;min-width:0;min-height:31px;padding:5px 3px;border:1px solid #34425b;border-radius:8px;background:#101a2b;color:#aab8ce;font-size:clamp(7px,2.1vw,9px);line-height:1.1;text-align:center;font-weight:850}
+.radar-stage-item b{display:grid;place-items:center;flex:0 0 15px;width:15px;height:15px;border-radius:50%;background:#29344a;color:#dce4f4;font-size:9px}
+#radarStepEntry.active{border-color:#00d995;background:#103b2b;color:#79ffc0}
+#radarStepEntry.active b{background:#00d995;color:#062519}
+#radarStepHold.active{border-color:#f4c95d;background:#493914;color:#ffe08a}
+#radarStepHold.active b{background:#f4c95d;color:#251900}
+#radarStepExit.active{border-color:#ff5269;background:#4a1825;color:#ffb1bf}
+#radarStepExit.active b{background:#ff5269;color:#2b0710}
+@media(max-width:380px){.radar-alert-tools{gap:4px}.radar-alert-heading button{font-size:7px;padding:5px 5px}.accuracy-mini{padding:3px 4px;font-size:6px}.accuracy-mini b{font-size:8px}.radar-stage-list{gap:3px}.radar-stage-item{font-size:7px;padding:4px 2px;gap:2px}}
 .compact-pattern{grid-template-columns:minmax(0,1fr) auto;gap:3px 8px;margin:3px 0 5px!important;padding:6px 9px!important;cursor:pointer;min-height:0}
 .compact-pattern .pattern-name{font-size:11px!important;line-height:1.15}
 .compact-pattern .pattern-state{font-size:8px!important;line-height:1.1}
@@ -3651,20 +3648,11 @@ button{border:1px solid #35476b;background:#182640;color:white;border-radius:9px
     </div>
     <div class="small" id="entryEconomics">Precio ejecutable Kalshi: esperando libro de órdenes</div>
 
-    <div class="accuracy-strip" id="accuracyStrip">
-        <div class="accuracy-head">
-            <span>PRECISIÓN REAL · 15 MIN</span>
-            <span id="accuracyUpdated">CARGANDO...</span>
-        </div>
-        <div class="accuracy-main">
-            <strong id="accuracyPercent">--</strong>
-            <span id="accuracyBasis">POR CONTRATO</span>
-        </div>
-        <div class="accuracy-counts">
-            <span class="accuracy-correct">ACIERTOS <b id="accuracyCorrect">--</b></span>
-            <span class="accuracy-wrong">ERRORES <b id="accuracyIncorrect">--</b></span>
-        </div>
-        <div class="accuracy-note" id="accuracyNote">Se calcula con contratos de 15 minutos ya resueltos.</div>
+    <div id="accuracyStrip" hidden>
+        <span id="accuracyUpdated">CARGANDO...</span>
+        <strong id="accuracyPercent">--</strong>
+        <span id="accuracyBasis">POR CONTRATO</span>
+        <span id="accuracyNote">Se calcula con contratos de 15 minutos ya resueltos.</span>
     </div>
 
 </section>
@@ -3675,18 +3663,22 @@ button{border:1px solid #35476b;background:#182640;color:white;border-radius:9px
             <div class="section-title">ALERTAS</div>
             <div class="small" id="radarAlertStatus">BRTI · 15 MIN</div>
         </div>
-        <button id="alertsEnableButton" onclick="enableRadarAlerts()">ACTIVAR AVISOS</button>
+        <div class="radar-alert-tools">
+            <div class="accuracy-mini" aria-label="Precisión real: aciertos y errores">
+                <span class="accuracy-correct">ACIERTOS <b id="accuracyCorrect">--</b></span>
+                <span class="accuracy-wrong">ERRORES <b id="accuracyIncorrect">--</b></span>
+            </div>
+            <button id="alertsEnableButton" onclick="enableRadarAlerts()">ACTIVAR AVISOS</button>
+        </div>
     </div>
-    <div class="radar-alert-state neutral" id="radarAlertState">OBSERVAR</div>
-    <div class="radar-stage-list" aria-label="Etapas de señal">
-        <div class="radar-stage-item active" id="radarStepObserve"><b>1</b><span>OBSERVAR</span></div>
-        <div class="radar-stage-item" id="radarStepPrealert"><b>2</b><span>PREALERTA</span></div>
-        <div class="radar-stage-item" id="radarStepEntry"><b>3</b><span>ENTRADA CONFIRMADA</span></div>
-        <div class="radar-stage-item" id="radarStepHold"><b>4</b><span>MANTENER</span></div>
-        <div class="radar-stage-item" id="radarStepExit"><b>5</b><span>SALIDA</span></div>
+    <div class="radar-stage-list" aria-label="Estados de alerta">
+        <div class="radar-stage-item" id="radarStepEntry"><b>✓</b><span>ENTRADA CONFIRMADA</span></div>
+        <div class="radar-stage-item" id="radarStepHold"><b>Ⅱ</b><span>MANTENER</span></div>
+        <div class="radar-stage-item" id="radarStepExit"><b>×</b><span>SALIDA</span></div>
     </div>
-    <div class="radar-alert-message" id="radarAlertMessage"></div>
-    <div class="radar-alert-detail" id="radarAlertDetail"></div>
+    <div class="radar-alert-state neutral" id="radarAlertState" hidden>OBSERVAR</div>
+    <div class="radar-alert-message" id="radarAlertMessage" hidden></div>
+    <div class="radar-alert-detail" id="radarAlertDetail" hidden></div>
 </section>
 
 
@@ -4497,15 +4489,17 @@ async function refreshAccuracy(){
         const correct=Number(result.correct || 0);
         const incorrect=Number(result.incorrect || 0);
         const evaluated=Number(result.predictions_evaluated || 0);
-        $("accuracyPercent").textContent=pct==null?"--":Number(pct).toFixed(1)+"%";
-        $("accuracyCorrect").textContent=String(correct);
-        $("accuracyIncorrect").textContent=String(incorrect);
-        $("accuracyBasis").textContent="POR CONTRATO · "+Number(result.contracts_evaluated || 0)+" EVALUADOS";
-        $("accuracyUpdated").textContent="ACTUALIZADO";
-        $("accuracyNote").textContent=evaluated>0
+        const percentEl=$("accuracyPercent"), correctEl=$("accuracyCorrect"), incorrectEl=$("accuracyIncorrect");
+        if(percentEl) percentEl.textContent=pct==null?"--":Number(pct).toFixed(1)+"%";
+        if(correctEl) correctEl.textContent=String(correct);
+        if(incorrectEl) incorrectEl.textContent=String(incorrect);
+        const basisEl=$("accuracyBasis"), updatedEl=$("accuracyUpdated"), noteEl=$("accuracyNote");
+        if(basisEl) basisEl.textContent="POR CONTRATO · "+Number(result.contracts_evaluated || 0)+" EVALUADOS";
+        if(updatedEl) updatedEl.textContent="ACTUALIZADO";
+        if(noteEl) noteEl.textContent=evaluated>0
             ? "Último pronóstico resuelto por contrato · "+evaluated+" pronósticos direccionales. Sin cambio cuenta como fallo."
             : "Aún no hay suficientes contratos resueltos para calcular la precisión.";
-        $("accuracyPercent").style.color=pct==null?"#f4f7ff":(Number(pct)>=50?"#55e0a6":"#ff7c8d");
+        if(percentEl) percentEl.style.color=pct==null?"#f4f7ff":(Number(pct)>=50?"#55e0a6":"#ff7c8d");
     }catch(error){
         $("accuracyUpdated").textContent="SIN DATOS";
         $("accuracyNote").textContent="No se pudo leer /stats: "+String(error.message || error);
