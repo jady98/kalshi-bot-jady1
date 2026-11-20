@@ -3230,6 +3230,16 @@ def health():
         "pattern": data.get("pattern"),
         "pattern_samples": data.get("pattern_samples", 0),
         "pattern_learning_used": data.get("pattern_learning_used", False),
+        "pattern_historical_bullish_pct": data.get("pattern_historical_bullish_pct"),
+        "pattern_historical_bearish_pct": data.get("pattern_historical_bearish_pct"),
+        "pattern_learning_weight_pct": data.get("pattern_learning_weight_pct", 0),
+        "pattern_learning_source": data.get("pattern_learning_source"),
+        "pattern_learning_min_samples": 12,
+        "pattern_learning_status": (
+            "ACTIVO" if data.get("pattern_learning_used") else
+            "MUESTRAS_INSUFICIENTES" if int(data.get("pattern_samples") or 0) < 12 else
+            "SIN_VENTAJA_HISTORICA_SUFICIENTE"
+        ),
         "news_intelligence": data.get("news_intelligence"),
 
         "coinbase_live": data["coinbase_live"],
