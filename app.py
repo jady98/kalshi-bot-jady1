@@ -4426,6 +4426,41 @@ function initChart(){
     chartInitialized = true;
 }
 
+function buildCandleMarkers(chartRows){
+    const markers=[];
+    chartRows.forEach((c,index)=>{
+        const open=Number(c.open), close=Number(c.close);
+        const high=Number(c.high), low=Number(c.low);
+        if(![open,close,high,low].every(Number.isFinite)) return;
+        const bullish=close>open;
+        const bearish=close<open;
+        const body=Math.abs(close-open);
+        const range=Math.max(high-low,0.00000001);
+        const upper=high-Math.max(open,close);
+        const lower=Math.min(open,close)-low;
+        let candlePattern="";
+        const prev=chartRows[index-1];
+        if(prev){
+            const po=Number(prev.open), pc=Number(prev.close);
+            if(pc<po && bullish && open<=pc && close>=po) candlePattern="ENVOLVENTE ALCISTA";
+            else if(pc>po && bearish && open>=pc && close<=po) candlePattern="ENVOLVENTE BAJISTA";
+        }
+        if(!candlePattern && lower>=body*2 && upper<=Math.max(body,0.00000001) && body/range<=0.40) candlePattern="MARTILLO";
+        else if(!candlePattern && upper>=body*2 && lower<=Math.max(body,0.00000001) && body/range<=0.40) candlePattern="ESTRELLA FUGAZ";
+        else if(!candlePattern && body/range<=0.10) candlePattern="DOJI";
+        const direction=bullish?"ALCISTA":(bearish?"BAJISTA":"INDECISA");
+        markers.push({
+            time:c.time,
+            position:bullish?"belowBar":(bearish?"aboveBar":"belowBar"),
+            color:bullish?"#00df9a":(bearish?"#ff5269":"#f4c95d"),
+            shape:bullish?"arrowUp":(bearish?"arrowDown":"circle"),
+            size:2,
+            text:candlePattern ? direction+" · "+candlePattern : direction
+        });
+    });
+    return markers;
+}
+
 function drawChart(data){
     if(Array.isArray(data)) candles = data;
     if(!chartInitialized) initChart();
@@ -4478,6 +4513,9 @@ function drawChart(data){
     }
 
     candleSeries.setData(chartRows);
+    // Los marcadores usan exactamente los mismos tiempos comprimidos que las velas.
+    // Se generan aquí, sin depender de que exista el panel de patrones en el DOM.
+    patternMarkers=buildCandleMarkers(chartRows);
     candleSeries.setMarkers(patternMarkers);
 
     const closes = chartRows.map(c=>c.close);
@@ -4668,40 +4706,7 @@ function updatePatternGuide(pattern, candleRows, mainDirection, samples){
     const forming=latest>0 && latest>=currentMinute;
     if(!conflicts) state.textContent=isNone?"OBSERVANDO":(forming?"EN FORMACIÓN":"VELA CERRADA");
 
-    patternMarkers=[];
-    // Señaliza cada vela visible con su dirección y, cuando se reconoce,
-    // el patrón propio de esa vela (no solo el patrón de la última vela).
-    rows.forEach((c,index)=>{
-        const open=Number(c.open), close=Number(c.close);
-        const high=Number(c.high), low=Number(c.low);
-        if(![open,close,high,low].every(Number.isFinite)) return;
-        const bullish=close>open;
-        const bearish=close<open;
-        const body=Math.abs(close-open);
-        const range=Math.max(high-low,0.00000001);
-        const upper=high-Math.max(open,close);
-        const lower=Math.min(open,close)-low;
-        let candlePattern="";
-        const prev=rows[index-1];
-        if(prev){
-            const po=Number(prev.open), pc=Number(prev.close);
-            if(pc<po && bullish && open<=pc && close>=po) candlePattern="ENVOLVENTE ALCISTA";
-            else if(pc>po && bearish && open>=pc && close<=po) candlePattern="ENVOLVENTE BAJISTA";
-        }
-        if(!candlePattern && lower>=body*2 && upper<=Math.max(body,0.00000001) && body/range<=0.40) candlePattern="MARTILLO";
-        else if(!candlePattern && upper>=body*2 && lower<=Math.max(body,0.00000001) && body/range<=0.40) candlePattern="ESTRELLA FUGAZ";
-        else if(!candlePattern && body/range<=0.10) candlePattern="DOJI";
-        const direction=bullish?"ALCISTA":(bearish?"BAJISTA":"INDECISA");
-        const color=bullish?"#00d995":(bearish?"#ff5269":"#f4c95d");
-        patternMarkers.push({
-            time:displayChartTime(c.time),
-            position:bullish?"belowBar":(bearish?"aboveBar":"belowBar"),
-            color,
-            shape:bullish?"arrowUp":(bearish?"arrowDown":"circle"),
-            text:candlePattern ? direction+" · "+candlePattern : "Vela "+direction.toLowerCase()
-        });
-    });
-    if(chart && candleSeries) candleSeries.setMarkers(patternMarkers);
+    // Las señales se calculan en drawChart(), independientemente del panel de patrones.
 }
 
 function goLive(){
