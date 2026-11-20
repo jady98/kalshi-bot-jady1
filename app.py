@@ -3999,9 +3999,9 @@ button{border:1px solid #35476b;background:#182640;color:white;border-radius:9px
         <span class="radar-mark-status" id="radarMarkStatus">Sin marcar</span>
     </div>
     <div class="radar-stage-list" aria-label="Estados de alerta">
-        <div class="radar-stage-item" id="radarStepEntry" role="status" aria-label="Puedes entrar"><b>↗</b><span id="radarEntryStepLabel">PUEDES ENTRAR</span></div>
-        <div class="radar-stage-item" id="radarStepHold" role="status" aria-label="Mantener"><b>Ⅱ</b><span>MANTENER</span></div>
-        <div class="radar-stage-item" id="radarStepExit" role="status" aria-label="Salir"><b>×</b><span>SALIR</span></div>
+        <div class="radar-stage-item" id="radarStepEntry" role="status" aria-label="Puedes entrar"><b>↗</b><span>PUEDES ENTRAR</span></div>
+        <div class="radar-stage-item" id="radarStepHold" role="status" aria-label="Mantenerte"><b>Ⅱ</b><span>MANTENERTE</span></div>
+        <div class="radar-stage-item" id="radarStepExit" role="status" aria-label="Puedes salir"><b>×</b><span>PUEDES SALIR</span></div>
     </div>
     <div class="radar-alert-state neutral" id="radarAlertState" hidden>OBSERVAR</div>
     <div class="radar-alert-message" id="radarAlertMessage" hidden></div>
@@ -4830,8 +4830,6 @@ function handleRadarAlert(data){
     const isNewEntry = hasFreshEvent && type === "ENTRADA" && stageIsEntry;
     const isHold = stageIsEntry && !isNewEntry;
     const isPrealert = stage === "PREALERTA";
-    const entryStepLabel = $("radarEntryStepLabel");
-    if(entryStepLabel) entryStepLabel.textContent = isPrealert ? "AÚN NO · CONFIRMANDO" : "PUEDES ENTRAR";
     const isDirectionChange = hasFreshEvent && type === "CAMBIO_DIRECCION";
 
     const state = $("radarAlertState");
@@ -4855,7 +4853,8 @@ function handleRadarAlert(data){
     panel.classList.toggle("has-event", isExit || isNewEntry || isPrealert || isDirectionChange);
 
     // Entrada y mantener permanecen iluminadas mientras la entrada siga vigente.
-    const activeSteps = isExit ? ["exit"] : isNewEntry || isHold ? ["entry","hold"] : isPrealert ? ["entry"] : [];
+    // Solo se ilumina una acción ejecutable: prealerta no equivale a entrada.
+    const activeSteps = isExit ? ["exit"] : isNewEntry ? ["entry"] : isHold ? ["hold"] : [];
     ["entry","hold","exit"].forEach(step=>{
         const item = $("radarStep" + step.charAt(0).toUpperCase() + step.slice(1));
         if(item) item.classList.toggle("active", activeSteps.includes(step));
