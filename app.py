@@ -4419,12 +4419,12 @@ function describePattern(pattern){
     const key=String(pattern || "SIN PATRÓN CLARO").toUpperCase();
     const lessons={
         "ENVOLVENTE ALCISTA":{
-            direction:"bull",bars:2,label:"GIRO ALZA",
+            direction:"bull",bars:2,label:"Envolvente alcista",
             text:"La vela verde cubre el cuerpo de la vela roja anterior. Puede mostrar que los compradores están ganando fuerza.",
             next:"Comprueba que aparezca después de una caída y que la siguiente vela cierre al alza. Sin confirmación puede ser una falsa señal."
         },
         "ENVOLVENTE BAJISTA":{
-            direction:"bear",bars:2,label:"GIRO BAJA",
+            direction:"bear",bars:2,label:"Envolvente bajista",
             text:"La vela roja cubre el cuerpo de la vela verde anterior. Puede mostrar que los vendedores están tomando el control.",
             next:"Busca que aparezca después de una subida y que la siguiente vela siga cerrando a la baja."
         },
@@ -4434,47 +4434,47 @@ function describePattern(pattern){
             next:"Es más relevante después de una caída. Espera una vela posterior alcista; aislado no confirma un giro."
         },
         "POSIBLE ESTRELLA FUGAZ":{
-            direction:"bear",bars:1,label:"RECHAZO BAJA",
+            direction:"bear",bars:1,label:"Estrella fugaz",
             text:"Tiene una mecha superior larga y un cuerpo pequeño. El precio subió, pero encontró vendedores en la zona alta.",
             next:"Es más relevante después de una subida. Espera una vela posterior bajista para confirmar el rechazo."
         },
         "DOJI":{
-            direction:"none",bars:1,label:"INDECISIÓN",
+            direction:"none",bars:1,label:"Doji · indecisión",
             text:"La apertura y el cierre son casi iguales. Compradores y vendedores terminaron prácticamente empatados.",
             next:"No elijas dirección solo por el Doji. Observa si la siguiente vela rompe su máximo o su mínimo."
         },
         "TRES VELAS ALCISTAS":{
-            direction:"bull",bars:3,label:"IMPULSO ALZA",
+            direction:"bull",bars:3,label:"Tres velas al alza",
             text:"Tres velas verdes consecutivas con cierres cada vez más altos. Reflejan impulso comprador.",
             next:"Comprueba que los cuerpos mantengan fuerza y que no estén chocando contra una resistencia cercana."
         },
         "TRES VELAS BAJISTAS":{
-            direction:"bear",bars:3,label:"IMPULSO BAJA",
+            direction:"bear",bars:3,label:"Tres velas a la baja",
             text:"Tres velas rojas consecutivas con cierres cada vez más bajos. Reflejan impulso vendedor.",
             next:"Comprueba que los cierres sigan descendiendo y que no haya un soporte cercano frenando la caída."
         },
         "RUPTURA ALCISTA DE RANGO":{
-            direction:"bull",bars:1,label:"ROMPE ALZA",
+            direction:"bull",bars:1,label:"Ruptura al alza",
             text:"La vela cerró por encima del máximo de las cinco velas anteriores. El precio intenta salir del rango hacia arriba.",
             next:"Vigila que el precio permanezca por encima del antiguo máximo. Si vuelve al rango, la ruptura puede haber fallado."
         },
         "RUPTURA BAJISTA DE RANGO":{
-            direction:"bear",bars:1,label:"ROMPE BAJA",
+            direction:"bear",bars:1,label:"Ruptura a la baja",
             text:"La vela cerró por debajo del mínimo de las cinco velas anteriores. El precio intenta salir del rango hacia abajo.",
             next:"Vigila que el precio permanezca por debajo del antiguo mínimo. Si recupera el rango, la ruptura puede haber fallado."
         },
         "ESTRUCTURA ALCISTA · HH/HL":{
-            direction:"bull",bars:3,label:"MÁXIMOS SUBEN",
+            direction:"bull",bars:3,label:"Tendencia al alza",
             text:"Los máximos y mínimos van subiendo. HH significa máximo más alto y HL significa mínimo más alto.",
             next:"La estructura se mantiene mientras los mínimos relevantes sigan subiendo. Una pérdida del último mínimo puede debilitarla."
         },
         "ESTRUCTURA BAJISTA · LH/LL":{
-            direction:"bear",bars:3,label:"MÍNIMOS BAJAN",
+            direction:"bear",bars:3,label:"Tendencia a la baja",
             text:"Los máximos y mínimos van bajando. LH significa máximo más bajo y LL significa mínimo más bajo.",
             next:"La estructura se mantiene mientras los máximos relevantes sigan bajando. Superar el último máximo puede debilitarla."
         },
         "VELA INTERNA · COMPRESIÓN":{
-            direction:"none",bars:2,label:"PAUSA",
+            direction:"none",bars:2,label:"Compresión · pausa",
             text:"La última vela quedó dentro del máximo y el mínimo de la vela anterior. El movimiento se está comprimiendo.",
             next:"Marca el máximo y el mínimo de la vela grande. La ruptura confirmada de uno de esos límites puede mostrar el siguiente movimiento."
         }
@@ -4526,21 +4526,17 @@ function updatePatternGuide(pattern, candleRows, mainDirection, samples){
 
     patternMarkers=[];
     if(!isNone && rows.length){
-        const selected=rows.slice(-lesson.bars);
-        const color=lesson.direction==="bull"?"#00d995":
-            lesson.direction==="bear"?"#ff5269":"#f4c95d";
-        selected.forEach((c,index)=>{
-            const bullish=lesson.direction==="bull";
-            const position=bullish?"belowBar":
-                lesson.direction==="bear"?"aboveBar":
-                (Number(c.close)>=Number(c.open)?"belowBar":"aboveBar");
-            patternMarkers.push({
-                time:displayChartTime(c.time),
-                position:position,
-                color:color,
-                shape:bullish?"arrowUp":lesson.direction==="bear"?"arrowDown":"circle",
-                text:index===selected.length-1?lesson.label:String(index+1)
-            });
+        // Una sola etiqueta breve y en español sobre la última vela del patrón.
+        // Así se identifica la figura sin llenar ni tapar la gráfica.
+        const c=rows[rows.length-1];
+        const bullish=lesson.direction==="bull";
+        const bearish=lesson.direction==="bear";
+        patternMarkers.push({
+            time:displayChartTime(c.time),
+            position:"aboveBar",
+            color:bullish?"#00d995":(bearish?"#ff5269":"#f4c95d"),
+            shape:bullish?"arrowUp":(bearish?"arrowDown":"circle"),
+            text:lesson.label
         });
     }
     if(chart && candleSeries) candleSeries.setMarkers(patternMarkers);
