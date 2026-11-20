@@ -3942,9 +3942,9 @@ button{border:1px solid #35476b;background:#182640;color:white;border-radius:9px
         <span class="accuracy-wrong">ERRORES <b id="accuracyIncorrect">--</b></span>
     </div>
     <div class="radar-stage-list" aria-label="Estados de alerta">
-        <div class="radar-stage-item" id="radarStepEntry"><b>✓</b><span id="radarEntryStepLabel">ENTRADA CONFIRMADA</span></div>
-        <div class="radar-stage-item" id="radarStepHold"><b>Ⅱ</b><span>MANTENER</span></div>
-        <div class="radar-stage-item" id="radarStepExit"><b>×</b><span>SALIDA</span></div>
+        <div class="radar-stage-item" id="radarStepEntry" role="status" aria-label="Puedes entrar"><b>↗</b><span id="radarEntryStepLabel">PUEDES ENTRAR</span></div>
+        <div class="radar-stage-item" id="radarStepHold" role="status" aria-label="Mantener"><b>Ⅱ</b><span>MANTENER</span></div>
+        <div class="radar-stage-item" id="radarStepExit" role="status" aria-label="Salir"><b>×</b><span>SALIR</span></div>
     </div>
     <div class="radar-alert-state neutral" id="radarAlertState" hidden>OBSERVAR</div>
     <div class="radar-alert-message" id="radarAlertMessage" hidden></div>
@@ -4781,7 +4781,7 @@ function handleRadarAlert(data){
     const isHold = stageIsEntry && !isNewEntry;
     const isPrealert = stage === "PREALERTA";
     const entryStepLabel = $("radarEntryStepLabel");
-    if(entryStepLabel) entryStepLabel.textContent = isPrealert ? "ESPERANDO CONFIRMACIÓN" : "ENTRADA CONFIRMADA";
+    if(entryStepLabel) entryStepLabel.textContent = isPrealert ? "AÚN NO · CONFIRMANDO" : "PUEDES ENTRAR";
     const isDirectionChange = hasFreshEvent && type === "CAMBIO_DIRECCION";
 
     const state = $("radarAlertState");
@@ -4794,7 +4794,7 @@ function handleRadarAlert(data){
         isHold ? "hold" : isPrealert ? "prealert" : "neutral";
     state.className = "radar-alert-state " + visibleKind;
     state.textContent = isExit ? "SALIDA" :
-        isNewEntry ? "ENTRADA CONFIRMADA" :
+        isNewEntry ? "PUEDES ENTRAR" :
         isHold ? "MANTENER · " + (data.entry_direction || data.direction || "") :
         isPrealert ? "PREALERTA · SIN ENTRADA" :
         isDirectionChange ? "CAMBIO DE DIRECCIÓN · OBSERVAR" : "OBSERVAR";
@@ -4808,7 +4808,7 @@ function handleRadarAlert(data){
     });
 
     message.textContent = alertData.message || (
-        isNewEntry ? "ENTRADA CONFIRMADA · " + (data.entry_direction || data.direction || "") :
+        isNewEntry ? "PUEDES ENTRAR · " + (data.entry_direction || data.direction || "") :
         isHold ? "La entrada sigue confirmada. No es una nueva entrada." :
         isPrealert ? "Hay una posible señal, pero todavía no está confirmada." :
         isExit ? "La señal perdió confirmación. Revisa la salida." :
