@@ -2770,7 +2770,8 @@ def update_guidance_alert(guidance, ticker, contract_active=False):
         if state["ticker"] != ticker:
             state.update({
                 "ticker": ticker, "stage": "SIN_SEÑAL", "direction": None,
-                "last_alert_ts": 0.0, "alert": None, "danger_count": 0
+                "last_alert_ts": 0.0, "alert": None, "danger_count": 0,
+                "exit_latched_direction": None, "hold_announced": False
             })
 
         previous_stage = state["stage"]
