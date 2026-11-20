@@ -125,7 +125,9 @@ _guidance_state = {
     "direction": None,
     "last_alert_ts": 0.0,
     "alert": None,
-    "danger_count": 0
+    "danger_count": 0,
+    "exit_latched_direction": None,
+    "hold_announced": False
 }
 
 session = requests.Session()
@@ -2761,7 +2763,8 @@ def update_guidance_alert(guidance, ticker, contract_active=False):
         if not contract_active or not ticker or seconds_left <= 0:
             state.update({
                 "ticker": None, "stage": "SIN_CONTRATO", "direction": None,
-                "last_alert_ts": 0.0, "alert": None, "danger_count": 0
+                "last_alert_ts": 0.0, "alert": None, "danger_count": 0,
+                "exit_latched_direction": None, "hold_announced": False
             })
             return None
         if state["ticker"] != ticker:
@@ -2773,6 +2776,27 @@ def update_guidance_alert(guidance, ticker, contract_active=False):
         previous_stage = state["stage"]
         previous_direction = state["direction"]
         short_direction = guidance.get("short_direction")
+
+        # Bloquear reentrada en la misma dirección después de SALIDA, dentro del contrato.
+        latched_direction = state.get("exit_latched_direction")
+        if stage == "ENTRADA" and direction == latched_direction:
+            stage = "SALIDA"
+            direction = None
+            guidance["entry_stage"] = "SALIDA"
+            guidance["entry_direction"] = None
+            guidance["signal_stage"] = "SALIDA · DIRECCIÓN BLOQUEADA"
+            guidance["guidance_note"] = "La dirección anterior ya tuvo una salida en este contrato. No se permite volver a entrar en la misma dirección."
+
+        # Emitir MANTENER una sola vez después de confirmar y estabilizar la entrada.
+        if previous_stage == "ENTRADA" and stage == "ENTRADA" and direction == previous_direction and not state.get("hold_announced"):
+            alert = {
+                "type": "MANTENER", "level": "AVISO",
+                "message": "MANTENER · " + str(previous_direction),
+                "detail": "La entrada continúa confirmada y la dirección se mantiene.",
+                "ticker": str(ticker), "seconds_remaining": seconds_left,
+                "timestamp": now
+            }
+            state["hold_announced"] = True
         opposite_confirmed = (
             previous_stage == "ENTRADA"
             and short_direction in ("ALCISTA", "BAJISTA")
@@ -2829,6 +2853,8 @@ def update_guidance_alert(guidance, ticker, contract_active=False):
             }
             stage = "SALIDA"
             direction = None
+            state["exit_latched_direction"] = previous_direction
+            state["hold_announced"] = False
             guidance["entry_stage"] = "SALIDA"
             guidance["entry_direction"] = None
             guidance["signal_stage"] = "SALIDA · PROTEGER"
@@ -2848,6 +2874,7 @@ def update_guidance_alert(guidance, ticker, contract_active=False):
                 "timestamp": now
             }
             state["danger_count"] = 0
+            state["hold_announced"] = False
         elif stage == "PREALERTA" and previous_stage not in ("PREALERTA", "ENTRADA"):
             alert = {
                 "type": "PREALERTA", "level": "AVISO",
