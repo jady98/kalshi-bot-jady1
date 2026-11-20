@@ -3739,6 +3739,13 @@ button{border:1px solid #35476b;background:#182640;color:white;border-radius:9px
 .accuracy-mini{display:flex;align-items:center;gap:12px;width:max-content;max-width:100%;margin:5px 0 4px;padding:4px 7px;border:1px solid #34415b;border-radius:7px;background:#101a2b;font-size:8px;font-weight:850;white-space:nowrap}
 .accuracy-mini b{font-size:9px;color:#fff;font-variant-numeric:tabular-nums}
 .accuracy-mini .accuracy-correct{color:#55e0a6}.accuracy-mini .accuracy-wrong{color:#ff7c8d}
+.radar-mark-row{display:flex;align-items:center;gap:6px;margin:4px 0 3px;min-width:0}
+.radar-mark-label{font-size:7px;color:#8796b0;font-weight:800;white-space:nowrap}
+.radar-mark-buttons{display:flex;gap:5px}
+.radar-mark-buttons button{min-width:39px;padding:4px 8px;border-radius:6px;font-size:8px;line-height:1;border:1px solid #40506c;background:#152238;color:#cbd5e8}
+.radar-mark-buttons #radarMarkYes.selected{border-color:#00d995;background:#103b2b;color:#79ffc0;box-shadow:0 0 7px #00d99533}
+.radar-mark-buttons #radarMarkNo.selected{border-color:#ff5269;background:#4a1825;color:#ffb1bf;box-shadow:0 0 7px #ff526933}
+.radar-mark-status{font-size:7px;color:#8190aa;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .radar-stage-list{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:5px;margin:6px 0 0}
 .radar-stage-item{display:flex;align-items:center;justify-content:center;gap:4px;min-width:0;min-height:31px;padding:5px 3px;border:1px solid #34425b;border-radius:8px;background:#101a2b;color:#aab8ce;font-size:clamp(7px,2.1vw,9px);line-height:1.1;text-align:center;font-weight:850}
 .radar-stage-item b{display:grid;place-items:center;flex:0 0 15px;width:15px;height:15px;border-radius:50%;background:#29344a;color:#dce4f4;font-size:9px}
@@ -3935,6 +3942,14 @@ button{border:1px solid #35476b;background:#182640;color:white;border-radius:9px
     <div class="accuracy-mini" aria-label="Precisión real: aciertos y errores">
         <span class="accuracy-correct">ACIERTOS <b id="accuracyCorrect">--</b></span>
         <span class="accuracy-wrong">ERRORES <b id="accuracyIncorrect">--</b></span>
+    </div>
+    <div class="radar-mark-row" aria-label="Registrar dirección indicada por el radar">
+        <span class="radar-mark-label">MARCAR RADAR</span>
+        <div class="radar-mark-buttons">
+            <button type="button" id="radarMarkYes" onclick="markRadarDirection('YES')">YES</button>
+            <button type="button" id="radarMarkNo" onclick="markRadarDirection('NO')">NO</button>
+        </div>
+        <span class="radar-mark-status" id="radarMarkStatus">Sin marcar</span>
     </div>
     <div class="radar-stage-list" aria-label="Estados de alerta">
         <div class="radar-stage-item" id="radarStepEntry" role="status" aria-label="Puedes entrar"><b>↗</b><span id="radarEntryStepLabel">PUEDES ENTRAR</span></div>
@@ -4880,6 +4895,32 @@ async function refreshAccuracy(){
     }
 }
 
+function markRadarDirection(side){
+    if(side !== "YES" && side !== "NO") return;
+    const ticker = String(window.currentRadarTicker || "RADAR-" + new Date().toISOString().slice(0,10));
+    const record = {side, ticker, marked_at: new Date().toISOString()};
+    try{
+        const records = JSON.parse(localStorage.getItem("radar_direction_marks") || "{}");
+        records[ticker] = record;
+        localStorage.setItem("radar_direction_marks", JSON.stringify(records));
+        renderRadarDirectionMark(ticker);
+    }catch(error){
+        const status = $("radarMarkStatus");
+        if(status) status.textContent = "No se pudo guardar";
+    }
+}
+function renderRadarDirectionMark(ticker){
+    let record = null;
+    try{
+        const records = JSON.parse(localStorage.getItem("radar_direction_marks") || "{}");
+        record = records[ticker] || null;
+    }catch(error){}
+    const yes = $("radarMarkYes"), no = $("radarMarkNo"), status = $("radarMarkStatus");
+    if(yes) yes.classList.toggle("selected", !!record && record.side === "YES");
+    if(no) no.classList.toggle("selected", !!record && record.side === "NO");
+    if(status) status.textContent = record ? "Marcado " + record.side : "Sin marcar";
+}
+
 function updateRadar(d){
 
     const measuredOffset = Number(d._client_clock_offset_ms);
@@ -4901,6 +4942,8 @@ function updateRadar(d){
     updateCurrentPriceAxisTag();
 
     const direction=d.direction || "RECOPILANDO";
+    window.currentRadarTicker = String(d.kalshi_market_ticker || "RADAR-" + new Date().toISOString().slice(0,10));
+    renderRadarDirectionMark(window.currentRadarTicker);
     if(direction === "ALCISTA" || direction === "BAJISTA"){
         if(lastAnnouncedDirection && direction !== lastAnnouncedDirection && radarAlertsEnabled){
             playRadarTone(direction === "ALCISTA" ? "bullish" : "bearish");
