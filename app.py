@@ -10,7 +10,7 @@ from collections import deque
 import requests
 import websocket
 
-from flask import Flask, jsonify, render_template_string
+from flask import Flask, jsonify, render_template_string, request
 
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
@@ -3354,6 +3354,35 @@ def candle_diagnostics():
     })
 
 
+
+@app.route("/api/manual-position", methods=["POST"])
+def save_manual_position():
+    start_services()
+    payload = request.get_json(silent=True) or {}
+    side = str(payload.get("side") or "").strip().upper()
+    ticker = str(payload.get("ticker") or "").strip()
+    raw_price = payload.get("entry_price")
+    if side not in ("YES", "NO") or not ticker:
+        return jsonify({"ok": False, "error": "Selecciona YES o NO para el contrato activo."}), 400
+    data = get_data()
+    if not data.get("kalshi_market_active") or ticker != str(data.get("kalshi_market_ticker") or ""):
+        return jsonify({"ok": False, "error": "El contrato cambió. Actualiza el radar antes de registrar tu posición."}), 409
+    entry_price = None
+    if raw_price not in (None, ""):
+        try:
+            entry_price = float(raw_price)
+        except (TypeError, ValueError):
+            return jsonify({"ok": False, "error": "El precio debe ser un número entre 0 y 1."}), 400
+        if not math.isfinite(entry_price) or not 0 < entry_price < 1:
+            return jsonify({"ok": False, "error": "El precio debe estar entre 0 y 1 (por ejemplo, 0.54)."}), 400
+    saved = pattern_memory.record_manual_position(
+        ticker, side, entry_price, time.time()
+    )
+    if not saved:
+        return jsonify({"ok": False, "error": "Ya existe una posición registrada para este contrato o no se pudo guardar."}), 409
+    return jsonify({"ok": True, "position": pattern_memory.get_manual_position(ticker)})
+
+
 @app.route("/history")
 def history():
     start_services()
@@ -3511,6 +3540,14 @@ button{border:1px solid #35476b;background:#182640;color:white;border-radius:9px
 .accuracy-note{margin-top:4px;color:#8f9bb1;font-size:8px;line-height:1.25}
 @media(max-width:600px){.accuracy-strip{margin-top:5px;padding:6px 8px}.accuracy-head{font-size:8px}.accuracy-main strong{font-size:21px}.accuracy-counts{gap:9px;font-size:8px}.accuracy-note{font-size:7px}}
 
+
+.manual-position{margin-top:14px;padding:12px;border:1px solid #29344b;border-radius:12px;background:#0b1220}
+.manual-position-title{font-weight:800;letter-spacing:.5px;margin-bottom:9px;color:#cbd5ef}
+.manual-position-buttons{display:flex;gap:10px;margin-bottom:10px}
+.manual-position-buttons button{flex:1;min-height:42px;border:1px solid #40506c;border-radius:9px;background:#141f33;color:#f4f6ff;font-weight:800}
+.manual-position-buttons button.selected{border-color:#00d995;background:#103b2b;color:#79ffc0;box-shadow:0 0 12px #00d99533}
+.manual-entry-price{display:block;width:100%;margin:6px 0 8px;padding:10px;border:1px solid #34415a;border-radius:8px;background:#080d18;color:#fff;font-size:16px}
+#manualPositionStatus{line-height:1.5;color:#aab6cc}
 </style>
 </head>
 
@@ -3676,6 +3713,16 @@ button{border:1px solid #35476b;background:#182640;color:white;border-radius:9px
     <div class="radar-alert-state neutral" id="radarAlertState" hidden>OBSERVAR</div>
     <div class="radar-alert-message" id="radarAlertMessage" hidden></div>
     <div class="radar-alert-detail" id="radarAlertDetail" hidden></div>
+    <div class="manual-position" id="manualPosition">
+        <div class="small manual-position-title">¿QUÉ COMPRASTE EN ESTE CONTRATO?</div>
+        <div class="manual-position-buttons">
+            <button type="button" id="manualYes" onclick="registerManualPosition('YES')">COMPRÉ YES</button>
+            <button type="button" id="manualNo" onclick="registerManualPosition('NO')">COMPRÉ NO</button>
+        </div>
+        <label class="small" for="manualEntryPrice">Precio al que compraste (opcional, ej. 0.54)</label>
+        <input id="manualEntryPrice" class="manual-entry-price" type="number" min="0.01" max="0.99" step="0.01" inputmode="decimal" placeholder="0.54">
+        <div class="small" id="manualPositionStatus">Registra tu posición cuando aparezca una entrada confirmada.</div>
+    </div>
 </section>
 
 
@@ -4419,6 +4466,34 @@ function playRadarTone(kind){
     }catch(error){ console.warn("No se pudo reproducir el aviso",error); }
 }
 
+
+async function registerManualPosition(side){
+    const ticker = window.currentRadarTicker;
+    const status = $("manualPositionStatus");
+    if(!ticker){
+        status.textContent = "No hay un contrato activo de Kalshi para registrar.";
+        return;
+    }
+    const priceText = $("manualEntryPrice").value.trim();
+    const payload = {side, ticker, entry_price: priceText || null};
+    status.textContent = "Guardando tu posición...";
+    try{
+        const response = await fetch("/api/manual-position",{
+            method:"POST",
+            headers:{"Content-Type":"application/json"},
+            body:JSON.stringify(payload)
+        });
+        const result = await response.json();
+        if(!response.ok || !result.ok) throw new Error(result.error || "No se pudo guardar.");
+        $("manualYes").classList.toggle("selected",side==="YES");
+        $("manualNo").classList.toggle("selected",side==="NO");
+        status.textContent = "TU POSICIÓN REGISTRADA: " + side +
+            (priceText ? " · precio de entrada " + Number(priceText).toFixed(2) : " · sin precio de compra");
+    }catch(error){
+        status.textContent = error.message || "Error al registrar la posición.";
+    }
+}
+
 function handleRadarAlert(data){
     const alertData = data.alert || {};
     const type = String(alertData.type || "").toUpperCase();
@@ -4666,6 +4741,13 @@ function updateRadar(d){
         $("entryEconomics").style.color = "#aab2c5";
     }
 
+    window.currentRadarTicker = d.kalshi_market_active ? d.kalshi_market_ticker : null;
+    const manualStatus = $("manualPositionStatus");
+    if(manualStatus && !manualStatus.dataset.saved){
+        manualStatus.textContent = window.currentRadarTicker
+            ? "Contrato activo: " + window.currentRadarTicker + ". Registra YES o NO cuando compres."
+            : "Esperando un contrato activo de Kalshi.";
+    }
     handleRadarAlert(d);
 
 
