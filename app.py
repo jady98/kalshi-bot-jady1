@@ -2972,6 +2972,22 @@ def get_data():
         market_close = None
     countdown = max(0, int(market_close - now)) if contract_active else 0
     orderbook = get_cached_kalshi_orderbook(market_ticker) if contract_active else {"available": False, "error": "SIN CONTRATO"}
+    # Probabilidad implícita de Kalshi: punto medio entre mejor compra y venta YES.
+    # Si solo existe un lado del libro, usar ese precio como referencia provisional.
+    yes_bid = orderbook.get("best_yes_bid")
+    yes_ask = orderbook.get("best_yes_ask")
+    kalshi_yes_probability = None
+    try:
+        if yes_bid is not None and yes_ask is not None:
+            kalshi_yes_probability = (float(yes_bid) + float(yes_ask)) / 2.0 * 100.0
+        elif yes_bid is not None:
+            kalshi_yes_probability = float(yes_bid) * 100.0
+        elif yes_ask is not None:
+            kalshi_yes_probability = float(yes_ask) * 100.0
+    except (TypeError, ValueError):
+        kalshi_yes_probability = None
+    if kalshi_yes_probability is not None:
+        kalshi_yes_probability = max(0.0, min(100.0, kalshi_yes_probability))
 
     brti_age = (
         round(now - bt, 1)
@@ -3364,6 +3380,10 @@ def get_data():
         "seconds_to_close": countdown,
         "kalshi_market_error": market_error,
         "kalshi_orderbook": orderbook,
+        "kalshi_yes_probability_pct": (
+            round(kalshi_yes_probability, 1)
+            if kalshi_yes_probability is not None else None
+        ),
         "entry_economics": entry_economics,
 
         "countdown": countdown,
@@ -3873,7 +3893,7 @@ button{border:1px solid #35476b;background:#182640;color:white;border-radius:9px
 <section class="card">
 
     <div class="section-title">
-        PROBABILIDAD DEL MOTOR · 15 MIN
+        PROBABILIDAD KALSHI · MERCADO
     </div>
 
     <div class="signal yellow" id="direction">
@@ -5013,24 +5033,20 @@ function updateRadar(d){
         );
 
 
-    const bullish=Math.max(
-        20,
-        Math.min(80,Number(d.bullish_score ?? 50))
-    );
+    const kalshiProbability = Number(d.kalshi_yes_probability_pct);
+    const hasKalshiProbability = d.kalshi_yes_probability_pct != null &&
+        Number.isFinite(kalshiProbability);
+    const bullish = hasKalshiProbability
+        ? Math.max(0, Math.min(100, kalshiProbability))
+        : null;
+    const bearish = bullish == null ? null : 100 - bullish;
 
-    const bearish=100-bullish;
-
-    $("bullText").textContent=
-        bullish.toFixed(1)+"%";
-
-    $("bearText").textContent=
-        bearish.toFixed(1)+"%";
-
-    $("bullBar").style.width=
-        bullish+"%";
-
-    $("bearBar").style.width=
-        bearish+"%";
+    $("bullText").textContent =
+        bullish == null ? "--" : bullish.toFixed(1) + "%";
+    $("bearText").textContent =
+        bearish == null ? "--" : bearish.toFixed(1) + "%";
+    $("bullBar").style.width = bullish == null ? "50%" : bullish + "%";
+    $("bearBar").style.width = bearish == null ? "50%" : bearish + "%";
 
 
     $("strength").textContent=
