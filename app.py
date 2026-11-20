@@ -3681,6 +3681,9 @@ button{border:1px solid #35476b;background:#182640;color:white;border-radius:9px
 .radar-alert-panel{border:1px solid #35415b;background:linear-gradient(135deg,rgba(20,27,48,.98),rgba(9,14,29,.98))}
 .radar-alert-heading{gap:7px;align-items:center}
 .radar-alert-heading button{white-space:nowrap;font-size:9px;padding:6px 7px}
+.alert-sound-toggle{border:1px solid #65728b!important;background:#172238!important;color:#dce7f8!important;transition:box-shadow .2s,border-color .2s,background .2s}
+.alert-sound-toggle.alerts-enabled{border:1px solid #00e6a0!important;background:#063c2b!important;color:#8bffd0!important;box-shadow:0 0 6px rgba(0,230,160,.8),0 0 16px rgba(0,230,160,.35);animation:radarSoundGlow 1.8s ease-in-out infinite}
+@keyframes radarSoundGlow{0%,100%{box-shadow:0 0 5px rgba(0,230,160,.55),0 0 12px rgba(0,230,160,.2)}50%{box-shadow:0 0 10px rgba(0,230,160,1),0 0 20px rgba(0,230,160,.5)}}
 .compact-radar-alert{padding:7px 8px!important;margin:3px 0!important}
 .compact-radar-alert .radar-alert-heading .section-title{margin:0;font-size:11px}
 .compact-radar-alert .radar-alert-heading .small{font-size:8px;line-height:1.15}
@@ -3878,7 +3881,7 @@ button{border:1px solid #35476b;background:#182640;color:white;border-radius:9px
             <div class="section-title">ALERTAS</div>
             <div class="small" id="radarAlertStatus">BRTI · 15 MIN</div>
         </div>
-        <button id="alertsEnableButton" onclick="enableRadarAlerts()">ACTIVAR AVISOS</button>
+        <button id="alertsEnableButton" class="alert-sound-toggle" onclick="enableRadarAlerts()" aria-pressed="false">ACTIVAR SONIDO</button>
     </div>
     <div class="accuracy-mini" aria-label="Precisión real: aciertos y errores">
         <span class="accuracy-correct">ACIERTOS <b id="accuracyCorrect">--</b></span>
@@ -4595,28 +4598,49 @@ let radarAlertsEnabled = false;
 let lastRadarAlertKey = "";
 let lastExitTicker = null;
 
-function enableRadarAlerts(){
-    radarAlertsEnabled = true;
+function paintRadarAlertToggle(){
+    const button = $("alertsEnableButton");
+    const status = $("radarAlertStatus");
+    if(button){
+        button.textContent = radarAlertsEnabled ? "SONIDO ACTIVADO" : "ACTIVAR SONIDO";
+        button.classList.toggle("alerts-enabled",radarAlertsEnabled);
+        button.setAttribute("aria-pressed",radarAlertsEnabled ? "true" : "false");
+    }
+    if(status){
+        status.textContent = radarAlertsEnabled
+            ? "SONIDO ENCENDIDO · avisos de entrada y salida"
+            : "SONIDO APAGADO · pulsa para activar";
+    }
+}
+
+async function enableRadarAlerts(){
+    if(radarAlertsEnabled){
+        radarAlertsEnabled = false;
+        paintRadarAlertToggle();
+        return;
+    }
     try{
         const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-        if(AudioContextClass){
-            radarAudioContext = radarAudioContext || new AudioContextClass();
-            if(radarAudioContext.state === "suspended") radarAudioContext.resume();
+        if(!AudioContextClass) throw new Error("Este navegador no permite sonido web.");
+        radarAudioContext = radarAudioContext || new AudioContextClass();
+        if(radarAudioContext.state === "suspended") await radarAudioContext.resume();
+        if(radarAudioContext.state !== "running") throw new Error("Android no habilitó el audio. Vuelve a pulsar el botón.");
+        radarAlertsEnabled = true;
+        paintRadarAlertToggle();
+        playRadarTone("entry");
+        if("Notification" in window && Notification.permission === "default"){
+            const permission = await Notification.requestPermission();
+            if(permission !== "granted"){
+                const status = $("radarAlertStatus");
+                if(status) status.textContent = "SONIDO ENCENDIDO · permite notificaciones para avisos del sistema";
+            }
         }
-    }catch(error){ console.warn("Audio no disponible", error); }
-    if("Notification" in window){
-        Notification.requestPermission().then(permission=>{
-            const button = $("alertsEnableButton");
-            if(button) button.textContent = permission === "granted" ? "AVISOS ACTIVOS" : "SONIDO ACTIVO";
-            $("radarAlertStatus").textContent = permission === "granted"
-                ? "Notificaciones y sonido activados mientras el radar esté abierto"
-                : "Sonido activado; permiso de notificaciones no concedido";
-        });
-    }else{
-        $("alertsEnableButton").textContent = "SONIDO ACTIVO";
-        $("radarAlertStatus").textContent = "Sonido activado en esta pantalla";
+    }catch(error){
+        radarAlertsEnabled = false;
+        paintRadarAlertToggle();
+        const status = $("radarAlertStatus");
+        if(status) status.textContent = error.message || "No se pudo activar el sonido.";
     }
-    playRadarTone("entry");
 }
 
 function playRadarTone(kind){
@@ -4740,12 +4764,12 @@ function handleRadarAlert(data){
             window.navigator.vibrate(isExit ? [180,80,180] : [100,60,100]);
         }
     }
-    if("Notification" in window && Notification.permission === "granted"){
+    if(radarAlertsEnabled && "Notification" in window && Notification.permission === "granted"){
         try{
             new Notification(isExit ? "BTC Radar · SALIDA" : "BTC Radar · ENTRADA",{
                 body: (alertData.message || "") + (alertData.detail ? "\n" + alertData.detail : ""),
                 tag: eventKey,
-                renotify: false
+                renotify: true
             });
         }catch(error){ console.warn("Notificación no disponible",error); }
     }
