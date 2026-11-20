@@ -124,7 +124,8 @@ _guidance_state = {
     "stage": "SIN_SEÑAL",
     "direction": None,
     "last_alert_ts": 0.0,
-    "alert": None
+    "alert": None,
+    "danger_count": 0
 }
 
 session = requests.Session()
@@ -2738,7 +2739,7 @@ def build_forward_guidance(
 
 
 def update_guidance_alert(guidance, ticker, contract_active=False):
-    """Solo alerta entradas ligadas al contrato vigente; nunca ejecuta órdenes."""
+    """Mantiene una entrada ante ruido breve y avisa salida ante deterioro persistente."""
     now = time.time()
     stage = guidance.get("entry_stage")
     direction = guidance.get("entry_direction")
@@ -2748,71 +2749,108 @@ def update_guidance_alert(guidance, ticker, contract_active=False):
         state = _guidance_state
         if not contract_active or not ticker or seconds_left <= 0:
             state.update({
-                "ticker": None,
-                "stage": "SIN_CONTRATO",
-                "direction": None,
-                "last_alert_ts": 0.0,
-                "alert": None
+                "ticker": None, "stage": "SIN_CONTRATO", "direction": None,
+                "last_alert_ts": 0.0, "alert": None, "danger_count": 0
             })
             return None
         if state["ticker"] != ticker:
             state.update({
-                "ticker": ticker,
-                "stage": "SIN_SEÑAL",
-                "direction": None,
-                "last_alert_ts": 0.0,
-                "alert": None
+                "ticker": ticker, "stage": "SIN_SEÑAL", "direction": None,
+                "last_alert_ts": 0.0, "alert": None, "danger_count": 0
             })
+
         previous_stage = state["stage"]
         previous_direction = state["direction"]
-        if previous_stage == "ENTRADA" and (
+        short_direction = guidance.get("short_direction")
+        opposite_confirmed = (
+            previous_stage == "ENTRADA"
+            and short_direction in ("ALCISTA", "BAJISTA")
+            and short_direction != previous_direction
+            and guidance.get("guidance_1m_aligned")
+            and guidance.get("guidance_3m_aligned")
+        )
+
+        # No salir por una sola lectura débil: exigir deterioro en 3 actualizaciones.
+        # Una reversión confirmada en 1m y 3m sí activa salida inmediata.
+        if previous_stage == "ENTRADA":
+            if stage == "ENTRADA" and direction == previous_direction:
+                state["danger_count"] = 0
+            elif opposite_confirmed:
+                state["danger_count"] = 3
+            else:
+                state["danger_count"] = int(state.get("danger_count") or 0) + 1
+                if state["danger_count"] < 3:
+                    stage = "ENTRADA"
+                    direction = previous_direction
+                    guidance["entry_stage"] = "ENTRADA"
+                    guidance["entry_direction"] = previous_direction
+                    guidance["signal_stage"] = "MANTENER · " + str(previous_direction)
+                    guidance["guidance_note"] = (
+                        "MANTENER: apareció una lectura débil aislada. "
+                        "El radar espera confirmación del deterioro antes de indicar salida. "
+                        + str(guidance.get("guidance_note") or "")
+                    )
+
+        should_exit = previous_stage == "ENTRADA" and (
             stage != "ENTRADA" or direction != previous_direction
-        ):
+        ) and (opposite_confirmed or int(state.get("danger_count") or 0) >= 3)
+
+        if should_exit:
             alert = {
-                "type": "SALIDA",
-                "level": "CRITICA",
-                "message": "SALIDA · LA ENTRADA PERDIÓ CONFIRMACIÓN",
-                "detail": str(guidance.get("guidance_note") or "La señal perdió confirmación en los movimientos cortos.") + " Quedan " + str(seconds_left) + " segundos; revisa la salida y protege el riesgo.",
-                "ticker": str(ticker),
-                "seconds_remaining": seconds_left,
+                "type": "SALIDA", "level": "CRITICA",
+                "message": "SALIDA · LA SEÑAL SE DEBILITÓ DE FORMA PERSISTENTE",
+                "detail": (
+                    str(guidance.get("guidance_note") or
+                        "La confirmación dejó de sostenerse.")
+                    + " El radar detectó deterioro persistente o reversión confirmada. "
+                    + "Quedan " + str(seconds_left) + " segundos; revisa la salida y protege el riesgo."
+                ),
+                "ticker": str(ticker), "seconds_remaining": seconds_left,
                 "timestamp": now
             }
+            stage = "SALIDA"
+            direction = None
+            guidance["entry_stage"] = "SALIDA"
+            guidance["entry_direction"] = None
+            guidance["signal_stage"] = "SALIDA · PROTEGER"
         elif stage == "ENTRADA" and (
             previous_stage != "ENTRADA" or direction != previous_direction
         ):
             alert = {
-                "type": "ENTRADA",
-                "level": "AVISO",
+                "type": "ENTRADA", "level": "AVISO",
                 "message": "ENTRADA CONFIRMADA · " + str(direction),
-                "detail": str(guidance.get("guidance_note") or "Dirección principal y movimientos cortos alineados.") + " " + ("Contrato " + str(ticker) if not str(ticker).startswith("RADAR-15M-") else "Ventana predictiva de 15 minutos") + ". Quedan " + str(seconds_left) + " segundos.",
-                "ticker": str(ticker),
-                "seconds_remaining": seconds_left,
+                "detail": str(guidance.get("guidance_note") or
+                    "Dirección principal y movimientos cortos alineados.")
+                    + " " + ("Contrato " + str(ticker) if not str(ticker).startswith("RADAR-15M-")
+                             else "Ventana predictiva de 15 minutos")
+                    + ". Quedan " + str(seconds_left) + " segundos."
+                    ,
+                "ticker": str(ticker), "seconds_remaining": seconds_left,
                 "timestamp": now
             }
+            state["danger_count"] = 0
         elif stage == "PREALERTA" and previous_stage not in ("PREALERTA", "ENTRADA"):
             alert = {
-                "type": "PREALERTA",
-                "level": "AVISO",
-                "message": "PREALERTA · POSIBLE " + str(direction),
-                "detail": str(guidance.get("guidance_note") or "Se está formando una dirección; todavía no es entrada confirmada.") + " " + ("Contrato " + str(ticker) if not str(ticker).startswith("RADAR-15M-") else "Ventana predictiva de 15 minutos") + ". Quedan " + str(seconds_left) + " segundos.",
-                "ticker": str(ticker),
-                "seconds_remaining": seconds_left,
+                "type": "PREALERTA", "level": "AVISO",
+                "message": "ESPERANDO CONFIRMACIÓN · POSIBLE " + str(direction),
+                "detail": str(guidance.get("guidance_note") or
+                    "Se está formando una dirección; todavía no es entrada confirmada.")
+                    + " " + ("Contrato " + str(ticker) if not str(ticker).startswith("RADAR-15M-")
+                             else "Ventana predictiva de 15 minutos")
+                    + ". Quedan " + str(seconds_left) + " segundos.",
+                "ticker": str(ticker), "seconds_remaining": seconds_left,
                 "timestamp": now
             }
+
         state["stage"] = stage
         state["direction"] = direction
-        # Cada transición se anuncia una sola vez; no se pierde una entrada
-        # por el intervalo de enfriamiento de una prealerta anterior.
         if alert:
             state["last_alert_ts"] = now
             state["alert"] = alert
 
-        # Mantener la alerta visible entre las consultas periódicas de la pantalla.
-        # Así no desaparece después de una sola respuesta de la API.
         saved_alert = state.get("alert")
         if (
-            saved_alert
-            and saved_alert.get("ticker") == ticker
+            saved_alert and saved_alert.get("ticker") == ticker
             and saved_alert.get("seconds_remaining", 0) > 0
             and saved_alert.get("timestamp") is not None
             and now - float(saved_alert["timestamp"]) <= 300
@@ -3847,7 +3885,7 @@ button{border:1px solid #35476b;background:#182640;color:white;border-radius:9px
         <span class="accuracy-wrong">ERRORES <b id="accuracyIncorrect">--</b></span>
     </div>
     <div class="radar-stage-list" aria-label="Estados de alerta">
-        <div class="radar-stage-item" id="radarStepEntry"><b>✓</b><span>ENTRADA CONFIRMADA</span></div>
+        <div class="radar-stage-item" id="radarStepEntry"><b>✓</b><span id="radarEntryStepLabel">ENTRADA CONFIRMADA</span></div>
         <div class="radar-stage-item" id="radarStepHold"><b>Ⅱ</b><span>MANTENER</span></div>
         <div class="radar-stage-item" id="radarStepExit"><b>×</b><span>SALIDA</span></div>
     </div>
@@ -4555,6 +4593,7 @@ function goLive(){
 let radarAudioContext = null;
 let radarAlertsEnabled = false;
 let lastRadarAlertKey = "";
+let lastExitTicker = null;
 
 function enableRadarAlerts(){
     radarAlertsEnabled = true;
@@ -4633,16 +4672,25 @@ function handleRadarAlert(data){
     const stage = String(data.entry_stage || "").toUpperCase();
     const hasFreshEvent = !!alertData.timestamp &&
         (Date.now() / 1000 - Number(alertData.timestamp)) >= 0 &&
-        (Date.now() / 1000 - Number(alertData.timestamp)) <= 120;
+        (Date.now() / 1000 - Number(alertData.timestamp)) <= 300;
+    const currentTicker = String(data.entry_ticker || alertData.ticker || "");
+    if(lastExitTicker && currentTicker && currentTicker !== lastExitTicker){
+        lastExitTicker = null;
+    }
+    if(hasFreshEvent && (type === "SALIDA" || type === "PROTEGER")){
+        lastExitTicker = String(alertData.ticker || currentTicker);
+    }
+    const exitRemainsActive = !!lastExitTicker && !!currentTicker &&
+        lastExitTicker === currentTicker;
 
     // La etapa vigente manda; un aviso viejo no puede contradecirla.
     const stageIsEntry = stage === "ENTRADA";
-    const isExit = hasFreshEvent &&
-        (type === "SALIDA" || type === "PROTEGER") &&
-        !stageIsEntry;
+    const isExit = !stageIsEntry && (exitRemainsActive || (hasFreshEvent && (type === "SALIDA" || type === "PROTEGER")));
     const isNewEntry = hasFreshEvent && type === "ENTRADA" && stageIsEntry;
     const isHold = stageIsEntry && !isNewEntry;
     const isPrealert = stage === "PREALERTA";
+    const entryStepLabel = $("radarEntryStepLabel");
+    if(entryStepLabel) entryStepLabel.textContent = isPrealert ? "ESPERANDO CONFIRMACIÓN" : "ENTRADA CONFIRMADA";
     const isDirectionChange = hasFreshEvent && type === "CAMBIO_DIRECCION";
 
     const state = $("radarAlertState");
@@ -4662,7 +4710,7 @@ function handleRadarAlert(data){
     panel.classList.toggle("has-event", isExit || isNewEntry || isPrealert || isDirectionChange);
 
     // Los tres indicadores son mutuamente excluyentes.
-    const activeStep = isExit ? "exit" : isNewEntry ? "entry" : isHold ? "hold" : "";
+    const activeStep = isExit ? "exit" : (isNewEntry || isPrealert) ? "entry" : isHold ? "hold" : "";
     ["entry","hold","exit"].forEach(step=>{
         const item = $("radarStep" + step.charAt(0).toUpperCase() + step.slice(1));
         if(item) item.classList.toggle("active", step === activeStep);
