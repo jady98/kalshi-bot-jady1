@@ -1988,18 +1988,18 @@ def get_official_market_accuracy():
 
 
 def get_15m_prediction_accuracy_by_contract():
-    """Evalúa el último pronóstico 15m resuelto por contrato; SIN CAMBIO es fallo."""
+    """Evalúa la última predicción 15m con resultado puntual por contrato."""
     empty = {
         "predictions_evaluated": 0, "correct": 0, "incorrect": 0,
         "no_change": 0, "indecisive_predictions": 0,
         "contracts_evaluated": 0, "indecisive_contracts": 0,
         "late_predictions_excluded": 0, "accuracy_pct": None,
-        "measurement": "ULTIMO PRONOSTICO 15M RESUELTO POR CONTRATO; SIN CAMBIO CUENTA COMO FALLO"
+        "measurement": "ULTIMA PREDICCION 15M PUNTUAL POR CONTRATO; SIN CAMBIO CUENTA COMO FALLO"
     }
     try:
         with _connect() as conn:
             row = conn.execute("""
-                WITH latest AS (
+                WITH timely_latest AS (
                     SELECT DISTINCT ON (
                         COALESCE(NULLIF(s.market_ticker, ''), NULLIF(s.snapshot_key, ''), s.id::TEXT)
                     )
@@ -2015,13 +2015,26 @@ def get_15m_prediction_accuracy_by_contract():
                       AND s.signal_ts >= COALESCE(
                           (SELECT reset_ts FROM btc_prediction_stats_control WHERE id = 1), 0
                       )
+                      AND o.result IN ('ALCISTA', 'BAJISTA', 'SIN CAMBIO')
                     ORDER BY COALESCE(NULLIF(s.market_ticker, ''), NULLIF(s.snapshot_key, ''), s.id::TEXT),
                              s.signal_ts DESC, s.id DESC
+                ),
+                late AS (
+                    SELECT COUNT(*) AS total
+                    FROM btc_signal_snapshots AS s
+                    JOIN btc_signal_outcomes AS o
+                      ON o.snapshot_id = s.id
+                     AND o.horizon_seconds = 900
+                     AND o.future_price IS NOT NULL
+                    WHERE s.features->>'forecast_horizon_seconds' = '900'
+                      AND s.signal_ts >= COALESCE(
+                          (SELECT reset_ts FROM btc_prediction_stats_control WHERE id = 1), 0
+                      )
+                      AND o.result IN ('TARDIO_ALCISTA', 'TARDIO_BAJISTA', 'TARDIO_SIN_CAMBIO')
                 )
                 SELECT
                     COUNT(*) FILTER (
                         WHERE direction IN ('ALCISTA', 'BAJISTA')
-                          AND result IN ('ALCISTA', 'BAJISTA', 'SIN CAMBIO')
                     ),
                     COUNT(*) FILTER (
                         WHERE direction IN ('ALCISTA', 'BAJISTA')
@@ -2029,10 +2042,7 @@ def get_15m_prediction_accuracy_by_contract():
                     ),
                     COUNT(*) FILTER (
                         WHERE direction IN ('ALCISTA', 'BAJISTA')
-                          AND (
-                              (result IN ('ALCISTA', 'BAJISTA') AND direction <> result)
-                              OR result = 'SIN CAMBIO'
-                          )
+                          AND direction <> result
                     ),
                     COUNT(*) FILTER (
                         WHERE direction IN ('ALCISTA', 'BAJISTA')
@@ -2044,17 +2054,13 @@ def get_15m_prediction_accuracy_by_contract():
                     ),
                     COUNT(DISTINCT contract_key) FILTER (
                         WHERE direction IN ('ALCISTA', 'BAJISTA')
-                          AND result IN ('ALCISTA', 'BAJISTA', 'SIN CAMBIO')
                     ),
                     COUNT(DISTINCT contract_key) FILTER (
                         WHERE direction IN ('INDECISO', 'RECOPILANDO')
                            OR direction IS NULL
                     ),
-                    COUNT(*) FILTER (
-                        WHERE direction IN ('ALCISTA', 'BAJISTA')
-                          AND result IN ('TARDIO_ALCISTA', 'TARDIO_BAJISTA', 'TARDIO_SIN_CAMBIO')
-                    )
-                FROM latest
+                    (SELECT total FROM late)
+                FROM timely_latest
             """).fetchone()
         evaluated, correct, incorrect, no_change, indecisive, contracts, indecisive_contracts, late = row
         correct, incorrect = int(correct or 0), int(incorrect or 0)
@@ -2069,12 +2075,10 @@ def get_15m_prediction_accuracy_by_contract():
             "indecisive_contracts": int(indecisive_contracts or 0),
             "late_predictions_excluded": int(late or 0),
             "accuracy_pct": round(correct * 100 / total, 1) if total else None,
-            "measurement": "ULTIMO PRONOSTICO 15M RESUELTO POR CONTRATO; SIN CAMBIO CUENTA COMO FALLO"
+            "measurement": "ULTIMA PREDICCION 15M PUNTUAL POR CONTRATO; SIN CAMBIO CUENTA COMO FALLO"
         }
     except Exception as exc:
         return {**empty, "error": str(exc)[:180]}
-
-
 
 
 def get_15m_error_diagnostics():
