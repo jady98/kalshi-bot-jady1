@@ -4423,35 +4423,58 @@ function handleRadarAlert(data){
     const alertData = data.alert || {};
     const type = String(alertData.type || "").toUpperCase();
     const stage = String(data.entry_stage || "").toUpperCase();
-    const isExit = type === "SALIDA" || type === "PROTEGER";
-    const isEntry = type === "ENTRADA" || stage === "ENTRADA";
-    const isPrealert = type === "PREALERTA" || stage === "PREALERTA";
+    const hasFreshEvent = !!alertData.timestamp &&
+        (Date.now() / 1000 - Number(alertData.timestamp)) >= 0 &&
+        (Date.now() / 1000 - Number(alertData.timestamp)) <= 120;
+
+    // La etapa vigente manda; un aviso viejo no puede contradecirla.
+    const stageIsEntry = stage === "ENTRADA";
+    const isExit = hasFreshEvent &&
+        (type === "SALIDA" || type === "PROTEGER") &&
+        !stageIsEntry;
+    const isNewEntry = hasFreshEvent && type === "ENTRADA" && stageIsEntry;
+    const isHold = stageIsEntry && !isNewEntry;
+    const isPrealert = stage === "PREALERTA";
+    const isDirectionChange = hasFreshEvent && type === "CAMBIO_DIRECCION";
+
     const state = $("radarAlertState");
     const message = $("radarAlertMessage");
     const detail = $("radarAlertDetail");
     const panel = $("radarAlertPanel");
     if(!state || !message || !detail || !panel) return;
 
-    state.className = "radar-alert-state " + (isExit ? "exit" : isEntry ? "entry" : isPrealert ? "prealert" : "neutral");
-    state.textContent = isExit ? "SALIDA" : isEntry ? "ENTRADA CONFIRMADA" : isPrealert ? "PREALERTA" : "OBSERVAR";
-    panel.classList.toggle("has-event", isExit || isEntry || isPrealert);
-    const activeStep = isExit ? "exit" : isEntry ? "entry" : isPrealert ? "prealert" : "observe";
-    ["observe","prealert","entry","hold","exit"].forEach(step=>{
+    const visibleKind = isExit ? "exit" : isNewEntry ? "entry" :
+        isHold ? "hold" : isPrealert ? "prealert" : "neutral";
+    state.className = "radar-alert-state " + visibleKind;
+    state.textContent = isExit ? "SALIDA" :
+        isNewEntry ? "ENTRADA CONFIRMADA" :
+        isHold ? "MANTENER · " + (data.entry_direction || data.direction || "") :
+        isPrealert ? "PREALERTA · SIN ENTRADA" :
+        isDirectionChange ? "CAMBIO DE DIRECCIÓN · OBSERVAR" : "OBSERVAR";
+    panel.classList.toggle("has-event", isExit || isNewEntry || isPrealert || isDirectionChange);
+
+    // Los tres indicadores son mutuamente excluyentes.
+    const activeStep = isExit ? "exit" : isNewEntry ? "entry" : isHold ? "hold" : "";
+    ["entry","hold","exit"].forEach(step=>{
         const item = $("radarStep" + step.charAt(0).toUpperCase() + step.slice(1));
-        if(item) item.classList.toggle("active", step === activeStep || (step === "hold" && isEntry));
+        if(item) item.classList.toggle("active", step === activeStep);
     });
+
     message.textContent = alertData.message || (
-        isEntry ? "ENTRADA CONFIRMADA · " + (data.entry_direction || data.direction || "") :
-        isPrealert ? "POSIBLE " + (data.entry_direction || data.direction || "") :
+        isNewEntry ? "ENTRADA CONFIRMADA · " + (data.entry_direction || data.direction || "") :
+        isHold ? "La entrada sigue confirmada. No es una nueva entrada." :
+        isPrealert ? "Hay una posible señal, pero todavía no está confirmada." :
         isExit ? "La señal perdió confirmación. Revisa la salida." :
-        "El radar avisará cuando confirme una entrada o detecte una salida."
+        isDirectionChange ? "La dirección cambió. Un cambio de dirección por sí solo no confirma una entrada." :
+        "Sin entrada confirmada. Espera a que el radar complete sus filtros."
     );
     detail.textContent = alertData.detail || data.guidance_note ||
-        "Se evalúan BRTI, dirección, fuerza y confirmación de 1 y 3 minutos.";
+        "La dirección y el porcentaje por sí solos no confirman una entrada.";
 
-    const eventType = isExit ? "SALIDA" : isEntry ? "ENTRADA" : isPrealert ? "PREALERTA" : "";
-    if(!eventType || !alertData.timestamp) return;
-    const eventKey = [eventType,alertData.ticker || data.entry_ticker || "",alertData.timestamp,alertData.message || ""].join("|");
+    // Solo una entrada o salida confirmada puede producir sonido/notificación.
+    const eventType = isExit ? "SALIDA" : isNewEntry ? "ENTRADA" : "";
+    if(!eventType || !hasFreshEvent) return;
+    const eventKey = [eventType,alertData.ticker || data.entry_ticker || "",alertData.timestamp].join("|");
     if(eventKey === lastRadarAlertKey) return;
     lastRadarAlertKey = eventKey;
 
@@ -4463,7 +4486,7 @@ function handleRadarAlert(data){
     }
     if("Notification" in window && Notification.permission === "granted"){
         try{
-            new Notification(isExit ? "BTC Radar · SALIDA" : isEntry ? "BTC Radar · ENTRADA" : "BTC Radar · PREALERTA",{
+            new Notification(isExit ? "BTC Radar · SALIDA" : "BTC Radar · ENTRADA",{
                 body: (alertData.message || "") + (alertData.detail ? "\n" + alertData.detail : ""),
                 tag: eventKey,
                 renotify: false
