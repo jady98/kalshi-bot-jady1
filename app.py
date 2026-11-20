@@ -3266,10 +3266,14 @@ def get_data():
         else (int(now // 900) + 1) * 900
     )
     entry_validation = get_entry_validation()
+    # El radar conserva su ventana móvil de 15 minutos aunque Kalshi aún
+    # no haya publicado el siguiente contrato. Esto permite PREALERTA y avisos
+    # internos; las entradas reales siguen bloqueadas sin mercado/libro válido.
+    guidance_active = bool(brti_live and guidance_close and guidance_close > now)
     guidance = build_forward_guidance(
         ticks, bp if brti_live else None, indicators, candles,
-        contract_active=contract_active,
-        ticker=market_ticker if contract_active else None,
+        contract_active=guidance_active,
+        ticker=guidance_ticker,
         close_ts=guidance_close,
         validation=entry_validation
     )
@@ -3298,8 +3302,8 @@ def get_data():
                 + " Entrada bloqueada: " + "; ".join(entry_blocks) + "."
             )
     guidance_alert = update_guidance_alert(
-        guidance, market_ticker if contract_active else None,
-        contract_active=contract_active
+        guidance, guidance_ticker if guidance_active else None,
+        contract_active=guidance_active
     )
     if guidance_alert is not None:
         alert_data = guidance_alert
