@@ -1603,6 +1603,9 @@ def get_model_comparison_accuracy():
                   ON o.market_ticker = s.market_ticker
                  AND o.source = 'kalshi_api'
                 WHERE s.signal_ts <= s.market_close_ts
+                  AND s.signal_ts >= COALESCE(
+                      (SELECT reset_ts FROM btc_prediction_stats_control WHERE id = 1), 0
+                  )
                   AND s.main_direction IN ('ALCISTA', 'BAJISTA')
                   AND s.gbm_yes_probability IS NOT NULL
                   AND s.gbm_yes_probability >= 0
