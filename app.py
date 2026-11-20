@@ -3720,8 +3720,6 @@ button{border:1px solid #35476b;background:#182640;color:white;border-radius:9px
             <button type="button" id="manualYes" onclick="registerManualPosition('YES')">COMPRÉ YES</button>
             <button type="button" id="manualNo" onclick="registerManualPosition('NO')">COMPRÉ NO</button>
         </div>
-        <label class="small" for="manualEntryPrice">Precio al que compraste (opcional, ej. 0.54)</label>
-        <input id="manualEntryPrice" class="manual-entry-price" type="number" min="0.01" max="0.99" step="0.01" inputmode="decimal" placeholder="0.54">
         <div class="small" id="manualPositionStatus">Registra tu posición cuando aparezca una entrada confirmada.</div>
     </div>
 </section>
@@ -4475,8 +4473,7 @@ async function registerManualPosition(side){
         status.textContent = "No hay un contrato activo de Kalshi para registrar.";
         return;
     }
-    const priceText = $("manualEntryPrice").value.trim();
-    const payload = {side, ticker, entry_price: priceText || null};
+    const payload = {side, ticker, entry_price: null};
     status.textContent = "Guardando tu posición...";
     try{
         const response = await fetch("/api/manual-position",{
@@ -4488,8 +4485,7 @@ async function registerManualPosition(side){
         if(!response.ok || !result.ok) throw new Error(result.error || "No se pudo guardar.");
         $("manualYes").classList.toggle("selected",side==="YES");
         $("manualNo").classList.toggle("selected",side==="NO");
-        status.textContent = "TU POSICIÓN REGISTRADA: " + side +
-            (priceText ? " · precio de entrada " + Number(priceText).toFixed(2) : " · sin precio de compra");
+        status.textContent = "TU POSICIÓN REGISTRADA: " + side + " · sin precio de compra";
     }catch(error){
         status.textContent = error.message || "Error al registrar la posición.";
     }
