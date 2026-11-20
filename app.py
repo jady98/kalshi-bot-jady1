@@ -699,7 +699,6 @@ def calibrate_directional_scores(bullish, bearish):
         "BRTI_900S_CONTRATOS_UNICOS" if calibrated else "SIN_MUESTRA_SUFICIENTE"
     )
 
-
 def get_cached_pattern_stats(pattern):
     """Cachea estadísticas válidas 60 s; los ceros solo 5 s para recoger cierres nuevos."""
     if not pattern or pattern == "SIN PATRÓN CLARO":
@@ -1398,7 +1397,6 @@ def calculate_prediction(
         sum(recent_volumes[:-1]) / len(recent_volumes[:-1])
         if len(recent_volumes) > 1 else 0
     )
-
     if average_volume > 0:
 
         possible += 1
@@ -2097,7 +2095,6 @@ def kalshi_status(value, error=""):
     with lock:
 
         kalshi_connected = value
-
         if error:
             kalshi_error = str(error)
 
@@ -2797,8 +2794,7 @@ def update_guidance_alert(guidance, ticker, contract_active=False):
 
         # Emitir MANTENER una sola vez después de confirmar y estabilizar la entrada.
         if previous_stage == "ENTRADA" and stage == "ENTRADA" and direction == previous_direction and not state.get("hold_announced"):
-            alert = {
-                "type": "MANTENER", "level": "AVISO",
+            alert = {                "type": "MANTENER", "level": "AVISO",
                 "message": "MANTENER · " + str(previous_direction),
                 "detail": "La entrada continúa confirmada y la dirección se mantiene.",
                 "ticker": str(ticker), "seconds_remaining": seconds_left,
@@ -3499,7 +3495,6 @@ def intelligence():
     start_services()
     return jsonify(market_intelligence.snapshot())
 
-
 @app.route("/stats")
 def stats():
 
@@ -4197,8 +4192,7 @@ function money(value){
     if(value === null || value === undefined || !Number.isFinite(Number(value))){
         return "--";
     }
-    return Number(value).toLocaleString("en-US", {
-        minimumFractionDigits:2,
+    return Number(value).toLocaleString("en-US", {        minimumFractionDigits:2,
         maximumFractionDigits:2
     });
 }
@@ -4654,13 +4648,14 @@ let radarAudioContext = null;
 let radarServiceWorkerRegistration = null;
 let radarAlertsEnabled = false;
 let lastRadarAlertKey = "";
+let lastAnnouncedDirection = "";
 let lastExitTicker = null;
 
 function paintRadarAlertToggle(){
     const button = $("alertsEnableButton");
     const status = $("radarAlertStatus");
     if(button){
-        button.textContent = radarAlertsEnabled ? "SONIDO ACTIVADO" : "ACTIVAR SONIDO";
+        button.textContent = radarAlertsEnabled ? "SONIDO: SÍ" : "SONIDO: NO";
         button.classList.toggle("alerts-enabled",radarAlertsEnabled);
         button.setAttribute("aria-pressed",radarAlertsEnabled ? "true" : "false");
     }
@@ -4713,7 +4708,7 @@ function playRadarTone(kind){
     if(!radarAlertsEnabled || !radarAudioContext) return;
     try{
         const now = radarAudioContext.currentTime;
-        const frequencies = kind === "exit" ? [330,247] : kind === "hold" ? [784] : [660,988];
+        const frequencies = kind === "exit" ? [330,247] : kind === "hold" ? [784] : kind === "bearish" ? [330,247] : [660,988];
         frequencies.forEach((frequency,index)=>{
             const oscillator = radarAudioContext.createOscillator();
             const gain = radarAudioContext.createGain();
@@ -4897,8 +4892,7 @@ function updateRadar(d){
     const closeSeconds = Number(d.kalshi_market_close);
     contractCloseEpochMs = d.kalshi_market_active && Number.isFinite(closeSeconds) && closeSeconds > 0
         ? closeSeconds * 1000
-        : null;
-    updateContractCountdown();
+        : null;    updateContractCountdown();
 
     $("brtiPrice").textContent =
         money(d.brti_price);
@@ -4907,6 +4901,13 @@ function updateRadar(d){
     updateCurrentPriceAxisTag();
 
     const direction=d.direction || "RECOPILANDO";
+    if(direction === "ALCISTA" || direction === "BAJISTA"){
+        if(lastAnnouncedDirection && direction !== lastAnnouncedDirection && radarAlertsEnabled){
+            playRadarTone(direction === "ALCISTA" ? "bullish" : "bearish");
+            if(window.navigator && typeof window.navigator.vibrate === "function") window.navigator.vibrate([90,50,90]);
+        }
+        lastAnnouncedDirection = direction;
+    }
     // La dirección estabilizada puede tardar unos segundos en cambiar.
     // Si la puntuación actual ya apunta al lado contrario, mostrar transición
     // sin alterar la señal interna ni las condiciones de entrada.
