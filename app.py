@@ -690,14 +690,18 @@ def calibrate_directional_scores(bullish, bearish):
 
 
 def get_cached_pattern_stats(pattern):
-    """Consulta el historial de patrones como máximo una vez por minuto."""
+    """Cachea estadísticas válidas 60 s; los ceros solo 5 s para recoger cierres nuevos."""
     if not pattern or pattern == "SIN PATRÓN CLARO":
         return {"samples": 0, "bullish_pct": None, "bearish_pct": None}
     now = time.monotonic()
     with lock:
         cached = _pattern_stats_cache.get(pattern)
-        if cached and now - cached[0] < 60:
-            return dict(cached[1])
+        if cached:
+            cached_stats = cached[1]
+            cached_samples = int(cached_stats.get("samples") or 0)
+            cache_ttl = 60 if cached_samples > 0 else 5
+            if now - cached[0] < cache_ttl:
+                return dict(cached_stats)
     try:
         stats = pattern_memory.get_pattern_stats(pattern)
         if not isinstance(stats, dict):
