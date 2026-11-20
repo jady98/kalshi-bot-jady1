@@ -151,6 +151,23 @@ def init_db():
                 )
             """)
             conn.execute("""
+                CREATE TABLE IF NOT EXISTS btc_manual_positions (
+                    market_ticker TEXT PRIMARY KEY,
+                    side TEXT NOT NULL CHECK (side IN ('YES', 'NO')),
+                    entry_price DOUBLE PRECISION CHECK (entry_price IS NULL OR (entry_price > 0 AND entry_price < 1)),
+                    entry_ts DOUBLE PRECISION NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'PENDIENTE'
+                        CHECK (status IN ('PENDIENTE', 'GANADA', 'PERDIDA', 'ANULADA')),
+                    official_result TEXT CHECK (official_result IN ('SI', 'NO')),
+                    pnl_per_contract DOUBLE PRECISION,
+                    resolved_ts DOUBLE PRECISION
+                )
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_btc_manual_positions_status
+                ON btc_manual_positions(status, entry_ts DESC)
+            """)
+            conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_btc_paper_trades_status
                 ON btc_paper_trades(status, entry_ts DESC)
             """)
@@ -2076,3 +2093,57 @@ def get_15m_error_diagnostics():
     except Exception as exc:
         return {**empty, "error": str(exc)[:180]}
 
+
+
+def record_manual_position(market_ticker, side, entry_price=None, entry_ts=None):
+    """Registra la posición elegida por la usuaria; no envía órdenes a Kalshi."""
+    global _db_status
+    ticker = str(market_ticker or "").strip()
+    side = str(side or "").strip().upper()
+    try:
+        ts = float(entry_ts if entry_ts is not None else time.time())
+        price = None if entry_price in (None, "") else float(entry_price)
+        if not ticker or side not in ("YES", "NO") or not math.isfinite(ts) or ts <= 0:
+            return False
+        if price is not None and (not math.isfinite(price) or not 0 < price < 1):
+            return False
+        with _connect() as conn:
+            row = conn.execute("""
+                INSERT INTO btc_manual_positions
+                    (market_ticker, side, entry_price, entry_ts)
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT (market_ticker) DO NOTHING
+                RETURNING market_ticker
+            """, (ticker, side, price, ts)).fetchone()
+        _db_status = "CONECTADA"
+        return row is not None
+    except Exception as exc:
+        _db_status = "ERROR: " + str(exc)[:180]
+        return False
+
+
+def get_manual_position(market_ticker):
+    """Devuelve la posición manual registrada para un contrato."""
+    ticker = str(market_ticker or "").strip()
+    if not ticker:
+        return None
+    try:
+        with _connect() as conn:
+            row = conn.execute("""
+                SELECT market_ticker, side, entry_price, entry_ts, status,
+                       official_result, pnl_per_contract
+                FROM btc_manual_positions
+                WHERE market_ticker = %s
+            """, (ticker,)).fetchone()
+        if not row:
+            return None
+        return {
+            "ticker": row[0], "side": row[1],
+            "entry_price": float(row[2]) if row[2] is not None else None,
+            "entry_ts": float(row[3]), "status": row[4],
+            "official_result": row[5],
+            "pnl_per_contract": float(row[6]) if row[6] is not None else None
+        }
+    except Exception as exc:
+        _db_status = "ERROR: " + str(exc)[:180]
+        return None
