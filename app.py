@@ -1864,13 +1864,68 @@ def coinbase_worker():
         time.sleep(5)
     
 def find_brti_value(data):
-    """Extrae el valor BRTI de los mensajes de Kalshi."""
+    """Extrae el precio spot BRTI del mensaje oficial de Kalshi.
 
-    if isinstance(data, str):
+    Kalshi entrega el frame CF Benchmarks original en `data` como JSON
+    serializado y, por separado, avg_60s_data. Se prioriza el valor spot
+    original; el promedio de 60s queda como respaldo, nunca como primera
+    opción para el precio instantáneo.
+    """
+
+    def parse_json(value):
+        if isinstance(value, str):
+            try:
+                return json.loads(value)
+            except (ValueError, TypeError):
+                return None
+        return value
+
+    def positive_number(value):
         try:
-            data = json.loads(data)
-        except (ValueError, TypeError):
+            number = float(value)
+            return number if math.isfinite(number) and number > 0 else None
+        except (TypeError, ValueError, OverflowError):
             return None
+
+    def raw_spot(node):
+        node = parse_json(node)
+        if isinstance(node, dict):
+            for key in ("value_usd", "value", "index_value", "price"):
+                number = positive_number(node.get(key))
+                if number is not None:
+                    return number
+            for key in ("data", "payload", "msg", "result"):
+                if key in node:
+                    number = raw_spot(node[key])
+                    if number is not None:
+                        return number
+        elif isinstance(node, list):
+            for item in node:
+                number = raw_spot(item)
+                if number is not None:
+                    return number
+        return None
+
+    def raw_timestamp(node):
+        node = parse_json(node)
+        if isinstance(node, dict):
+            for key in ("source_ts_ms", "ts_ms", "timestamp", "time", "received_at"):
+                value = node.get(key)
+                if value is not None:
+                    return value
+            for key in ("data", "payload", "msg", "result"):
+                if key in node:
+                    value = raw_timestamp(node[key])
+                    if value is not None:
+                        return value
+        elif isinstance(node, list):
+            for item in node:
+                value = raw_timestamp(item)
+                if value is not None:
+                    return value
+        return None
+
+    data = parse_json(data)
 
     if isinstance(data, list):
         for item in data:
@@ -1882,64 +1937,49 @@ def find_brti_value(data):
     if not isinstance(data, dict):
         return None
 
-    index = (
-        data.get("index_id")
-        or data.get("ticker")
-        or data.get("id")
-    )
-
+    index = data.get("index_id") or data.get("ticker") or data.get("id")
     timestamp = (
-        data.get("ts_ms")
+        data.get("source_ts_ms")
+        or data.get("ts_ms")
         or data.get("time")
         or data.get("timestamp")
         or data.get("received_at")
     )
 
-    # Comprobar el índice BRTI
     if index == INDEX_ID:
+        # 1) Precio spot del frame original de CF Benchmarks.
+        raw_data = data.get("data")
+        spot = raw_spot(raw_data)
+        if spot is not None:
+            return spot, raw_timestamp(raw_data) or timestamp
 
-        # Valor directo
-        value = data.get("value")
+        # 2) Compatibilidad con variantes que exponen el spot directamente.
+        for key in ("value_usd", "value", "index_value", "price"):
+            spot = positive_number(data.get(key))
+            if spot is not None:
+                return spot, timestamp
 
-        if value is not None:
-            try:
-                return float(value), timestamp
-            except (ValueError, TypeError):
-                pass
-
-        # Datos anidados
-        for key in ("data", "payload", "msg"):
-            nested = data.get(key)
-
-            if nested is not None:
-                result = find_brti_value(nested)
-                if result is not None:
-                    return result
-
-        # Promedio de 60 segundos
+        # 3) Último respaldo: promedio móvil oficial de 60 segundos.
         average = data.get("avg_60s_data")
-
         if isinstance(average, dict):
-            value = average.get("value")
-
+            value = positive_number(average.get("value"))
             if value is not None:
-                try:
-                    return float(value), timestamp
-                except (ValueError, TypeError):
-                    pass
+                average_ts = (
+                    average.get("window_end_ts_exclusive")
+                    or average.get("window_start_ts_ms")
+                    or timestamp
+                )
+                return value, average_ts
 
-    # Buscar dentro de otros objetos
+    # Algunos mensajes envuelven el payload dentro de msg/data/payload.
     for key in ("msg", "data", "payload"):
         nested = data.get(key)
-
         if isinstance(nested, (dict, list, str)):
             result = find_brti_value(nested)
-
             if result is not None:
                 return result
 
     return None
-    
 
 
 # ==========================================
