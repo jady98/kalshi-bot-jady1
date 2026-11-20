@@ -2714,6 +2714,17 @@ def build_forward_guidance(
         note = "Fuerza técnica insuficiente para activar una prealerta."
     elif not align_1m:
         note = "El movimiento de 1 minuto todavía no acompaña la dirección."
+    # Bloquear entradas si el historial real aún no demuestra fiabilidad.
+    if stage == "ENTRADA" and not bool(validation.get("qualified")):
+        stage = "ENTRADA BLOQUEADA · " + str(validation.get("status") or "VALIDACIÓN PENDIENTE")
+        note = (
+            "NO HAY ENTRADA VALIDADA. Se requieren al menos "
+            + str(validation.get("minimum_samples", 30))
+            + " contratos resueltos y "
+            + str(validation.get("minimum_accuracy_pct", 55.0))
+            + "% de acierto. La lectura técnica no basta para autorizar una entrada."
+        )
+
     return {
         "short_change_1m_pct": round(change_1m, 5) if change_1m is not None else None,
         "short_change_3m_pct": round(change_3m, 5) if change_3m is not None else None,
@@ -3703,7 +3714,7 @@ button{border:1px solid #35476b;background:#182640;color:white;border-radius:9px
 .compact-pattern{grid-template-columns:minmax(0,1fr) auto;gap:3px 8px;margin:3px 0 5px!important;padding:6px 9px!important;cursor:pointer;min-height:0}
 .compact-pattern .pattern-name{font-size:11px!important;line-height:1.15}
 .compact-pattern .pattern-state{font-size:8px!important;line-height:1.1}
-.compact-pattern .pattern-description,.compact-pattern .pattern-history{display:none}
+.compact-pattern .pattern-description,.compact-pattern .pattern-history{display:block;font-size:10px!important;line-height:1.25;margin-top:3px}
 .compact-pattern.expanded .pattern-description,.compact-pattern.expanded .pattern-history{display:block;font-size:10px!important;line-height:1.25;margin-top:3px}
 @media(max-width:380px){.radar-alert-heading button{font-size:8px;padding:6px 7px}.radar-alert-message{font-size:11px}}
 
@@ -4647,19 +4658,20 @@ function playRadarTone(kind){
     if(!radarAlertsEnabled || !radarAudioContext) return;
     try{
         const now = radarAudioContext.currentTime;
-        const frequencies = kind === "exit" ? [440,330] : [660,880];
+        const frequencies = kind === "exit" ? [330,247] : kind === "hold" ? [784] : [660,988];
         frequencies.forEach((frequency,index)=>{
             const oscillator = radarAudioContext.createOscillator();
             const gain = radarAudioContext.createGain();
             oscillator.frequency.value = frequency;
             oscillator.type = "sine";
-            gain.gain.setValueAtTime(0.0001,now + index * 0.16);
-            gain.gain.exponentialRampToValueAtTime(0.12,now + index * 0.16 + 0.025);
-            gain.gain.exponentialRampToValueAtTime(0.0001,now + index * 0.16 + 0.14);
+            const spacing = kind === "hold" ? 0 : index * 0.16;
+            gain.gain.setValueAtTime(0.0001,now + spacing);
+            gain.gain.exponentialRampToValueAtTime(0.12,now + spacing + 0.025);
+            gain.gain.exponentialRampToValueAtTime(0.0001,now + spacing + 0.14);
             oscillator.connect(gain);
             gain.connect(radarAudioContext.destination);
-            oscillator.start(now + index * 0.16);
-            oscillator.stop(now + index * 0.16 + 0.15);
+            oscillator.start(now + spacing);
+            oscillator.stop(now + spacing + 0.15);
         });
     }catch(error){ console.warn("No se pudo reproducir el aviso",error); }
 }
@@ -4733,11 +4745,11 @@ function handleRadarAlert(data){
         isDirectionChange ? "CAMBIO DE DIRECCIÓN · OBSERVAR" : "OBSERVAR";
     panel.classList.toggle("has-event", isExit || isNewEntry || isPrealert || isDirectionChange);
 
-    // Los tres indicadores son mutuamente excluyentes.
-    const activeStep = isExit ? "exit" : (isNewEntry || isPrealert) ? "entry" : isHold ? "hold" : "";
+    // Entrada y mantener permanecen iluminadas mientras la entrada siga vigente.
+    const activeSteps = isExit ? ["exit"] : isNewEntry || isHold ? ["entry","hold"] : isPrealert ? ["entry"] : [];
     ["entry","hold","exit"].forEach(step=>{
         const item = $("radarStep" + step.charAt(0).toUpperCase() + step.slice(1));
-        if(item) item.classList.toggle("active", step === activeStep);
+        if(item) item.classList.toggle("active", activeSteps.includes(step));
     });
 
     message.textContent = alertData.message || (
@@ -4751,17 +4763,18 @@ function handleRadarAlert(data){
     detail.textContent = alertData.detail || data.guidance_note ||
         "La dirección y el porcentaje por sí solos no confirman una entrada.";
 
-    // Solo una entrada o salida confirmada puede producir sonido/notificación.
-    const eventType = isExit ? "SALIDA" : isNewEntry ? "ENTRADA" : "";
+    // Sonido distinto al entrar, mantener y salir; solo una vez por cambio.
+    const eventType = isExit ? "SALIDA" : isNewEntry ? "ENTRADA" :
+        (isHold && hasFreshEvent && type === "MANTENER") ? "MANTENER" : "";
     if(!eventType || !hasFreshEvent) return;
     const eventKey = [eventType,alertData.ticker || data.entry_ticker || "",alertData.timestamp].join("|");
     if(eventKey === lastRadarAlertKey) return;
     lastRadarAlertKey = eventKey;
 
     if(radarAlertsEnabled){
-        playRadarTone(isExit ? "exit" : "entry");
+        playRadarTone(isExit ? "exit" : eventType === "MANTENER" ? "hold" : "entry");
         if(window.navigator && typeof window.navigator.vibrate === "function"){
-            window.navigator.vibrate(isExit ? [180,80,180] : [100,60,100]);
+            window.navigator.vibrate(isExit ? [180,80,180] : eventType === "MANTENER" ? [70] : [100,60,100]);
         }
     }
     if(radarAlertsEnabled && "Notification" in window && Notification.permission === "granted"){
@@ -5056,7 +5069,7 @@ function updateRadar(d){
 
 
     drawChart(d.coinbase_candles || []);
-    updatePatternGuide(d.pattern, d.brti_candles || [], d.direction, d.pattern_samples);
+    updatePatternGuide(d.pattern, d.coinbase_candles || [], d.direction, d.pattern_samples);
 
     // El contador se actualiza dentro de drawChart con las velas realmente visibles.
 
