@@ -118,6 +118,7 @@ _signal_state = {
 }
 
 _pattern_stats_cache = {}
+_entry_validation_cache = {"checked_at": 0.0, "data": None}
 _guidance_state = {
     "ticker": None,
     "stage": "SIN_SEÑAL",
@@ -711,6 +712,49 @@ def get_cached_pattern_stats(pattern):
     with lock:
         _pattern_stats_cache[pattern] = (now, dict(stats))
     return stats
+
+
+def get_entry_validation():
+    """No habilita entradas hasta reunir una muestra post-reinicio suficiente."""
+    now = time.monotonic()
+    with lock:
+        cached = _entry_validation_cache.get("data")
+        if cached and now - float(_entry_validation_cache.get("checked_at", 0)) < 60:
+            return dict(cached)
+    try:
+        stats = pattern_memory.get_15m_prediction_accuracy_by_contract()
+        samples = int(stats.get("contracts_evaluated") or 0)
+        accuracy = stats.get("accuracy_pct")
+        accuracy = float(accuracy) if accuracy is not None else None
+        minimum_samples = 30
+        minimum_accuracy = 55.0
+        qualified = (
+            samples >= minimum_samples
+            and accuracy is not None
+            and accuracy >= minimum_accuracy
+        )
+        data = {
+            "samples": samples,
+            "minimum_samples": minimum_samples,
+            "accuracy_pct": accuracy,
+            "minimum_accuracy_pct": minimum_accuracy,
+            "qualified": qualified,
+            "status": (
+                "VALIDADA" if qualified
+                else "MUESTRA INSUFICIENTE" if samples < minimum_samples
+                else "PRECISIÓN INSUFICIENTE"
+            )
+        }
+    except Exception as exc:
+        data = {
+            "samples": 0, "minimum_samples": 30,
+            "accuracy_pct": None, "minimum_accuracy_pct": 55.0,
+            "qualified": False, "status": "ERROR DE VALIDACIÓN",
+            "error": str(exc)[:160]
+        }
+    with lock:
+        _entry_validation_cache.update({"checked_at": now, "data": dict(data)})
+    return data
 
 
 # ==========================================
@@ -2486,10 +2530,12 @@ def _candle_change_over_seconds(candles, price, seconds, now):
 
 def build_forward_guidance(
     ticks, price, indicators, candles=None,
-    contract_active=False, ticker=None, close_ts=None
+    contract_active=False, ticker=None, close_ts=None,
+    validation=None
 ):
     """Proyección corta separada del pronóstico principal al cierre de 15 minutos."""
     now = time.time()
+    validation = validation or get_entry_validation()
     seconds_left = max(0, int(float(close_ts) - now)) if close_ts else 0
     if not close_ts or seconds_left <= 0:
         return {
@@ -2596,10 +2642,10 @@ def build_forward_guidance(
         # exige 1m alineado, que 3m no contradiga, EMA alineadas y fuerza/probabilidad
         # moderadas. No espera obligatoriamente a que 3m también esté alineado.
         if (
-            side_probability >= 63
-            and strength >= 32
+            side_probability >= 65
+            and strength >= 35
             and align_1m
-            and not opposite_3m
+            and align_3m
             and ema_aligned
             and not rsi_blocked
         ):
@@ -2627,6 +2673,25 @@ def build_forward_guidance(
         note = "Fuerza técnica insuficiente para activar una prealerta."
     elif not align_1m:
         note = "El movimiento de 1 minuto todavía no acompaña la dirección."
+    # La señal técnica por sí sola no basta: se bloquea la entrada hasta
+    # validar precisión post-reinicio con al menos 30 contratos resueltos.
+    if stage == "ENTRADA" and not validation.get("qualified"):
+        stage = "ENTRADA BLOQUEADA · VALIDACIÓN"
+        if validation.get("status") == "MUESTRA INSUFICIENTE":
+            note += (
+                " Entrada bloqueada: validación post-reinicio "
+                + str(validation.get("samples", 0)) + "/"
+                + str(validation.get("minimum_samples", 30))
+                + " contratos resueltos."
+            )
+        else:
+            note += (
+                " Entrada bloqueada: precisión observada "
+                + str(validation.get("accuracy_pct"))
+                + "%; se exige al menos "
+                + str(validation.get("minimum_accuracy_pct", 55.0)) + "%."
+            )
+
     return {
         "short_change_1m_pct": round(change_1m, 5) if change_1m is not None else None,
         "short_change_3m_pct": round(change_3m, 5) if change_3m is not None else None,
@@ -2638,6 +2703,7 @@ def build_forward_guidance(
         "guidance_3m_aligned": align_3m,
         "guidance_ema_aligned": ema_aligned,
         "guidance_note": note,
+        "entry_validation": validation,
         "short_direction": direction if direction in ("ALCISTA", "BAJISTA") else "INDECISO",
         "entry_stage": stage,
         "entry_direction": direction if stage in ("PREALERTA", "ENTRADA") else None,
@@ -3074,12 +3140,40 @@ def get_data():
         market_close if contract_active
         else (int(now // 900) + 1) * 900
     )
+    entry_validation = get_entry_validation()
     guidance = build_forward_guidance(
         ticks, bp if brti_live else None, indicators, candles,
         contract_active=contract_active,
         ticker=market_ticker if contract_active else None,
-        close_ts=guidance_close
+        close_ts=guidance_close,
+        validation=entry_validation
     )
+    entry_economics = calculate_entry_economics(
+        indicators.get("direction"), indicators.get("bullish_score"),
+        indicators.get("bearish_score"), orderbook
+    )
+    # Una entrada confirmada exige fuentes frescas y alineadas, libro ejecutable
+    # y valor esperado neto positivo. Sin estas condiciones, solo se informa.
+    if guidance.get("entry_stage") == "ENTRADA":
+        entry_blocks = []
+        if not coinbase_live or not brti_live:
+            entry_blocks.append("Coinbase/BRTI no están ambos en vivo")
+        if divergence_pct is None or abs(float(divergence_pct)) >= 0.05:
+            entry_blocks.append("Coinbase y BRTI no confirman el mismo precio")
+        if not entry_economics.get("available"):
+            entry_blocks.append("libro de Kalshi no disponible")
+        elif not entry_economics.get("is_positive_estimated_ev"):
+            entry_blocks.append("valor esperado neto no positivo")
+        if not entry_validation.get("qualified"):
+            entry_blocks.append("validación estadística pendiente")
+        if entry_blocks:
+            guidance["entry_stage"] = "ENTRADA BLOQUEADA · CONFIRMACIÓN"
+            guidance["entry_direction"] = None
+            guidance["signal_stage"] = guidance["entry_stage"]
+            guidance["guidance_note"] = (
+                str(guidance.get("guidance_note") or "")
+                + " Entrada bloqueada: " + "; ".join(entry_blocks) + "."
+            )
     guidance_alert = update_guidance_alert(
         guidance, market_ticker if contract_active else None,
         contract_active=contract_active
@@ -3087,11 +3181,7 @@ def get_data():
     if guidance_alert is not None:
         alert_data = guidance_alert
     indicators.update(guidance)
-
-    entry_economics = calculate_entry_economics(
-        indicators.get("direction"), indicators.get("bullish_score"),
-        indicators.get("bearish_score"), orderbook
-    )
+    indicators["entry_validation"] = entry_validation
     # Registro idempotente: solo contratos reales con ENTRADA confirmada
     # y precio/fee disponibles. La clave única impide duplicar el mismo ticker.
     if (
