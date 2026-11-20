@@ -4603,7 +4603,7 @@ function updatePatternGuide(pattern, candleRows, mainDirection, samples){
     description.textContent=lesson.text+(lesson.next?" Qué observar: "+lesson.next:"");
     const history=$("patternHistory");
     const sampleCount=Math.max(0,Number(samples)||0);
-    history.textContent="Muestras oficiales: "+sampleCount+" / 20 para habilitar influencia estadística.";
+    history.textContent="Resultados oficiales de contratos Kalshi: "+sampleCount+" / 12 necesarios para empezar a influir en el cálculo.";
     const conflicts=(lesson.direction==="bull" && mainDirection==="BAJISTA") ||
         (lesson.direction==="bear" && mainDirection==="ALCISTA");
     if(conflicts){
