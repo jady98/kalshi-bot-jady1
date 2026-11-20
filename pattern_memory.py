@@ -1834,6 +1834,13 @@ def get_paper_trade_stats():
     }
     try:
         with _connect() as conn:
+            reset_row = conn.execute("""
+                SELECT COALESCE(
+                    (SELECT reset_ts FROM btc_prediction_stats_control WHERE id = 1),
+                    0
+                )
+            """).fetchone()
+            reset_ts = float(reset_row[0] or 0)
             row = conn.execute("""
                 SELECT
                     COUNT(*),
@@ -1848,7 +1855,8 @@ def get_paper_trade_stats():
                     COALESCE(SUM(estimated_fee), 0),
                     AVG(estimated_ev)
                 FROM btc_paper_trades
-            """).fetchone()
+                WHERE entry_ts >= %s
+            """, (reset_ts,)).fetchone()
             side_rows = conn.execute("""
                 SELECT side, COUNT(*),
                        COUNT(*) FILTER (WHERE status IN ('GANADA', 'PERDIDA')),
@@ -1856,13 +1864,15 @@ def get_paper_trade_stats():
                        COUNT(*) FILTER (WHERE status = 'PERDIDA'),
                        COALESCE(SUM(pnl) FILTER (WHERE status IN ('GANADA', 'PERDIDA')), 0)
                 FROM btc_paper_trades
+                WHERE entry_ts >= %s
                 GROUP BY side ORDER BY side
-            """).fetchall()
+            """, (reset_ts,)).fetchall()
         total, resolved, pending, voided, wins, losses = [int(x or 0) for x in row[:6]]
         pnl = float(row[6] or 0)
         invested = float(row[7]) if row[7] is not None else None
         return {
             "measurement": empty["measurement"],
+            "stats_reset_ts": reset_ts,
             "trades_total": total, "resolved": resolved, "pending": pending,
             "voided": voided, "wins": wins, "losses": losses,
             "win_rate_pct": round(wins * 100 / resolved, 1) if resolved else None,
