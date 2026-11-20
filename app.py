@@ -2568,45 +2568,59 @@ def build_forward_guidance(
     elif seconds_left < 120:
         stage = "CIERRE PRÓXIMO · SIN ENTRADA"
         note = "Quedan menos de 2 minutos. Evita una entrada tardía en este contrato."
-    elif change_1m is None or change_3m is None:
+    elif change_1m is None:
         stage = "RECOPILANDO CONFIRMACIÓN"
-        note = "Faltan datos completos de movimiento de 1 y 3 minutos."
+        note = "Faltan datos recientes para medir el movimiento de 1 minuto."
     elif direction not in ("ALCISTA", "BAJISTA"):
         stage = "OBSERVAR · SIN DIRECCIÓN"
         note = "La señal principal no tiene dirección definida; no se fuerza una alerta."
     elif opposite_1m or opposite_3m:
         stage = "OBSERVAR · MOVIMIENTOS EN CONFLICTO"
-        note = "El movimiento corto contradice la dirección principal. Espera que 1 y 3 minutos se alineen."
-    elif side_probability >= 58 and strength >= 25 and (align_1m or align_3m):
+        note = "El movimiento corto contradice la dirección principal. Espera que se estabilice."
+    elif side_probability >= 55 and strength >= 20 and align_1m:
         stage = "PREALERTA"
         note = (
             "Posible " + direction + " · " + str(round(side_probability, 1))
-            + "% a favor. " + ("1 min alineado" if align_1m else "1 min pendiente")
-            + " · " + ("3 min alineado" if align_3m else "3 min pendiente")
+            + "% a favor · movimiento de 1 min alineado"
+            + " · 3 min " + ("alineado" if align_3m else "todavía sin confirmar")
             + " · EMA " + ("alineadas" if ema_aligned else "sin confirmar")
-            + ". Todavía no es entrada confirmada."
+            + ". PREALERTA temprana; todavía no es entrada confirmada."
         )
-        if side_probability >= 67 and strength >= 40 and align_1m and align_3m and ema_aligned and not rsi_blocked:
+        # Confirmación más temprana para contratos de 15 minutos:
+        # exige 1m alineado, que 3m no contradiga, EMA alineadas y fuerza/probabilidad
+        # moderadas. No espera obligatoriamente a que 3m también esté alineado.
+        if (
+            side_probability >= 63
+            and strength >= 32
+            and align_1m
+            and not opposite_3m
+            and ema_aligned
+            and not rsi_blocked
+        ):
             stage = "ENTRADA"
             note = (
-                "CONFIRMACIÓN " + direction + " · " + str(round(side_probability, 1))
+                "ENTRADA CONFIRMADA " + direction + " · " + str(round(side_probability, 1))
                 + "% a favor · fuerza " + str(round(strength))
-                + "% · 1 y 3 min alineados · EMA 9/21 alineadas"
+                + "% · 1 min alineado · 3 min "
+                + ("alineado" if align_3m else "sin contradicción")
+                + " · EMA 9/21 alineadas"
                 + (" · RSI " + str(round(float(rsi), 1)) if rsi is not None else "")
-                + ". Verifica el precio del contrato y el riesgo antes de decidir."
+                + ". Comprueba el precio ejecutable y el riesgo antes de decidir."
             )
         elif rsi_blocked:
             note += " RSI muy extendido: no perseguir el movimiento."
         elif not ema_aligned:
             note += " Falta confirmación de EMA 9/21."
-        elif strength < 40:
-            note += " La fuerza técnica aún es insuficiente."
-    elif side_probability < 58:
-        note = "Probabilidad direccional inferior al umbral de prealerta (58%)."
-    elif strength < 25:
+        elif strength < 32:
+            note += " La fuerza técnica aún es insuficiente para confirmar."
+        elif side_probability < 63:
+            note += " La probabilidad todavía no alcanza el umbral de confirmación."
+    elif side_probability < 55:
+        note = "Probabilidad direccional inferior al umbral de prealerta (55%)."
+    elif strength < 20:
         note = "Fuerza técnica insuficiente para activar una prealerta."
-    elif not (align_1m or align_3m):
-        note = "El movimiento de 1 y 3 minutos todavía no acompaña la dirección."
+    elif not align_1m:
+        note = "El movimiento de 1 minuto todavía no acompaña la dirección."
     return {
         "short_change_1m_pct": round(change_1m, 5) if change_1m is not None else None,
         "short_change_3m_pct": round(change_3m, 5) if change_3m is not None else None,
