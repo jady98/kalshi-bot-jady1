@@ -4419,62 +4419,62 @@ function describePattern(pattern){
     const key=String(pattern || "SIN PATRÓN CLARO").toUpperCase();
     const lessons={
         "ENVOLVENTE ALCISTA":{
-            direction:"bull",bars:2,label:"ENV",
+            direction:"bull",bars:2,label:"GIRO ALZA",
             text:"La vela verde cubre el cuerpo de la vela roja anterior. Puede mostrar que los compradores están ganando fuerza.",
             next:"Comprueba que aparezca después de una caída y que la siguiente vela cierre al alza. Sin confirmación puede ser una falsa señal."
         },
         "ENVOLVENTE BAJISTA":{
-            direction:"bear",bars:2,label:"ENV",
+            direction:"bear",bars:2,label:"GIRO BAJA",
             text:"La vela roja cubre el cuerpo de la vela verde anterior. Puede mostrar que los vendedores están tomando el control.",
             next:"Busca que aparezca después de una subida y que la siguiente vela siga cerrando a la baja."
         },
         "POSIBLE MARTILLO":{
-            direction:"bull",bars:1,label:"MART",
+            direction:"bull",bars:1,label:"GIRO ALZA",
             text:"Tiene una mecha inferior larga y un cuerpo pequeño. El precio cayó, pero los compradores lo empujaron de nuevo hacia arriba.",
             next:"Es más relevante después de una caída. Espera una vela posterior alcista; aislado no confirma un giro."
         },
         "POSIBLE ESTRELLA FUGAZ":{
-            direction:"bear",bars:1,label:"EST",
+            direction:"bear",bars:1,label:"RECHAZO BAJA",
             text:"Tiene una mecha superior larga y un cuerpo pequeño. El precio subió, pero encontró vendedores en la zona alta.",
             next:"Es más relevante después de una subida. Espera una vela posterior bajista para confirmar el rechazo."
         },
         "DOJI":{
-            direction:"none",bars:1,label:"DOJI",
+            direction:"none",bars:1,label:"INDECISIÓN",
             text:"La apertura y el cierre son casi iguales. Compradores y vendedores terminaron prácticamente empatados.",
             next:"No elijas dirección solo por el Doji. Observa si la siguiente vela rompe su máximo o su mínimo."
         },
         "TRES VELAS ALCISTAS":{
-            direction:"bull",bars:3,label:"3 VELAS",
+            direction:"bull",bars:3,label:"IMPULSO ALZA",
             text:"Tres velas verdes consecutivas con cierres cada vez más altos. Reflejan impulso comprador.",
             next:"Comprueba que los cuerpos mantengan fuerza y que no estén chocando contra una resistencia cercana."
         },
         "TRES VELAS BAJISTAS":{
-            direction:"bear",bars:3,label:"3 VELAS",
+            direction:"bear",bars:3,label:"IMPULSO BAJA",
             text:"Tres velas rojas consecutivas con cierres cada vez más bajos. Reflejan impulso vendedor.",
             next:"Comprueba que los cierres sigan descendiendo y que no haya un soporte cercano frenando la caída."
         },
         "RUPTURA ALCISTA DE RANGO":{
-            direction:"bull",bars:1,label:"RUPTURA",
+            direction:"bull",bars:1,label:"ROMPE ALZA",
             text:"La vela cerró por encima del máximo de las cinco velas anteriores. El precio intenta salir del rango hacia arriba.",
             next:"Vigila que el precio permanezca por encima del antiguo máximo. Si vuelve al rango, la ruptura puede haber fallado."
         },
         "RUPTURA BAJISTA DE RANGO":{
-            direction:"bear",bars:1,label:"RUPTURA",
+            direction:"bear",bars:1,label:"ROMPE BAJA",
             text:"La vela cerró por debajo del mínimo de las cinco velas anteriores. El precio intenta salir del rango hacia abajo.",
             next:"Vigila que el precio permanezca por debajo del antiguo mínimo. Si recupera el rango, la ruptura puede haber fallado."
         },
         "ESTRUCTURA ALCISTA · HH/HL":{
-            direction:"bull",bars:3,label:"HH / HL",
+            direction:"bull",bars:3,label:"MÁXIMOS SUBEN",
             text:"Los máximos y mínimos van subiendo. HH significa máximo más alto y HL significa mínimo más alto.",
             next:"La estructura se mantiene mientras los mínimos relevantes sigan subiendo. Una pérdida del último mínimo puede debilitarla."
         },
         "ESTRUCTURA BAJISTA · LH/LL":{
-            direction:"bear",bars:3,label:"LH / LL",
+            direction:"bear",bars:3,label:"MÍNIMOS BAJAN",
             text:"Los máximos y mínimos van bajando. LH significa máximo más bajo y LL significa mínimo más bajo.",
             next:"La estructura se mantiene mientras los máximos relevantes sigan bajando. Superar el último máximo puede debilitarla."
         },
         "VELA INTERNA · COMPRESIÓN":{
-            direction:"none",bars:2,label:"INTERNA",
+            direction:"none",bars:2,label:"PAUSA",
             text:"La última vela quedó dentro del máximo y el mínimo de la vela anterior. El movimiento se está comprimiendo.",
             next:"Marca el máximo y el mínimo de la vela grande. La ruptura confirmada de uno de esos límites puede mostrar el siguiente movimiento."
         }
