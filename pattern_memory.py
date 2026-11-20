@@ -2080,6 +2080,9 @@ def get_15m_error_diagnostics():
                      AND o.horizon_seconds = 900
                      AND o.future_price IS NOT NULL
                     WHERE s.features->>'forecast_horizon_seconds' = '900'
+                      AND s.signal_ts >= COALESCE(
+                          (SELECT reset_ts FROM btc_prediction_stats_control WHERE id = 1), 0
+                      )
                       AND s.direction IN ('ALCISTA', 'BAJISTA')
                       AND o.result IN ('ALCISTA', 'BAJISTA', 'SIN CAMBIO')
                       AND (
