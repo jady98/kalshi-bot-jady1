@@ -4068,13 +4068,6 @@ button{border:1px solid #35476b;background:#182640;color:white;border-radius:9px
 
     </div>
 
-    <div class="pattern-guide none compact-pattern" id="patternGuide" role="button" tabindex="0" aria-expanded="false" onclick="togglePatternGuide()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();togglePatternGuide()}">
-        <div class="pattern-name" id="patternName">PATRÓN: ANALIZANDO VELAS</div>
-        <div class="pattern-state" id="patternState">ESPERANDO</div>
-        <div class="pattern-description" id="patternDescription">El radar señalará aquí las velas que forman el patrón y explicará qué puede indicar.</div>
-        <div class="pattern-history" id="patternHistory">Historial oficial del patrón: recopilando</div>
-    </div>
-
     <div class="chart-wrap">
 
         <div id="chart" role="img" aria-label="Gráfica de velas BTC/USD con patrones señalados"></div>
