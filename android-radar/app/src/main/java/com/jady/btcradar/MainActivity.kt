@@ -63,17 +63,18 @@ class MainActivity : Activity() {
         root.addView(progress, FrameLayout.LayoutParams(-1, 4, Gravity.TOP))
 
         bubbleButton = Button(this).apply {
-            textSize = 11f
+            textSize = 12f
             setTextColor(Color.WHITE)
+            elevation = 10 * resources.displayMetrics.density
             setOnClickListener { toggleBubble() }
         }
         val buttonParams = FrameLayout.LayoutParams(
-            (132 * resources.displayMetrics.density).toInt(),
+            (164 * resources.displayMetrics.density).toInt(),
             (48 * resources.displayMetrics.density).toInt(),
-            Gravity.BOTTOM or Gravity.END
+            Gravity.TOP or Gravity.END
         ).apply {
-            val margin = (16 * resources.displayMetrics.density).toInt()
-            setMargins(margin, margin, margin, margin + (18 * resources.displayMetrics.density).toInt())
+            val margin = (12 * resources.displayMetrics.density).toInt()
+            setMargins(margin, margin, margin, margin)
         }
         root.addView(bubbleButton, buttonParams)
 
