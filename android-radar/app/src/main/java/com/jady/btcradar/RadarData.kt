@@ -15,7 +15,11 @@ data class Snapshot(
     val direction: String,
     val alertType: String,
     val alertMessage: String,
-    val alertKey: String
+    val alertKey: String,
+    val alertTimestamp: Long,
+    val entryStage: String,
+    val entryDirection: String,
+    val manualSide: String
 )
 
 object RadarData {
@@ -71,6 +75,10 @@ object RadarData {
         val ticker = alert.optString("ticker", data.optString("entry_ticker", ""))
         val timestamp = alert.optLong("timestamp", 0L)
         val alertKey = listOf(alertType, ticker, timestamp.toString()).joinToString("|")
+        val entryStage = data.optString("entry_stage", data.optString("signal_stage", "")).uppercase()
+        val entryDirection = data.optString("entry_direction", direction).uppercase()
+        val manualPosition = data.optJSONObject("manual_position")
+        val manualSide = manualPosition?.optString("side", "")?.uppercase() ?: ""
 
         return Snapshot(
             price = price,
@@ -81,7 +89,11 @@ object RadarData {
             direction = direction,
             alertType = alertType,
             alertMessage = alertMessage,
-            alertKey = alertKey
+            alertKey = alertKey,
+            alertTimestamp = timestamp,
+            entryStage = entryStage,
+            entryDirection = entryDirection,
+            manualSide = manualSide
         )
     }
 }
