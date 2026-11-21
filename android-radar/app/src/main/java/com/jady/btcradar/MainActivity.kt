@@ -70,7 +70,7 @@ class MainActivity : Activity() {
             setOnClickListener {
                 if (!Settings.canDrawOverlays(this@MainActivity)) {
                     Toast.makeText(this@MainActivity, "Activa Permitir mostrar sobre otras apps y vuelve a tocar BURBUJA.", Toast.LENGTH_LONG).show()
-                    startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + packageName)))
+                    startActivityForResult(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + packageName)), 411)
                 } else {
                     startForegroundService(Intent(this@MainActivity, RadarService::class.java))
                     Toast.makeText(this@MainActivity, "Burbuja flotante activada", Toast.LENGTH_SHORT).show()
@@ -88,11 +88,46 @@ class MainActivity : Activity() {
         root.addView(bubbleButton, buttonParams)
 
         setContentView(root)
+        enableRadarNotifications()
         if (savedInstanceState == null) {
             web.loadUrl("https://kalshi-bot-jady1.onrender.com/")
         } else {
             web.restoreState(savedInstanceState)
         }
+    }
+
+
+    private fun enableRadarNotifications() {
+        if (android.os.Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 410)
+        } else {
+            startRadarBackgroundService()
+        }
+    }
+
+    private fun startRadarBackgroundService() {
+        try {
+            val intent = Intent(this, RadarService::class.java)
+            if (android.os.Build.VERSION.SDK_INT >= 26) startForegroundService(intent) else startService(intent)
+        } catch (_: Exception) {
+            Toast.makeText(this, "No se pudo iniciar el servicio de alertas. Revisa los permisos.", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == 410) startRadarBackgroundService()
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == 411 && Settings.canDrawOverlays(this)) startRadarBackgroundService()
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
