@@ -25,7 +25,7 @@ class RadarService : Service() {
                         panel?.findViewWithTag<TextView>("p")?.text = "BTC  $" + "%,.0f".format(d.price)
                         panel?.findViewWithTag<TextView>("t")?.text = "ALCISTA  ${d.up}%     BAJISTA  ${100-d.up}%"
                         panel?.findViewWithTag<ProgressBar>("tb")?.progress = d.up
-                        panel?.findViewWithTag<TextView>("b")?.text = "COMPRADORES  ${d.buyers}%     VENDEDORES  ${100-d.buyers}%"
+                        panel?.findViewWithTag<TextView>("b")?.text = "FLUJO COMPRADOR / VENDEDOR: DATO NO DISPONIBLE"
                         panel?.findViewWithTag<ProgressBar>("bb")?.progress = d.buyers
                         panel?.findViewWithTag<TextView>("c")?.text = "CIERRE EN 15 MIN\n$" + "%,.2f".format(d.prediction) + "   •   " + d.time
                         val signal = if (d.up >= 75) "ALCISTA" else if (d.up <= 25) "BAJISTA" else ""
@@ -109,8 +109,7 @@ class RadarService : Service() {
         box.addView(label("BTC —", "p", 21f))
         box.addView(label("ALCISTA  —%     BAJISTA  —%", "t", 13f))
         box.addView(bar("tb", true), LinearLayout.LayoutParams(-1, dp(10)).apply { bottomMargin = dp(10) })
-        box.addView(label("COMPRADORES  —%     VENDEDORES  —%", "b", 11f, Color.rgb(190, 204, 220)))
-        box.addView(bar("bb", false), LinearLayout.LayoutParams(-1, dp(8)).apply { bottomMargin = dp(11) })
+        box.addView(label("FLUJO COMPRADOR / VENDEDOR: SIN DATO", "b", 10f, Color.rgb(190, 204, 220)))
         val closeInfo = label("CIERRE EN 15 MIN\n—", "c", 13f, Color.rgb(255, 213, 105))
         closeInfo.background = rounded(Color.rgb(29, 39, 55), 12)
         closeInfo.setPadding(dp(10), dp(8), dp(10), dp(8))
