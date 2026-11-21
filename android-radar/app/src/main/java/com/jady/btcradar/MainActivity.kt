@@ -19,15 +19,15 @@ import android.widget.Toast
 
 class MainActivity : Activity() {
     private lateinit var web: WebView
+    private lateinit var bubbleButton: Button
+    private val prefs by lazy { getSharedPreferences("radar_settings", MODE_PRIVATE) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.statusBarColor = Color.rgb(11, 17, 26)
         window.navigationBarColor = Color.rgb(11, 17, 26)
 
-        val root = FrameLayout(this).apply {
-            setBackgroundColor(Color.rgb(11, 17, 26))
-        }
+        val root = FrameLayout(this).apply { setBackgroundColor(Color.rgb(11, 17, 26)) }
 
         web = WebView(this).apply {
             setBackgroundColor(Color.rgb(11, 17, 26))
@@ -62,24 +62,14 @@ class MainActivity : Activity() {
         root.addView(web, FrameLayout.LayoutParams(-1, -1))
         root.addView(progress, FrameLayout.LayoutParams(-1, 4, Gravity.TOP))
 
-        val bubbleButton = Button(this).apply {
-            text = "BURBUJA"
+        bubbleButton = Button(this).apply {
             textSize = 11f
             setTextColor(Color.WHITE)
-            setBackgroundColor(Color.rgb(20, 125, 100))
-            setOnClickListener {
-                if (!Settings.canDrawOverlays(this@MainActivity)) {
-                    Toast.makeText(this@MainActivity, "Activa Permitir mostrar sobre otras apps y vuelve a tocar BURBUJA.", Toast.LENGTH_LONG).show()
-                    startActivityForResult(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + packageName)), 411)
-                } else {
-                    startForegroundService(Intent(this@MainActivity, RadarService::class.java))
-                    Toast.makeText(this@MainActivity, "Burbuja flotante activada", Toast.LENGTH_SHORT).show()
-                }
-            }
+            setOnClickListener { toggleBubble() }
         }
         val buttonParams = FrameLayout.LayoutParams(
-            (104 * resources.displayMetrics.density).toInt(),
-            (46 * resources.displayMetrics.density).toInt(),
+            (132 * resources.displayMetrics.density).toInt(),
+            (48 * resources.displayMetrics.density).toInt(),
             Gravity.BOTTOM or Gravity.END
         ).apply {
             val margin = (16 * resources.displayMetrics.density).toInt()
@@ -88,14 +78,51 @@ class MainActivity : Activity() {
         root.addView(bubbleButton, buttonParams)
 
         setContentView(root)
+        refreshBubbleButton()
         enableRadarNotifications()
-        if (savedInstanceState == null) {
-            web.loadUrl("https://kalshi-bot-jady1.onrender.com/")
+        if (savedInstanceState == null) web.loadUrl("https://kalshi-bot-jady1.onrender.com/")
+        else web.restoreState(savedInstanceState)
+    }
+
+    private fun toggleBubble() {
+        if (!Settings.canDrawOverlays(this)) {
+            Toast.makeText(this, "Permite mostrar sobre otras aplicaciones para usar la burbuja.", Toast.LENGTH_LONG).show()
+            startActivityForResult(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + packageName)), 411)
+            return
+        }
+        val enabled = prefs.getBoolean("bubble_enabled", false)
+        if (enabled) {
+            prefs.edit().putBoolean("bubble_enabled", false).apply()
+            sendServiceAction(RadarService.ACTION_HIDE)
+            Toast.makeText(this, "Burbuja desactivada", Toast.LENGTH_SHORT).show()
         } else {
-            web.restoreState(savedInstanceState)
+            prefs.edit().putBoolean("bubble_enabled", true).apply()
+            sendServiceAction(RadarService.ACTION_SHOW)
+            Toast.makeText(this, "Burbuja activada", Toast.LENGTH_SHORT).show()
+        }
+        refreshBubbleButton()
+    }
+
+    private fun refreshBubbleButton() {
+        if (!::bubbleButton.isInitialized) return
+        val enabled = prefs.getBoolean("bubble_enabled", false)
+        bubbleButton.text = if (enabled) "BURBUJA: ACTIVADA" else "BURBUJA: DESACTIVADA"
+        bubbleButton.setBackgroundColor(if (enabled) Color.rgb(20, 145, 104) else Color.rgb(65, 78, 96))
+    }
+
+    private fun sendServiceAction(action: String) {
+        try {
+            val intent = Intent(this, RadarService::class.java).setAction(action)
+            if (android.os.Build.VERSION.SDK_INT >= 26) startForegroundService(intent) else startService(intent)
+        } catch (_: Exception) {
+            Toast.makeText(this, "No se pudo cambiar la burbuja. Revisa el permiso de ventana flotante.", Toast.LENGTH_LONG).show()
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        refreshBubbleButton()
+    }
 
     private fun enableRadarNotifications() {
         if (android.os.Build.VERSION.SDK_INT >= 33 &&
@@ -116,18 +143,18 @@ class MainActivity : Activity() {
         }
     }
 
-    override fun onRequestPermissionsResult(
-        requestCode: Int,
-        permissions: Array<out String>,
-        grantResults: IntArray
-    ) {
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == 410) startRadarBackgroundService()
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == 411 && Settings.canDrawOverlays(this)) startRadarBackgroundService()
+        if (requestCode == 411 && Settings.canDrawOverlays(this)) {
+            prefs.edit().putBoolean("bubble_enabled", true).apply()
+            sendServiceAction(RadarService.ACTION_SHOW)
+            refreshBubbleButton()
+        }
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -137,7 +164,12 @@ class MainActivity : Activity() {
 
     @Deprecated("Deprecated in Android")
     override fun onBackPressed() {
-        if (::web.isInitialized && web.canGoBack()) web.goBack() else super.onBackPressed()
+        if (prefs.getBoolean("bubble_enabled", false) && Settings.canDrawOverlays(this)) {
+            sendServiceAction(RadarService.ACTION_SHOW)
+            moveTaskToBack(true)
+        } else {
+            super.onBackPressed()
+        }
     }
 
     override fun onDestroy() {
