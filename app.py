@@ -3747,7 +3747,7 @@ button{border:1px solid #35476b;background:#182640;color:white;border-radius:9px
 @media(max-width:600px){
  html,body{width:100%;height:100%;min-height:0;overflow:hidden}
  body{padding:0}
- main{width:100%;max-width:none;height:100vh;height:100dvh;min-height:0;margin:0;padding:max(28px,env(safe-area-inset-top,0px)) 5px max(7px,env(safe-area-inset-bottom,0px));display:grid;grid-template-rows:auto auto auto auto minmax(130px,1fr) auto;gap:5px;overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain}
+ main{width:100%;max-width:none;height:100vh;height:100dvh;min-height:0;margin:0;padding:max(28px,env(safe-area-inset-top,0px)) 5px max(7px,env(safe-area-inset-bottom,0px));display:grid;grid-template-rows:minmax(22px,auto) minmax(58px,auto) minmax(112px,auto) minmax(82px,auto) minmax(145px,1fr) minmax(34px,auto);gap:4px;overflow:hidden;overscroll-behavior:none}
  .header{min-height:28px;margin:0;padding:0 2px;justify-content:center;position:relative}.logo{font-size:17px;line-height:1.1;text-align:center}.status{font-size:7px;position:absolute;right:2px;top:50%;transform:translateY(-50%)}
  #signalStage,#newsIntel,#newsHeadlines,#entryEconomics{display:none!important}
  .grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:5px;margin:0;min-height:0}
@@ -3784,6 +3784,27 @@ button{border:1px solid #35476b;background:#182640;color:white;border-radius:9px
  .technical-card,.footer{display:none!important}
  button{padding:7px 8px;font-size:8px}
 }
+ /* Ajuste de una sola pantalla: conservar todos los paneles visibles sin desplazamiento. */
+ #accuracyStrip{display:grid;grid-template-columns:1fr;gap:2px;margin:4px 0 0;padding:4px 6px;border-radius:7px}
+ #accuracyStrip .accuracy-strip-top strong{font-size:8px}
+ #accuracyStrip .accuracy-strip-top span{font-size:7px}
+ #accuracyStrip .accuracy-strip-score{font-size:8px;gap:5px}
+ #accuracyStrip .accuracy-strip-score strong{font-size:15px}
+ #accuracyBasis,#accuracyNote{display:none!important}
+ .compact-radar-alert{padding:5px 7px!important;margin:0!important}
+ .compact-radar-alert .radar-mark-row{margin:2px 0;gap:4px}
+ .compact-radar-alert .radar-stage-list{gap:3px;margin:3px 0 0}
+ .compact-radar-alert .radar-stage-item{min-height:25px;padding:3px 2px;font-size:7px}
+ .compact-radar-alert .radar-stage-item b{flex-basis:13px;width:13px;height:13px;font-size:8px}
+ main>section.card:nth-of-type(1){padding:5px 7px}
+ main>section.card:nth-of-type(1) .signal{font-size:clamp(14px,3.6vw,18px);margin:1px 0 2px}
+ main>section.card:nth-of-type(1) .price{font-size:clamp(12px,3.2vw,15px)}
+ main>section.card:nth-of-type(3){padding:5px}
+ main>section.card:nth-of-type(3) .chart-legend{font-size:7px;margin:2px 0;gap:5px}
+ main>section.card:nth-of-type(3) .pattern-guide{display:none}
+ main>section.card:nth-of-type(3) .chart-wrap{min-height:0}
+ main>section.card:nth-of-type(5){padding:4px 7px}
+ main>section.card:nth-of-type(5) .small{line-height:1.05}
 @media(max-width:380px){
  main{padding:max(28px,env(safe-area-inset-top,0px)) 4px max(7px,env(safe-area-inset-bottom,0px));gap:4px}
  .grid .card{padding:6px 3px}
