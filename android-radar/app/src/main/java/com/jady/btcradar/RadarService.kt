@@ -9,6 +9,7 @@ import android.graphics.drawable.GradientDrawable
 import android.os.*
 import android.provider.Settings
 import android.view.*
+import android.view.ScaleGestureDetector
 import android.widget.*
 import android.media.RingtoneManager
 import android.webkit.WebView
@@ -246,7 +247,7 @@ class RadarService : Service() {
                 </script></body></html>
                 """.trimIndent(), "text/html", "UTF-8", null)
         }
-        root.addView(web, FrameLayout.LayoutParams(dp(340), dp(260)).apply { topMargin = dp(40) })
+        root.addView(web, FrameLayout.LayoutParams(-1, -1).apply { topMargin = dp(40) })
         web.pivotX = 0f
         web.pivotY = 0f
 
@@ -267,10 +268,25 @@ class RadarService : Service() {
         val lp = WindowManager.LayoutParams(dp(340), dp(300), type,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, PixelFormat.TRANSLUCENT
         ).apply { gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL; y = dp(70) }
-        fun resizePanel(delta: Int) {
-            lp.width = (lp.width + dp(delta)).coerceIn(dp(250), dp(440))
-            lp.height = (lp.height + dp((delta * 0.45).toInt())).coerceIn(dp(250), dp(380))
+        val display = resources.displayMetrics
+        val maxPanelWidth = (display.widthPixels - dp(16)).coerceAtLeast(dp(220))
+        val maxPanelHeight = (display.heightPixels - dp(80)).coerceAtLeast(dp(190))
+        fun applyPanelSize(width: Int, height: Int) {
+            lp.width = width.coerceIn(dp(220), maxPanelWidth)
+            lp.height = height.coerceIn(dp(190), maxPanelHeight)
+            web.layoutParams = FrameLayout.LayoutParams(-1, lp.height - dp(40)).apply { topMargin = dp(40) }
+            topBar.layoutParams = FrameLayout.LayoutParams(lp.width, dp(40), Gravity.TOP)
             wm.updateViewLayout(root, lp)
+        }
+        val scaleDetector = ScaleGestureDetector(this, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
+            override fun onScale(detector: ScaleGestureDetector): Boolean {
+                applyPanelSize((lp.width * detector.scaleFactor).toInt(), (lp.height * detector.scaleFactor).toInt())
+                return true
+            }
+        })
+        web.setOnTouchListener { _, event ->
+            scaleDetector.onTouchEvent(event)
+            false
         }
         val close = TextView(this).apply {
             text = "×"; textSize = 25f; gravity = Gravity.CENTER
@@ -284,7 +300,7 @@ class RadarService : Service() {
             getSharedPreferences("radar_settings", MODE_PRIVATE).edit().putBoolean("bubble_enabled", false).apply()
             removePanel()
         }
-        root.addView(topBar, FrameLayout.LayoutParams(dp(340), dp(40), Gravity.TOP))
+        root.addView(topBar, FrameLayout.LayoutParams(-1, dp(40), Gravity.TOP))
         topBar.pivotX = 0f
         topBar.pivotY = 0f
 
@@ -315,30 +331,15 @@ class RadarService : Service() {
             rightMargin = dp(4)
             bottomMargin = dp(4)
         })
-        var panelScale = 1f
-        fun applyPanelScale(value: Float) {
-            panelScale = value.coerceIn(0.55f, 1f)
-            lp.width = dp((340 * panelScale).toInt())
-            lp.height = dp((300 * panelScale).toInt())
-            web.scaleX = panelScale
-            web.scaleY = panelScale
-            topBar.scaleX = panelScale
-            topBar.scaleY = panelScale
-            resizeHandle.scaleX = panelScale
-            resizeHandle.scaleY = panelScale
-            wm.updateViewLayout(root, lp)
-        }
         resizeHandle.setOnTouchListener(object : View.OnTouchListener {
             var startX = 0f
             var startY = 0f
-            var startScale = 1f
             var moved = false
             override fun onTouch(v: View, e: MotionEvent): Boolean {
                 when (e.action) {
                     MotionEvent.ACTION_DOWN -> {
                         startX = e.rawX
                         startY = e.rawY
-                        startScale = panelScale
                         moved = false
                         return true
                     }
@@ -347,13 +348,14 @@ class RadarService : Service() {
                         val dy = e.rawY - startY
                         if (kotlin.math.abs(dx) + kotlin.math.abs(dy) > dp(8)) moved = true
                         if (moved) {
-                            val change = (dx + dy) / (2f * dp(340))
-                            applyPanelScale(startScale + change)
+                            applyPanelSize(lp.width + dx.toInt(), lp.height + dy.toInt())
+                            startX = e.rawX
+                            startY = e.rawY
                         }
                         return true
                     }
                     MotionEvent.ACTION_UP -> {
-                        if (!moved) applyPanelScale(if (panelScale > 0.8f) 0.62f else 1f)
+                        if (!moved) applyPanelSize(if (lp.width > dp(300)) dp(260) else dp(340), if (lp.height > dp(240)) dp(210) else dp(300))
                         return true
                     }
                     MotionEvent.ACTION_CANCEL -> return true
