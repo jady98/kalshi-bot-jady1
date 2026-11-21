@@ -163,7 +163,7 @@ class RadarService : Service() {
                 <!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
                 <style>
                 *{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#080d17;color:#eef5ff;font-family:Arial,sans-serif}
-                .wrap{padding:9px 10px 8px}.prices{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+                .wrap{height:100%;display:flex;flex-direction:column;justify-content:center;padding:6px 10px 8px}.prices{display:grid;grid-template-columns:1fr 1fr;gap:8px}
                 .card{background:#111d2d;border:1px solid #243b55;border-radius:9px;padding:7px 9px;min-width:0}
                 .label{font-size:9px;color:#91a9c2;letter-spacing:.4px;white-space:nowrap}
                 .value{font-size:17px;font-weight:800;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -200,7 +200,7 @@ class RadarService : Service() {
                 </script></body></html>
                 """.trimIndent(), "text/html", "UTF-8", null)
         }
-        root.addView(web, FrameLayout.LayoutParams(-1, -1))
+        root.addView(web, FrameLayout.LayoutParams(-1, -1).apply { topMargin = dp(40) })
 
 
         val topBar = LinearLayout(this).apply {
