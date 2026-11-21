@@ -143,61 +143,56 @@ class RadarService : Service() {
             elevation = dp(18).toFloat()
         }
 
-        // La ventana carga la misma página y el mismo gráfico vivo del radar.
+        // Panel compacto: precios, barra, tendencia y cierre.
         val web = WebView(this).apply {
             setBackgroundColor(Color.rgb(8, 13, 23))
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
-            settings.loadsImagesAutomatically = true
-            settings.useWideViewPort = true
-            settings.loadWithOverviewMode = false
             settings.cacheMode = android.webkit.WebSettings.LOAD_NO_CACHE
-            webChromeClient = android.webkit.WebChromeClient()
-            webViewClient = object : android.webkit.WebViewClient() {
-                override fun onPageFinished(view: WebView?, url: String?) {
-                    val js = """
-                        (function(){
-                          if(document.getElementById('btc-floating-style')) return;
-                          const style=document.createElement('style'); style.id='btc-floating-style';
-                          style.textContent='html,body{margin:0!important;padding:0!important;background:#080b14!important}body{padding:44px 8px 8px!important}main{max-width:none!important;width:100%!important;margin:0!important}.header{margin:0 0 7px!important}.logo{font-size:15px!important}.status{font-size:7px!important}.grid{grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:5px!important;margin-bottom:7px!important}.grid .target-card{display:none!important}.grid .card{padding:8px!important;margin:0!important;border-radius:10px!important}.grid .price{font-size:17px!important;margin:4px 0!important}.grid .label{font-size:8px!important}.grid .small{font-size:7px!important}.bar{display:flex!important;width:100%!important;height:12px!important;overflow:hidden!important;border-radius:8px!important;gap:0!important}.bar .bull{display:block!important;flex:0 0 auto!important;background:#00d995!important;min-width:0!important}.bar .bear{display:block!important;flex:0 0 auto!important;background:#ff536b!important;min-width:0!important}#chart,.chart-wrap,canvas,svg.chart{display:none!important}main>section:has(#chart){display:none!important}.technical-card,.radar-alert-panel{display:none!important}#btc-float-alert{display:block;margin:9px 0 0;padding:15px 12px;border-radius:13px;background:linear-gradient(145deg,#101f32,#0b1321);border:1px solid #294867;box-shadow:inset 0 1px 0 #ffffff18,0 5px 16px #0008;text-align:center}#btc-float-alert .alert-kicker{font-size:9px;letter-spacing:1.5px;color:#8caac5;font-weight:700}#btc-float-alert .alert-title{font-size:22px;font-weight:900;letter-spacing:.5px;margin:8px 0}#btc-float-alert .alert-sub{font-size:11px;color:#c2d2e2;line-height:1.4}#btc-float-alert.bull{border-color:#00a979}#btc-float-alert.bull .alert-title{color:#00e6a0;text-shadow:0 0 14px #00d99555}#btc-float-alert.bear{border-color:#d44760}#btc-float-alert.bear .alert-title{color:#ff637b;text-shadow:0 0 14px #ff526955}#btc-float-alert.neutral .alert-title{color:#e8c66d}';
-                          document.head.appendChild(style);
-                          const alert=document.createElement('div'); alert.id='btc-float-alert'; alert.className='neutral';
-                          alert.innerHTML='<div class="alert-kicker">SEÑAL DEL RADAR · EN VIVO</div><div class="alert-title">CONECTANDO…</div><div class="alert-sub">Leyendo tendencia de BTC</div>';
-                          const main=document.querySelector('main')||document.body;
-                          main.appendChild(alert);
-                          let previous='';
-                          async function updateSignal(){
-                            try{
-                              const response=await fetch('/api?t='+Date.now(),{cache:'no-store'});
-                              const d=await response.json();
-                              let direction=String(d.direction||'').toUpperCase();
-                              if(direction!=='ALCISTA'&&direction!=='BAJISTA'){
-                                const pct=Number(d.bullish_score??50);
-                                direction=pct>=55?'ALCISTA':pct<=45?'BAJISTA':'INDECISO';
-                              }
-                              const title=direction==='ALCISTA'?'TENDENCIA ALCISTA':direction==='BAJISTA'?'TENDENCIA BAJISTA':'TENDENCIA INDECISA';
-                              const detail=(d.alert&& (d.alert.message||d.alert.detail))||d.entry_stage||'La señal se actualiza automáticamente';
-                              alert.className=direction==='ALCISTA'?'bull':direction==='BAJISTA'?'bear':'neutral';
-                              alert.querySelector('.alert-title').textContent=title;
-                              alert.querySelector('.alert-sub').textContent=String(detail);
-                              if(previous && direction!==previous && direction!=='INDECISO'){
-                                alert.animate([{filter:'brightness(1)'},{filter:'brightness(1.8)'},{filter:'brightness(1)'}],{duration:900});
-                              }
-                              previous=direction;
-                            }catch(e){alert.querySelector('.alert-sub').textContent='Reconectando con el radar…';}
-                          }
-                          updateSignal(); setInterval(updateSignal,1000);
-                          setTimeout(()=>window.dispatchEvent(new Event('resize')),500);
-                        })();
-                    """.trimIndent()
-                    evaluateJavascript(js, null)
-                }
-                override fun shouldOverrideUrlLoading(view: WebView?, request: android.webkit.WebResourceRequest?): Boolean {
-                    return !request?.url.toString().startsWith("https://kalshi-bot-jady1.onrender.com/")
-                }
-            }
+            loadDataWithBaseURL("https://kalshi-bot-jady1.onrender.com/",
+                """
+                <!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+                <style>
+                *{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#080d17;color:#eef5ff;font-family:Arial,sans-serif}
+                .wrap{padding:9px 10px 8px}.prices{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+                .card{background:#111d2d;border:1px solid #243b55;border-radius:9px;padding:7px 9px;min-width:0}
+                .label{font-size:9px;color:#91a9c2;letter-spacing:.4px;white-space:nowrap}
+                .value{font-size:17px;font-weight:800;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+                .barline{display:flex;height:13px;border-radius:8px;overflow:hidden;margin-top:10px;background:#273449}
+                #bull{width:50%;background:#00d995}#bear{width:50%;background:#ff536b}
+                .perc{display:flex;justify-content:space-between;font-size:10px;font-weight:700;margin-top:4px}
+                #up{color:#00e6a0}#down{color:#ff7185}
+                .bottom{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:7px;font-size:10px}
+                #trend{font-weight:800;white-space:nowrap}#close{color:#9db2c9;white-space:nowrap}
+                .bull #trend{color:#00e6a0}.bear #trend{color:#ff7185}.neutral #trend{color:#e8c66d}
+                </style></head><body><div class="wrap neutral" id="panel">
+                <div class="prices"><div class="card"><div class="label">PRECIO ACTUAL</div><div class="value" id="price">--</div></div>
+                <div class="card"><div class="label">PREDICCIÓN AL CIERRE</div><div class="value" id="prediction">--</div></div></div>
+                <div class="barline"><div id="bull"></div><div id="bear"></div></div>
+                <div class="perc"><span id="up">ALCISTA --%</span><span id="down">BAJISTA --%</span></div>
+                <div class="bottom"><span id="trend">TENDENCIA INDECISA</span><span id="close">CIERRE --:--</span></div>
+                </div><script>
+                const money=v=>Number.isFinite(Number(v))&&Number(v)>0?'$'+Number(v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}):'--';
+                async function refresh(){
+                  try{
+                    const r=await fetch('/api?t='+Date.now(),{cache:'no-store'});if(!r.ok)throw Error('api');const d=await r.json();
+                    const p=Number(d.kalshi_yes_probability_pct??d.bullish_score??50);const up=Math.max(0,Math.min(100,Number.isFinite(p)?p:50));const down=100-up;
+                    document.getElementById('price').textContent=money(d.brti_price??d.coinbase_price);
+                    document.getElementById('prediction').textContent=money(d.predicted_price);
+                    document.getElementById('bull').style.width=up+'%';document.getElementById('bear').style.width=down+'%';
+                    document.getElementById('up').textContent='ALCISTA '+up.toFixed(0)+'%';document.getElementById('down').textContent='BAJISTA '+down.toFixed(0)+'%';
+                    let dir=String(d.direction||'').toUpperCase();if(dir!=='ALCISTA'&&dir!=='BAJISTA')dir=up>=55?'ALCISTA':up<=45?'BAJISTA':'INDECISA';
+                    const box=document.getElementById('panel');box.className='wrap '+(dir==='ALCISTA'?'bull':dir==='BAJISTA'?'bear':'neutral');
+                    document.getElementById('trend').textContent='TENDENCIA '+dir;
+                    let secs=Number(d.seconds_to_close??d.countdown);if(!Number.isFinite(secs)||secs<0){const close=Number(d.kalshi_market_close),now=Number(d.server_time);secs=close>0&&now>0?Math.max(0,Math.floor(close-now)):0;}
+                    const mm=Math.floor(secs/60),ss=secs%60;document.getElementById('close').textContent='CIERRE '+String(mm).padStart(2,'0')+':'+String(ss).padStart(2,'0');
+                  }catch(e){document.getElementById('trend').textContent='CONECTANDO…';}
+                }refresh();setInterval(refresh,1000);
+                </script></body></html>
+                """.trimIndent(), "text/html", "UTF-8", null)
         }
         root.addView(web, FrameLayout.LayoutParams(-1, -1))
+
         web.loadUrl("https://kalshi-bot-jady1.onrender.com/?floating=1&v=2")
 
         val topBar = LinearLayout(this).apply {
@@ -212,6 +207,25 @@ class RadarService : Service() {
             typeface = Typeface.create("sans-serif", Typeface.BOLD)
         }
         topBar.addView(title, LinearLayout.LayoutParams(0, -1, 1f))
+        val type = if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE
+        val lp = WindowManager.LayoutParams(dp(340), dp(190), type,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, PixelFormat.TRANSLUCENT
+        ).apply { gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL; y = dp(70) }
+        fun resizePanel(delta: Int) {
+            lp.width = (lp.width + dp(delta)).coerceIn(dp(250), dp(440))
+            lp.height = (lp.height + dp((delta * 0.45).toInt())).coerceIn(dp(150), dp(280))
+            wm.updateViewLayout(root, lp)
+        }
+        val smaller = TextView(this).apply {
+            text = "−"; textSize = 22f; gravity = Gravity.CENTER; setTextColor(Color.WHITE)
+            setPadding(dp(7), 0, dp(7), 0); setOnClickListener { resizePanel(-30) }
+        }
+        val larger = TextView(this).apply {
+            text = "+"; textSize = 20f; gravity = Gravity.CENTER; setTextColor(Color.WHITE)
+            setPadding(dp(7), 0, dp(7), 0); setOnClickListener { resizePanel(30) }
+        }
+        topBar.addView(smaller, LinearLayout.LayoutParams(dp(32), dp(36)))
+        topBar.addView(larger, LinearLayout.LayoutParams(dp(32), dp(36)))
         val close = TextView(this).apply {
             text = "×"; textSize = 25f; gravity = Gravity.CENTER
             setTextColor(Color.WHITE)
@@ -225,11 +239,6 @@ class RadarService : Service() {
             removePanel()
         }
         root.addView(topBar, FrameLayout.LayoutParams(-1, dp(40), Gravity.TOP))
-
-        val type = if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE
-        val lp = WindowManager.LayoutParams(dp(360), dp(590), type,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, PixelFormat.TRANSLUCENT
-        ).apply { gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL; y = dp(70) }
 
         topBar.setOnTouchListener(object : View.OnTouchListener {
             var sx=0f; var sy=0f; var ox=0; var oy=0
