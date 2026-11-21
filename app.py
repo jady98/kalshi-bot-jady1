@@ -4739,7 +4739,7 @@ function paintRadarAlertToggle(){
     }
     if(status){
         status.textContent = radarAlertsEnabled
-            ? "SONIDO ENCENDIDO · avisos de entrada y salida"
+            ? "SONIDO ENCENDIDO · ENTRAR, MANTENER y SALIR"
             : "SONIDO APAGADO · pulsa para activar";
     }
 }
@@ -4786,13 +4786,13 @@ function playRadarTone(kind){
     if(!radarAlertsEnabled || !radarAudioContext) return;
     try{
         const now = radarAudioContext.currentTime;
-        const frequencies = kind === "exit" ? [330,247] : kind === "hold" ? [784] : kind === "bearish" ? [330,247] : [660,988];
+        const frequencies = kind === "exit" ? [330,247,196] : kind === "hold" ? [784,1046] : kind === "bearish" ? [330,247] : [660,988];
         frequencies.forEach((frequency,index)=>{
             const oscillator = radarAudioContext.createOscillator();
             const gain = radarAudioContext.createGain();
             oscillator.frequency.value = frequency;
             oscillator.type = "sine";
-            const spacing = kind === "hold" ? 0 : index * 0.16;
+            const spacing = index * (kind === "hold" ? 0.13 : 0.16);
             gain.gain.setValueAtTime(0.0001,now + spacing);
             gain.gain.exponentialRampToValueAtTime(0.12,now + spacing + 0.025);
             gain.gain.exponentialRampToValueAtTime(0.0001,now + spacing + 0.14);
@@ -4895,11 +4895,13 @@ function handleRadarAlert(data){
     detail.textContent = alertData.detail || data.guidance_note ||
         "La dirección y el porcentaje por sí solos no confirman una entrada.";
 
-    // Sonido distinto al entrar, mantener y salir; solo una vez por cambio.
-    const eventType = isExit ? "SALIDA" : isNewEntry ? "ENTRADA" :
-        (isHold && hasFreshEvent && type === "MANTENER") ? "MANTENER" :
-        (isPrealert && hasFreshEvent && type === "PREALERTA") ? "PREALERTA" : "";
-    if(!eventType || !hasFreshEvent) return;
+    // Un sonido por cada evento nuevo: entrada, mantener y salida.
+    // Las luces de ENTRAR + MANTENER permanecen activas durante toda la posición.
+    const eventType = hasFreshEvent && isExit ? "SALIDA" :
+        hasFreshEvent && isNewEntry ? "ENTRADA" :
+        (hasFreshEvent && isHold && type === "MANTENER") ? "MANTENER" :
+        (hasFreshEvent && isPrealert && type === "PREALERTA") ? "PREALERTA" : "";
+    if(!eventType) return;
     const eventKey = [eventType,alertData.ticker || data.entry_ticker || "",alertData.timestamp].join("|");
     if(eventKey === lastRadarAlertKey) return;
     lastRadarAlertKey = eventKey;
