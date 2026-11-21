@@ -139,6 +139,15 @@ _guidance_state = {
     "hold_announced": False
 }
 
+# Seguimiento informativo de una entrada rápida por contrato (sin enviar órdenes).
+_scalp_trade = {
+    "ticker": None, "status": "ESPERANDO", "side": None,
+    "direction": None, "entry_price": None, "entry_fee": None,
+    "total_cost": None, "take_profit_price": None, "stop_loss_price": None,
+    "exit_price": None, "net_pnl": None, "exit_reason": None,
+    "opened_ts": None, "closed_ts": None
+}
+
 session = requests.Session()
 session.headers.update({
     "User-Agent": "BitcoinRadar/7.0"
@@ -304,6 +313,111 @@ def calculate_entry_economics(direction, bullish_probability, bearish_probabilit
         "is_positive_estimated_ev": expected_value > 0,
         "warning": "ESTIMACIÓN CON PROBABILIDAD DEL MODELO; NO ES RENTABILIDAD VALIDADA"
     }
+
+
+
+def _estimated_contract_fee(price):
+    """Estimación conservadora de tarifa taker por contrato."""
+    raw = 0.07 * float(price) * (1.0 - float(price))
+    return math.ceil((raw - 1e-12) * 100.0) / 100.0
+
+
+def update_scalp_trade(guidance, ticker, orderbook, economics,
+                       contract_active, now):
+    """
+    Señal simulada de entrada/salida sobre el precio ejecutable de Kalshi.
+    Nunca envía órdenes. Objetivo +20% y stop -12% sobre el precio de entrada.
+    """
+    stage = str((guidance or {}).get("entry_stage") or "")
+    seconds_left = int((guidance or {}).get("entry_seconds_remaining") or 0)
+    with lock:
+        state = _scalp_trade
+        if not contract_active or not ticker:
+            return {
+                "status": "ESPERANDO", "message": "Esperando contrato activo",
+                "entry_price": None, "take_profit_price": None,
+                "stop_loss_price": None, "current_bid": None,
+                "net_pnl": None, "pnl_pct": None
+            }
+        if state.get("ticker") != ticker:
+            state.update({
+                "ticker": ticker, "status": "ESPERANDO", "side": None,
+                "direction": None, "entry_price": None, "entry_fee": None,
+                "total_cost": None, "take_profit_price": None,
+                "stop_loss_price": None, "exit_price": None,
+                "net_pnl": None, "exit_reason": None,
+                "opened_ts": None, "closed_ts": None
+            })
+
+        if state.get("status") == "ESPERANDO" and stage == "ENTRADA" and economics and economics.get("available") and orderbook and orderbook.get("available"):
+            entry = float(economics["entry_ask"])
+            side = str(economics["side"])
+            state.update({
+                "status": "ABIERTA", "side": side,
+                "direction": guidance.get("entry_direction") or guidance.get("short_direction"),
+                "entry_price": entry,
+                "entry_fee": float(economics.get("estimated_taker_fee") or 0),
+                "total_cost": float(economics.get("estimated_total_cost") or (entry + float(economics.get("estimated_taker_fee") or 0))),
+                "take_profit_price": round(min(0.99, entry * 1.20), 4),
+                "stop_loss_price": round(max(0.01, entry * 0.88), 4),
+                "exit_price": None, "net_pnl": None, "exit_reason": None,
+                "opened_ts": now, "closed_ts": None
+            })
+
+        if state.get("status") == "ABIERTA":
+            side = state.get("side")
+            bid = orderbook.get("best_yes_bid" if side == "YES" else "best_no_bid") if orderbook else None
+            if bid is not None:
+                bid = float(bid)
+                exit_fee = _estimated_contract_fee(bid)
+                pnl = bid - exit_fee - float(state["total_cost"])
+                pnl_pct = (pnl / float(state["total_cost"])) * 100 if state["total_cost"] else None
+                reason = None
+                if bid >= float(state["take_profit_price"]):
+                    reason = "TAKE PROFIT ALCANZADO"
+                elif bid <= float(state["stop_loss_price"]):
+                    reason = "STOP LOSS ALCANZADO"
+                elif stage == "SALIDA":
+                    reason = "SEÑAL TÉCNICA DE SALIDA"
+                elif seconds_left <= 30:
+                    reason = "CIERRE PREVENTIVO · QUEDAN 30 S"
+                if reason:
+                    state.update({
+                        "status": "CERRADA", "exit_price": bid,
+                        "net_pnl": round(pnl, 4), "exit_reason": reason,
+                        "closed_ts": now
+                    })
+            else:
+                bid = None
+                pnl = None
+                pnl_pct = None
+        else:
+            side = state.get("side")
+            bid = None
+            pnl = state.get("net_pnl")
+            pnl_pct = (
+                (float(pnl) / float(state["total_cost"])) * 100
+                if pnl is not None and state.get("total_cost") else None
+            )
+
+        return {
+            "status": state.get("status"),
+            "message": (
+                "Entrada simulada confirmada" if state.get("status") == "ABIERTA"
+                else state.get("exit_reason") or "Esperando entrada confirmada"
+            ),
+            "ticker": ticker, "side": side,
+            "direction": state.get("direction"),
+            "entry_price": state.get("entry_price"),
+            "take_profit_price": state.get("take_profit_price"),
+            "stop_loss_price": state.get("stop_loss_price"),
+            "current_bid": bid,
+            "net_pnl": round(pnl, 4) if pnl is not None else None,
+            "pnl_pct": round(pnl_pct, 2) if pnl_pct is not None else None,
+            "exit_price": state.get("exit_price"),
+            "exit_reason": state.get("exit_reason"),
+            "seconds_remaining": seconds_left
+        }
 
 
 def normalize_timestamp(value):
@@ -3422,6 +3536,10 @@ def get_data():
     )
     if guidance_alert is not None:
         alert_data = guidance_alert
+    scalp_trade = update_scalp_trade(
+        guidance, market_ticker, orderbook, entry_economics,
+        contract_active, now
+    )
     indicators.update(guidance)
     indicators["entry_validation"] = entry_validation
     # Registro idempotente: solo contratos reales con ENTRADA confirmada
@@ -3511,6 +3629,7 @@ def get_data():
             if kalshi_yes_probability is not None else None
         ),
         "entry_economics": entry_economics,
+        "scalp_trade": scalp_trade,
 
         "countdown": countdown,
 
@@ -3967,6 +4086,23 @@ button{border:1px solid #35476b;background:#182640;color:white;border-radius:9px
 #manualPositionStatus{line-height:1.5;color:#aab6cc}
 
 
+
+.scalp-trade-panel{margin-top:6px;padding:7px 8px;border:1px solid #33415b;border-radius:10px;background:#0b1423}
+.scalp-trade-heading,.scalp-trade-bottom{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:8px;color:#aebbd1}
+.scalp-trade-heading strong{color:#dce6f8;letter-spacing:.45px}
+#scalpTradeStatus{font-weight:900;color:#f1cf72}
+.scalp-trade-panel.open #scalpTradeStatus{color:#55e0a6}
+.scalp-trade-panel.closed #scalpTradeStatus{color:#ff8999}
+.scalp-trade-levels{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:5px;margin:6px 0}
+.scalp-trade-levels div{min-width:0;padding:5px 4px;border-radius:7px;background:#111e30;text-align:center}
+.scalp-trade-levels small{display:block;font-size:7px;color:#8e9bb2;font-weight:800}
+.scalp-trade-levels b{display:block;margin-top:2px;font-size:12px;color:#f3f6ff;font-variant-numeric:tabular-nums}
+.scalp-trade-levels div:nth-child(2) b{color:#55e0a6}
+.scalp-trade-levels div:nth-child(3) b{color:#ff8999}
+.scalp-trade-bottom{font-size:8px;line-height:1.2}
+#scalpTradePnl{font-size:10px;font-variant-numeric:tabular-nums;color:#dce6f8}
+@media(max-width:380px){.scalp-trade-panel{padding:6px}.scalp-trade-levels b{font-size:11px}}
+
 /* Alertas compactas: la explicación nunca debe empujar la gráfica fuera de pantalla. */
 .compact-radar-alert .radar-alert-state{
   margin:4px 0 2px!important;padding:4px 7px!important;
@@ -4171,6 +4307,15 @@ button{border:1px solid #35476b;background:#182640;color:white;border-radius:9px
     <div class="radar-alert-state neutral" id="radarAlertState" hidden>OBSERVAR</div>
     <div class="radar-alert-message" id="radarAlertMessage" hidden></div>
     <div class="radar-alert-detail" id="radarAlertDetail" hidden></div>
+    <div class="scalp-trade-panel" id="scalpTradePanel" aria-live="polite">
+        <div class="scalp-trade-heading"><strong>ENTRADA / SALIDA · 15 MIN</strong><span id="scalpTradeStatus">ESPERANDO</span></div>
+        <div class="scalp-trade-levels">
+            <div><small>ENTRADA</small><b id="scalpEntryPrice">--</b></div>
+            <div><small>TAKE PROFIT</small><b id="scalpTakeProfit">--</b></div>
+            <div><small>STOP LOSS</small><b id="scalpStopLoss">--</b></div>
+        </div>
+        <div class="scalp-trade-bottom"><span id="scalpTradeDetail">Esperando entrada confirmada</span><strong id="scalpTradePnl">--</strong></div>
+    </div>
     <div class="manual-position" id="manualPosition">
         <div class="small manual-position-title">¿QUÉ COMPRASTE EN ESTE CONTRATO?</div>
         <div class="manual-position-buttons">
@@ -5178,6 +5323,34 @@ function renderRadarDirectionMark(ticker){
     if(status) status.textContent = record ? "Marcado " + record.side : "Sin marcar";
 }
 
+
+function updateScalpTrade(trade){
+    const panel = $("scalpTradePanel");
+    if(!panel) return;
+    const status = String(trade.status || "ESPERANDO");
+    panel.classList.toggle("open",status === "ABIERTA");
+    panel.classList.toggle("closed",status === "CERRADA");
+    $("scalpTradeStatus").textContent = status === "ABIERTA" ? "EN CURSO" :
+        status === "CERRADA" ? "SALIDA" : "ESPERANDO";
+    const price = value => value == null ? "--" : "$" + Number(value).toFixed(2);
+    $("scalpEntryPrice").textContent = price(trade.entry_price);
+    $("scalpTakeProfit").textContent = price(trade.take_profit_price);
+    $("scalpStopLoss").textContent = price(trade.stop_loss_price);
+    $("scalpTradeDetail").textContent = trade.status === "ABIERTA"
+        ? (trade.side || "") + " · BID " + price(trade.current_bid) + " · " + (trade.seconds_remaining || 0) + " s restantes"
+        : (trade.message || "Esperando entrada confirmada");
+    const pnl = $("scalpTradePnl");
+    if(trade.net_pnl == null){
+        pnl.textContent = "--";
+        pnl.style.color = "#dce6f8";
+    }else{
+        const value = Number(trade.net_pnl);
+        pnl.textContent = (value >= 0 ? "+" : "") + "$" + value.toFixed(4) +
+            (trade.pnl_pct == null ? "" : " · " + Number(trade.pnl_pct).toFixed(1) + "%");
+        pnl.style.color = value >= 0 ? "#55e0a6" : "#ff8999";
+    }
+}
+
 function updateRadar(d){
 
     const measuredOffset = Number(d._client_clock_offset_ms);
@@ -5347,6 +5520,7 @@ function updateRadar(d){
         $("entryEconomics").style.color = "#aab2c5";
     }
 
+    updateScalpTrade(d.scalp_trade || {});
     window.currentRadarTicker = d.kalshi_market_active ? d.kalshi_market_ticker : null;
     const manualPanel = $("manualPosition");
     const manualStatus = $("manualPositionStatus");
