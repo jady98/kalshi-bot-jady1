@@ -4000,10 +4000,6 @@ button{border:1px solid #35476b;background:#182640;color:white;border-radius:9px
         </div>
         <button id="alertsEnableButton" class="alert-sound-toggle" onclick="enableRadarAlerts()" aria-pressed="false">ACTIVAR SONIDO</button>
     </div>
-    <div class="accuracy-mini" aria-label="Precisión real: aciertos y errores">
-        <span class="accuracy-correct">ACIERTOS <b id="accuracyCorrect">--</b></span>
-        <span class="accuracy-wrong">ERRORES <b id="accuracyIncorrect">--</b></span>
-    </div>
     <div class="radar-mark-row" aria-label="Registrar dirección indicada por el radar">
         <span class="radar-mark-label">MARCAR RADAR</span>
         <div class="radar-mark-buttons">
