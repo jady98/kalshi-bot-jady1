@@ -41,6 +41,29 @@ def init_db():
                 ON CONFLICT (id) DO NOTHING
             """)
 
+            # Reinicio único del período de evaluación solicitado el 2026-11-21.
+            # Conserva todas las señales y resultados históricos; solo mueve el
+            # punto de inicio de las estadísticas. La clave única evita repetirlo
+            # en cada reinicio o despliegue posterior de Render.
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS btc_prediction_stats_resets (
+                    reset_key TEXT PRIMARY KEY,
+                    reset_ts DOUBLE PRECISION NOT NULL
+                )
+            """)
+            reset_row = conn.execute("""
+                INSERT INTO btc_prediction_stats_resets (reset_key, reset_ts)
+                VALUES ('fresh_accuracy_baseline_2026_11_21', EXTRACT(EPOCH FROM NOW()))
+                ON CONFLICT (reset_key) DO NOTHING
+                RETURNING reset_ts
+            """).fetchone()
+            if reset_row:
+                conn.execute("""
+                    UPDATE btc_prediction_stats_control
+                    SET reset_ts = %s
+                    WHERE id = 1
+                """, (float(reset_row[0]),))
+
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS brti_minute_candles (
                     candle_time BIGINT PRIMARY KEY,
