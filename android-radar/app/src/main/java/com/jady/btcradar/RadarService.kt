@@ -12,6 +12,8 @@ import android.view.*
 import android.view.ScaleGestureDetector
 import android.widget.*
 import android.media.RingtoneManager
+import android.media.AudioManager
+import android.media.ToneGenerator
 import android.webkit.WebView
 import android.widget.FrameLayout
 import android.text.SpannableString
@@ -27,6 +29,9 @@ class RadarService : Service() {
     private var panel: View? = null
     private val handler = Handler(Looper.getMainLooper())
     private var lastSignal = ""
+    private var toneGenerator: ToneGenerator? = null
+    private var lastCountdownSecond = -1
+    private var lastFinalBeepSecond = -1
     @Volatile private var loading = false
     private val task = object : Runnable {
         override fun run() {
@@ -77,7 +82,13 @@ class RadarService : Service() {
                 enableVibration(true)
             }
             nm.createNotificationChannel(eventChannel)
+            val silentEventChannel = NotificationChannel("btc_events_v3", "Alertas BTC Radar", NotificationManager.IMPORTANCE_HIGH).apply {
+                setSound(null, null)
+                enableVibration(false)
+            }
+            nm.createNotificationChannel(silentEventChannel)
         }
+        toneGenerator = ToneGenerator(AudioManager.STREAM_NOTIFICATION, 85)
         startForeground(1, Notification.Builder(this, "btc").setSmallIcon(android.R.drawable.ic_dialog_info).setContentTitle("BTC Radar activo").setContentText("Monitoreando BTC/USD").build())
         if (Settings.canDrawOverlays(this) && getSharedPreferences("radar_settings", MODE_PRIVATE).getBoolean("bubble_enabled", false)) show()
         handler.post(task)
@@ -100,6 +111,7 @@ class RadarService : Service() {
             prefs.edit().putString("last_direction", d.direction).apply()
             return
         }
+        playContractFinalSeconds(d.secondsToClose)
         val expected = if (d.manualSide == "YES") "ALCISTA" else if (d.manualSide == "NO") "BAJISTA" else ""
         val alignment = when {
             d.manualSide.isEmpty() -> "No has marcado YES o NO."
@@ -109,8 +121,9 @@ class RadarService : Service() {
         if (event.isNotEmpty()) {
             val key = listOf(event, d.alertKey).joinToString("|")
             if (prefs.getString("last_event", "") == key) return
+            playEventTone(event)
             val body = listOf(d.alertMessage.ifBlank { "BTC Radar detectó: $event." }, alignment).joinToString("\\n")
-            val notification = Notification.Builder(this, "btc_events_v2")
+            val notification = Notification.Builder(this, "btc_events_v3")
                 .setSmallIcon(android.R.drawable.ic_dialog_info)
                 .setContentTitle("BTC Radar · $event")
                 .setContentText(body)
@@ -134,7 +147,8 @@ class RadarService : Service() {
             if (prefs.getString("last_confidence_alert", "") != confidenceKey) {
                 val confidencePercent = if (confidenceDirection == "ALCISTA") d.up else 100 - d.up
                 val body = "Probabilidad ${if (confidenceDirection == "ALCISTA") "alcista" else "bajista"}: $confidencePercent%."
-                val notification = Notification.Builder(this, "btc_events_v2")
+                playEventTone("TENDENCIA")
+                val notification = Notification.Builder(this, "btc_events_v3")
                     .setSmallIcon(android.R.drawable.ic_dialog_info)
                     .setContentTitle("BTC Radar · TENDENCIA $confidenceDirection")
                     .setContentText(body)
@@ -150,7 +164,8 @@ class RadarService : Service() {
             if (previous.orEmpty().isNotEmpty() && previous != d.direction) {
                 val key = "DIRECTION|${d.direction}|${d.alertKey}"
                 if (prefs.getString("last_event", "") != key) {
-                    val notification = Notification.Builder(this, "btc_events_v2")
+                    playEventTone("CAMBIO")
+                    val notification = Notification.Builder(this, "btc_events_v3")
                         .setSmallIcon(android.R.drawable.ic_dialog_info)
                         .setContentTitle("BTC Radar · CAMBIO DE TENDENCIA")
                         .setContentText("\${d.direction} · $alignment")
@@ -163,6 +178,28 @@ class RadarService : Service() {
             }
             prefs.edit().putString("last_direction", d.direction).apply()
         }
+    }
+
+    private fun playEventTone(event: String) {
+        val tone = when (event) {
+            "ENTRADA" -> ToneGenerator.TONE_PROP_ACK
+            "MANTENER" -> ToneGenerator.TONE_PROP_BEEP2
+            "SALIDA" -> ToneGenerator.TONE_PROP_NACK
+            else -> ToneGenerator.TONE_PROP_BEEP
+        }
+        try { toneGenerator?.startTone(tone, 220) } catch (_: Exception) {}
+    }
+
+    private fun playContractFinalSeconds(secondsToClose: Int) {
+        if (secondsToClose > lastCountdownSecond && lastCountdownSecond >= 0) {
+            lastFinalBeepSecond = -1
+        }
+        lastCountdownSecond = secondsToClose
+        if (secondsToClose in 1..4 && secondsToClose != lastFinalBeepSecond) {
+            try { toneGenerator?.startTone(ToneGenerator.TONE_PROP_BEEP, 130) } catch (_: Exception) {}
+            lastFinalBeepSecond = secondsToClose
+        }
+        if (secondsToClose <= 0) lastFinalBeepSecond = -1
     }
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
@@ -392,6 +429,8 @@ class RadarService : Service() {
     override fun onDestroy() {
         handler.removeCallbacks(task)
         removePanel()
+        try { toneGenerator?.release() } catch (_: Exception) {}
+        toneGenerator = null
         super.onDestroy()
     }
     override fun onBind(i: Intent?): IBinder? = null
