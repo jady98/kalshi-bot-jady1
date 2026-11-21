@@ -122,14 +122,13 @@ class RadarService : Service() {
             if (previous.orEmpty().isNotEmpty() && previous != d.direction) {
                 val key = "DIRECTION|${d.direction}|${d.alertKey}"
                 if (prefs.getString("last_event", "") != key) {
-                    val notification = Notification.Builder(this, "btc_events")
+                    val notification = Notification.Builder(this, "btc_events_v2")
                         .setSmallIcon(android.R.drawable.ic_dialog_info)
                         .setContentTitle("BTC Radar · CAMBIO DE TENDENCIA")
                         .setContentText("\${d.direction} · $alignment")
                         .setAutoCancel(true)
                         .setContentIntent(PendingIntent.getActivity(this, 42, Intent(this, MainActivity::class.java), PendingIntent.FLAG_UPDATE_CURRENT or if (Build.VERSION.SDK_INT >= 23) PendingIntent.FLAG_IMMUTABLE else 0))
                         .build()
-                    notification.defaults = Notification.DEFAULT_SOUND or Notification.DEFAULT_VIBRATE
                     getSystemService(NotificationManager::class.java).notify(42, notification)
                     prefs.edit().putString("last_event", key).apply()
                 }
