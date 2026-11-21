@@ -162,7 +162,7 @@ class RadarService : Service() {
                 <!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
                 <style>
                 *{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#080d17;color:#eef5ff;font-family:Arial,sans-serif}
-                .wrap{height:100%;display:flex;flex-direction:column;justify-content:center;padding:6px 10px 8px}.prices{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+                .wrap{height:100%;display:flex;flex-direction:column;justify-content:center;padding:6px 10px 8px}.prices{display:grid;grid-template-columns:1fr;gap:8px}
                 .card{background:#111d2d;border:1px solid #243b55;border-radius:9px;padding:7px 9px;min-width:0}
                 .label{font-size:9px;color:#91a9c2;letter-spacing:.4px;white-space:nowrap}
                 .value{font-size:17px;font-weight:800;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -171,18 +171,17 @@ class RadarService : Service() {
                 .probLabel{font-size:8px;color:#829bb5;letter-spacing:.6px;margin-top:8px}
                 .perc{display:flex;justify-content:space-between;font-size:10px;font-weight:700;margin-top:3px}
                 #up{color:#00e6a0}#down{color:#ff7185}
-                .reason{font-size:9px;line-height:1.25;color:#c1d0e2;margin-top:6px;white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;min-height:22px}
+                .reason{font-size:8px;line-height:1.2;color:#c1d0e2;margin-top:5px;white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;min-height:18px}
                 .bottom{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:7px;font-size:10px}
-                #trend{font-weight:800;white-space:nowrap}#close{color:#9db2c9;white-space:nowrap}
-                .bull #trend{color:#00e6a0}.bear #trend{color:#ff7185}.neutral #trend{color:#e8c66d}
+                #prediction{font-weight:800;color:#9db2c9;white-space:nowrap;font-size:10px}#close{color:#9db2c9;white-space:nowrap}
+                
                 </style></head><body><div class="wrap neutral" id="panel">
-                <div class="prices"><div class="card"><div class="label">PRECIO ACTUAL</div><div class="value" id="price">--</div></div>
-                <div class="card"><div class="label">PREDICCIÓN AL CIERRE</div><div class="value" id="prediction">--</div></div></div>
+                <div class="prices"><div class="card"><div class="label">PRECIO ACTUAL</div><div class="value" id="price">--</div></div></div>
                 <div class="probLabel">PRONÓSTICO PROPIO DEL RADAR · PRÓXIMOS 15 MIN</div>
                 <div class="barline"><div id="bull"></div><div id="bear"></div></div>
                 <div class="perc"><span id="up">ALCISTA --%</span><span id="down">BAJISTA --%</span></div>
                 <div class="reason" id="why">Analizando momentum, estructura y fuerza del movimiento…</div>
-                <div class="bottom"><span id="trend">TENDENCIA INDECISA</span><span id="close">CIERRE --:--</span></div>
+                <div class="bottom"><span id="prediction">CIERRE PROYECTADO: --</span><span id="close">TIEMPO --:--</span></div>
                 </div><script>
                 const money=v=>Number.isFinite(Number(v))&&Number(v)>0?'$'+Number(v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}):'--';
                 async function refresh(){
@@ -193,12 +192,12 @@ class RadarService : Service() {
                     document.getElementById('prediction').textContent=money(d.predicted_price);
                     document.getElementById('bull').style.width=up+'%';document.getElementById('bear').style.width=down+'%';
                     document.getElementById('up').textContent='ALCISTA '+(valid?up.toFixed(0)+'%':'--');document.getElementById('down').textContent='BAJISTA '+(valid?down.toFixed(0)+'%':'--');
-                    const emaUp=d.ema9!=null&&d.ema21!=null&&Number(d.ema9)>Number(d.ema21);const emaDown=d.ema9!=null&&d.ema21!=null&&Number(d.ema9)<Number(d.ema21);const mom=Number(d.momentum_pct);const rsi=d.rsi==null?null:Number(d.rsi);const delta=Number(d.predicted_price)>0&&Number(d.brti_price??d.coinbase_price)>0?((Number(d.predicted_price)/Number(d.brti_price??d.coinbase_price)-1)*100):null;const factors=[];if(emaUp)factors.push('EMA 9 sobre 21');else if(emaDown)factors.push('EMA 9 bajo 21');if(Number.isFinite(mom))factors.push('impulso '+(mom>=0?'+':'')+mom.toFixed(3)+'%');if(rsi!==null&&Number.isFinite(rsi))factors.push('RSI '+rsi.toFixed(0));if(d.pattern)factors.push(String(d.pattern).replace(/[<>]/g,'').slice(0,35));const outlook=dir==='ALCISTA'?'ALCISTA':dir==='BAJISTA'?'BAJISTA':'SIN VENTAJA CLARA';const projection=delta===null?'proyección sin confirmar':'cierre proyectado '+(delta>=0?'+':'')+delta.toFixed(2)+'%';const caution=(emaUp&&mom<0)||(emaDown&&mom>0)?' · señales mezcladas':'';const note=factors.slice(0,2).join(' y ')||'faltan datos técnicos';document.getElementById('why').textContent='PISTA DEL RADAR: '+outlook+' por '+note+'; '+projection+caution+'.';
                     let dir=String(d.direction||'').toUpperCase();if(dir!=='ALCISTA'&&dir!=='BAJISTA')dir=up>=55?'ALCISTA':up<=45?'BAJISTA':'INDECISA';
+                    const emaUp=d.ema9!=null&&d.ema21!=null&&Number(d.ema9)>Number(d.ema21);const emaDown=d.ema9!=null&&d.ema21!=null&&Number(d.ema9)<Number(d.ema21);const mom=Number(d.momentum_pct);const rsi=d.rsi==null?null:Number(d.rsi);const base=Number(d.brti_price??d.coinbase_price);const delta=Number(d.predicted_price)>0&&base>0?((Number(d.predicted_price)/base-1)*100):null;const factors=[];if(emaUp)factors.push('EMA 9 sobre 21');else if(emaDown)factors.push('EMA 9 bajo 21');if(Number.isFinite(mom))factors.push('impulso '+(mom>=0?'+':'')+mom.toFixed(3)+'%');if(rsi!==null&&Number.isFinite(rsi))factors.push('RSI '+rsi.toFixed(0));if(d.pattern)factors.push(String(d.pattern).replace(/[<>]/g,'').slice(0,30));const outlook=dir;const projection=delta===null?'':'; proyección '+(delta>=0?'+':'')+delta.toFixed(2)+'%';const caution=(emaUp&&mom<0)||(emaDown&&mom>0)?' · señales mixtas':'';const note=factors.slice(0,2).join(' y ')||'analizando señales';document.getElementById('why').textContent='TENDENCIA '+outlook+' · '+note+caution+'.';
+                    document.getElementById('prediction').textContent='CIERRE PROYECTADO: '+money(d.predicted_price);
                     const box=document.getElementById('panel');box.className='wrap '+(dir==='ALCISTA'?'bull':dir==='BAJISTA'?'bear':'neutral');
-                    document.getElementById('trend').textContent='TENDENCIA '+dir;
-                    let secs=Number(d.seconds_to_close??d.countdown);if(!Number.isFinite(secs)||secs<0){const close=Number(d.kalshi_market_close),now=Number(d.server_time);secs=close>0&&now>0?Math.max(0,Math.floor(close-now)):0;}
-                    const mm=Math.floor(secs/60),ss=secs%60;document.getElementById('close').textContent='CIERRE '+String(mm).padStart(2,'0')+':'+String(ss).padStart(2,'0');
+                                        let secs=Number(d.seconds_to_close??d.countdown);if(!Number.isFinite(secs)||secs<0){const close=Number(d.kalshi_market_close),now=Number(d.server_time);secs=close>0&&now>0?Math.max(0,Math.floor(close-now)):0;}
+                    const mm=Math.floor(secs/60),ss=secs%60;document.getElementById('close').textContent='TIEMPO '+String(mm).padStart(2,'0')+':'+String(ss).padStart(2,'0');
                   }catch(e){document.getElementById('trend').textContent='CONECTANDO…';}
                 }refresh();setInterval(refresh,1000);
                 </script></body></html>
