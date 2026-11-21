@@ -5034,10 +5034,10 @@ function handleRadarAlert(data){
     const visibleKind = isExit ? "exit" : isNewEntry ? "entry" :
         isHold ? "hold" : isPrealert ? "prealert" : "neutral";
     state.className = "radar-alert-state " + visibleKind;
-    state.textContent = isExit ? "SALIDA" :
-        isNewEntry ? "PUEDES ENTRAR" :
+    state.textContent = isExit ? "SALIDA · TENDENCIA PERDIENDO FUERZA" :
+        isNewEntry ? "ENTRADA CONFIRMADA · " + (data.entry_direction || data.direction || "") :
         isHold ? "MANTENER · " + (data.entry_direction || data.direction || "") :
-        isPrealert ? "PREALERTA · SIN ENTRADA" :
+        isPrealert ? "PREPARANDO ENTRADA · " + (data.short_direction || data.direction || "") :
         isDirectionChange ? "CAMBIO DE DIRECCIÓN · OBSERVAR" : "OBSERVAR";
     panel.classList.toggle("has-event", isExit || isNewEntry || isPrealert || isDirectionChange);
 
@@ -5051,7 +5051,7 @@ function handleRadarAlert(data){
     });
 
     message.textContent = alertData.message || (
-        isNewEntry ? "PUEDES ENTRAR · " + (data.entry_direction || data.direction || "") :
+        isNewEntry ? "ENTRADA CONFIRMADA · " + (data.entry_direction || data.direction || "") :
         isHold ? "La entrada sigue confirmada. No es una nueva entrada." :
         isPrealert ? "Hay una posible señal, pero todavía no está confirmada." :
         isExit ? "La señal perdió confirmación. Revisa la salida." :
@@ -5079,8 +5079,9 @@ function handleRadarAlert(data){
         }
     }
     if(radarAlertsEnabled && "Notification" in window && Notification.permission === "granted"){
-        const title = isExit ? "BTC Radar · SALIDA" :
-            eventType === "MANTENER" ? "BTC Radar · MANTENER" : "BTC Radar · ENTRADA";
+        const title = isExit ? "BTC Radar · TENDENCIA PERDIENDO FUERZA" :
+            eventType === "PREALERTA" ? "BTC Radar · PREPARANDO ENTRADA" :
+            eventType === "MANTENER" ? "BTC Radar · MANTENER" : "BTC Radar · ENTRADA CONFIRMADA";
         const options = {
             body: (alertData.message || "") + (alertData.detail ? "\n" + alertData.detail : ""),
             tag: eventKey,
