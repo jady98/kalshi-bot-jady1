@@ -178,7 +178,7 @@ class RadarService : Service() {
                 .barline{display:flex;height:11px;border-radius:8px;overflow:hidden;margin-top:5px;background:#273449}
                 #bull{width:50%;background:#00d995}#bear{width:50%;background:#ff536b}
                 .reason{font-size:8px;line-height:1.2;color:#c1d0e2;margin-top:6px;white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;min-height:10px}
-                .flow{display:flex;justify-content:space-between;align-items:center;margin-top:8px;padding-top:6px;border-top:1px solid #29415b;font-size:8px;font-weight:700}.flow .buy{color:#36D99A}.flow .sell{color:#FF7185}.flowbar{display:flex;height:7px;overflow:hidden;border-radius:8px;background:#273449;margin-top:5px}.flowbuy{background:#25D987;width:50%}.flowsell{background:#F05269;width:50%}.chartbox,.accuracybox{background:#132237;border:1px solid #29415b;border-radius:10px;padding:8px 9px}.charthead,.accuracyhead{display:flex;justify-content:space-between;align-items:center;font-size:8px;color:#9db2c9;font-weight:800;letter-spacing:.4px}.chartbox svg{display:block;width:100%;height:86px;margin-top:5px}.accuracyvalues{display:flex;justify-content:space-between;align-items:center;margin-top:6px;font-size:9px;font-weight:800}.accuracyvalues b{font-size:17px;color:#fff}.good{color:#55e0a6}.bad{color:#ff7c8d}.accuracybasis{font-size:7px;color:#91a8c2;margin-top:4px}
+                .flow{display:flex;justify-content:space-between;align-items:center;margin-top:8px;padding-top:6px;border-top:1px solid #29415b;font-size:8px;font-weight:700}.flow .buy{color:#36D99A}.flow .sell{color:#FF7185}.flowbar{display:flex;height:7px;overflow:hidden;border-radius:8px;background:#273449;margin-top:5px}.flowbuy{background:#25D987;width:50%}.flowsell{background:#F05269;width:50%}
                 
                 </style></head><body><div class="wrap neutral" id="panel">
                 <div class="prices">
@@ -196,13 +196,9 @@ class RadarService : Service() {
                   <div class="flow"><span class="buy" id="buyers">COMPRADORES —</span><span class="sell" id="sellers">VENDEDORES —</span></div>
                   <div class="flowbar"><div class="flowbuy" id="flowBuy"></div><div class="flowsell" id="flowSell"></div></div>
                 </div>
-                <div class="chartbox"><div class="charthead"><span>GRÁFICA BTC · 1 MIN</span><span>EMA 9 / EMA 21</span></div><svg id="miniChart" viewBox="0 0 320 86" preserveAspectRatio="none" aria-label="Velas BTC"></svg></div>
-                <div class="accuracybox"><div class="accuracyhead"><span>RESULTADOS OFICIALES</span><span id="accuracyPct">--</span></div><div class="accuracyvalues"><span class="good">ACIERTOS <b id="accuracyWins">--</b></span><span class="bad">ERRORES <b id="accuracyLosses">--</b></span></div><div class="accuracybasis" id="accuracyBasis">Evaluación con resultado oficial de Kalshi al cierre</div></div>
+                
                 </div><script>
                 const money=v=>Number.isFinite(Number(v))&&Number(v)>0?'$'+Number(v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}):'--';
-                function ema(values,period){if(!values.length)return [];const a=2/(period+1);let v=values[0];return values.map((x,i)=>{v=i===0?x:a*x+(1-a)*v;return v;});}
-                function drawMiniChart(rows){const svg=document.getElementById('miniChart');if(!svg)return;const list=Array.isArray(rows)?rows.filter(x=>x&&Number(x.open)>0&&Number(x.high)>0&&Number(x.low)>0&&Number(x.close)>0).slice(-24):[];if(list.length<2){svg.innerHTML='';return;}const lo=Math.min.apply(null,list.map(x=>Number(x.low)));const hi=Math.max.apply(null,list.map(x=>Number(x.high)));const span=Math.max(hi-lo,0.01);const y=v=>78-((v-lo)/span)*68;const step=320/list.length;let out='';for(let g=1;g<4;g++){const gy=8+g*17;out+='<line x1="0" y1="'+gy+'" x2="320" y2="'+gy+'" stroke="#354052" stroke-width=".6"/>';}const closes=list.map(x=>Number(x.close));const e9=ema(closes,9),e21=ema(closes,21);let p9='',p21='';list.forEach((x,i)=>{const cx=(i+.5)*step;const o=Number(x.open),h=Number(x.high),l=Number(x.low),cl=Number(x.close),up=cl>=o,col=up?'#28D88A':'#F05B70';const top=Math.min(y(o),y(cl)),height=Math.max(2,Math.abs(y(o)-y(cl)));out+='<line x1="'+cx+'" y1="'+y(h)+'" x2="'+cx+'" y2="'+y(l)+'" stroke="'+col+'" stroke-width="1"/><rect x="'+(cx-step*.28)+'" y="'+top+'" width="'+(step*.56)+'" height="'+height+'" rx=".7" fill="'+col+'"/>';p9+=(i?' ':'')+cx+','+y(e9[i]);p21+=(i?' ':'')+cx+','+y(e21[i]);});out+='<polyline points="'+p9+'" fill="none" stroke="#B98AFF" stroke-width="1.4"/><polyline points="'+p21+'" fill="none" stroke="#45A9FF" stroke-width="1.4"/>';svg.innerHTML=out;}
-                let statsLoaded=false;async function refreshStats(){try{const r=await fetch('/stats?t='+Date.now(),{cache:'no-store'});if(!r.ok)throw Error('stats');const s=await r.json();const a=s.official_market_accuracy&&s.official_market_accuracy.kalshi_api?s.official_market_accuracy.kalshi_api:null;if(!a)throw Error('accuracy');document.getElementById('accuracyWins').textContent=a.correct??0;document.getElementById('accuracyLosses').textContent=a.incorrect??0;document.getElementById('accuracyPct').textContent=a.accuracy_pct==null?'--':Number(a.accuracy_pct).toFixed(1)+'%';document.getElementById('accuracyBasis').textContent='Solo contratos liquidados por resultado oficial de Kalshi';statsLoaded=true;}catch(e){if(!statsLoaded)document.getElementById('accuracyBasis').textContent='Estadística oficial no disponible todavía';}}
                 async function refresh(){
                   try{
                     const r=await fetch('/api?t='+Date.now(),{cache:'no-store'});if(!r.ok)throw Error('api');const d=await r.json();
@@ -211,7 +207,7 @@ class RadarService : Service() {
                     document.getElementById('prediction').textContent=money(d.predicted_price);
                     document.getElementById('bull').style.width=up+'%';document.getElementById('bear').style.width=down+'%';
                     document.getElementById('up').textContent='ALCISTA '+(valid?up.toFixed(0)+'%':'--');document.getElementById('down').textContent='BAJISTA '+(valid?down.toFixed(0)+'%':'--');
-                    const buyRaw=d.buyers_pct??d.buyer_pct??d.buy_volume_pct;const sellRaw=d.sellers_pct??d.seller_pct??d.sell_volume_pct;const buy=Number(buyRaw),sell=Number(sellRaw);const flowValid=buyRaw!=null&&sellRaw!=null&&Number.isFinite(buy)&&Number.isFinite(sell)&&buy>=0&&sell>=0&&(buy+sell)>0;document.getElementById('buyers').textContent=flowValid?'COMPRADORES '+buy.toFixed(0)+'%':'COMPRADORES —';document.getElementById('sellers').textContent=flowValid?'VENDEDORES '+sell.toFixed(0)+'%':'VENDEDORES —';document.getElementById('flowBuy').style.width=(flowValid?buy:50)+'%';document.getElementById('flowSell').style.width=(flowValid?sell:50)+'%';drawMiniChart(d.coinbase_candles||[]);
+                    const buyRaw=d.buyers_pct??d.buyer_pct??d.buy_volume_pct;const sellRaw=d.sellers_pct??d.seller_pct??d.sell_volume_pct;const buy=Number(buyRaw),sell=Number(sellRaw);const flowValid=buyRaw!=null&&sellRaw!=null&&Number.isFinite(buy)&&Number.isFinite(sell)&&buy>=0&&sell>=0&&(buy+sell)>0;document.getElementById('buyers').textContent=flowValid?'COMPRADORES '+buy.toFixed(0)+'%':'COMPRADORES —';document.getElementById('sellers').textContent=flowValid?'VENDEDORES '+sell.toFixed(0)+'%':'VENDEDORES —';document.getElementById('flowBuy').style.width=(flowValid?buy:50)+'%';document.getElementById('flowSell').style.width=(flowValid?sell:50)+'%';
                     let dir=String(d.direction||'').toUpperCase();if(dir!=='ALCISTA'&&dir!=='BAJISTA')dir=up>=55?'ALCISTA':up<=45?'BAJISTA':'INDECISA';
                     const emaUp=d.ema9!=null&&d.ema21!=null&&Number(d.ema9)>Number(d.ema21);const emaDown=d.ema9!=null&&d.ema21!=null&&Number(d.ema9)<Number(d.ema21);const mom=Number(d.momentum_pct);const rsi=d.rsi==null?null:Number(d.rsi);const base=Number(d.brti_price??d.coinbase_price);const delta=Number(d.predicted_price)>0&&base>0?((Number(d.predicted_price)/base-1)*100):null;const factors=[];if(emaUp)factors.push('EMA 9 sobre 21');else if(emaDown)factors.push('EMA 9 bajo 21');if(Number.isFinite(mom))factors.push('impulso '+(mom>=0?'+':'')+mom.toFixed(3)+'%');if(rsi!==null&&Number.isFinite(rsi))factors.push('RSI '+rsi.toFixed(0));if(d.pattern)factors.push(String(d.pattern).replace(/[<>]/g,'').slice(0,30));const outlook=dir;const projection=delta===null?'':'; proyección '+(delta>=0?'+':'')+delta.toFixed(2)+'%';const caution=(emaUp&&mom<0)||(emaDown&&mom>0)?' · señales mixtas':'';const note=factors.slice(0,2).join(' y ')||'analizando señales';document.getElementById('direction').textContent=outlook;document.getElementById('direction').style.color=dir==='ALCISTA'?'#36d99a':dir==='BAJISTA'?'#ff7185':'#f3c969';document.getElementById('why').textContent=note+caution+'.';
                     
@@ -219,7 +215,7 @@ class RadarService : Service() {
                                         let secs=Number(d.seconds_to_close??d.countdown);if(!Number.isFinite(secs)||secs<0){const close=Number(d.kalshi_market_close),now=Number(d.server_time);secs=close>0&&now>0?Math.max(0,Math.floor(close-now)):0;}
                     const mm=Math.floor(secs/60),ss=secs%60;document.getElementById('close').textContent='TIEMPO '+String(mm).padStart(2,'0')+':'+String(ss).padStart(2,'0');
                   }catch(e){document.getElementById('direction').textContent='CONECTANDO';}
-                }refresh();refreshStats();setInterval(refresh,1000);setInterval(refreshStats,15000);
+                }refresh();setInterval(refresh,1000);
                 </script></body></html>
                 """.trimIndent(), "text/html", "UTF-8", null)
         }
@@ -239,12 +235,12 @@ class RadarService : Service() {
         }
         topBar.addView(title, LinearLayout.LayoutParams(0, -1, 1f))
         val type = if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE
-        val lp = WindowManager.LayoutParams(dp(340), dp(390), type,
+        val lp = WindowManager.LayoutParams(dp(340), dp(300), type,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, PixelFormat.TRANSLUCENT
         ).apply { gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL; y = dp(70) }
         fun resizePanel(delta: Int) {
             lp.width = (lp.width + dp(delta)).coerceIn(dp(250), dp(440))
-            lp.height = (lp.height + dp((delta * 0.45).toInt())).coerceIn(dp(300), dp(460))
+            lp.height = (lp.height + dp((delta * 0.45).toInt())).coerceIn(dp(250), dp(380))
             wm.updateViewLayout(root, lp)
         }
         val close = TextView(this).apply {
