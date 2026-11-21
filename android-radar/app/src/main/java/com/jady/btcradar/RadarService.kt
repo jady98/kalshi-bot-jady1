@@ -171,8 +171,7 @@ class RadarService : Service() {
                 .probLabel{font-size:8px;color:#829bb5;letter-spacing:.6px;margin-top:8px}
                 .perc{display:flex;justify-content:space-between;font-size:10px;font-weight:700;margin-top:3px}
                 #up{color:#00e6a0}#down{color:#ff7185}
-                .reason{font-size:9px;line-height:1.35;color:#c1d0e2;margin-top:6px;white-space:normal}
-                .reason b{color:#8fcaff}
+                .reason{font-size:9px;line-height:1.25;color:#c1d0e2;margin-top:6px;white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;min-height:22px}
                 .bottom{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:7px;font-size:10px}
                 #trend{font-weight:800;white-space:nowrap}#close{color:#9db2c9;white-space:nowrap}
                 .bull #trend{color:#00e6a0}.bear #trend{color:#ff7185}.neutral #trend{color:#e8c66d}
@@ -194,7 +193,7 @@ class RadarService : Service() {
                     document.getElementById('prediction').textContent=money(d.predicted_price);
                     document.getElementById('bull').style.width=up+'%';document.getElementById('bear').style.width=down+'%';
                     document.getElementById('up').textContent='ALCISTA '+(valid?up.toFixed(0)+'%':'--');document.getElementById('down').textContent='BAJISTA '+(valid?down.toFixed(0)+'%':'--');
-                    const emaUp=d.ema9!=null&&d.ema21!=null&&Number(d.ema9)>Number(d.ema21);const emaDown=d.ema9!=null&&d.ema21!=null&&Number(d.ema9)<Number(d.ema21);const mom=Number(d.momentum_pct);const rsi=d.rsi==null?'RSI sin datos':'RSI '+Number(d.rsi).toFixed(0);const pattern=String(d.pattern||'estructura sin confirmar');const evidence=[emaUp?'EMA 9 sobre 21':emaDown?'EMA 9 bajo 21':'EMA sin cruce claro',Number.isFinite(mom)?'momento '+(mom>=0?'+':'')+mom.toFixed(3)+'%':'momento sin datos',rsi,pattern].slice(0,3);document.getElementById('why').innerHTML='<b>POR QUÉ:</b> '+evidence.join(' · ')+(d.guidance_note?' <br><b>CONFIRMACIÓN:</b> '+String(d.guidance_note).replace(/[<>]/g,'').slice(0,135):'');
+                    const emaUp=d.ema9!=null&&d.ema21!=null&&Number(d.ema9)>Number(d.ema21);const emaDown=d.ema9!=null&&d.ema21!=null&&Number(d.ema9)<Number(d.ema21);const mom=Number(d.momentum_pct);const rsi=d.rsi==null?null:Number(d.rsi);const delta=Number(d.predicted_price)>0&&Number(d.brti_price??d.coinbase_price)>0?((Number(d.predicted_price)/Number(d.brti_price??d.coinbase_price)-1)*100):null;const factors=[];if(emaUp)factors.push('EMA 9 sobre 21');else if(emaDown)factors.push('EMA 9 bajo 21');if(Number.isFinite(mom))factors.push('impulso '+(mom>=0?'+':'')+mom.toFixed(3)+'%');if(rsi!==null&&Number.isFinite(rsi))factors.push('RSI '+rsi.toFixed(0));if(d.pattern)factors.push(String(d.pattern).replace(/[<>]/g,'').slice(0,35));const outlook=dir==='ALCISTA'?'ALCISTA':dir==='BAJISTA'?'BAJISTA':'SIN VENTAJA CLARA';const projection=delta===null?'proyección sin confirmar':'cierre proyectado '+(delta>=0?'+':'')+delta.toFixed(2)+'%';const caution=(emaUp&&mom<0)||(emaDown&&mom>0)?' · señales mezcladas':'';const note=factors.slice(0,2).join(' y ')||'faltan datos técnicos';document.getElementById('why').textContent='PISTA DEL RADAR: '+outlook+' por '+note+'; '+projection+caution+'.';
                     let dir=String(d.direction||'').toUpperCase();if(dir!=='ALCISTA'&&dir!=='BAJISTA')dir=up>=55?'ALCISTA':up<=45?'BAJISTA':'INDECISA';
                     const box=document.getElementById('panel');box.className='wrap '+(dir==='ALCISTA'?'bull':dir==='BAJISTA'?'bear':'neutral');
                     document.getElementById('trend').textContent='TENDENCIA '+dir;
