@@ -2726,6 +2726,13 @@ def build_forward_guidance(
     ) or (
         flow_available and direction == "BAJISTA" and sellers_value >= 52.5
     )
+    # Si el flujo agresor favorece claramente el lado opuesto a la tendencia
+    # técnica, mostrar conflicto y no emitir prealerta/entrada.
+    flow_conflict = (
+        flow_available and direction == "ALCISTA" and sellers_value >= 52.5
+    ) or (
+        flow_available and direction == "BAJISTA" and buyers_value >= 52.5
+    )
 
     stage = "OBSERVAR"
     note = "Sin coincidencia suficiente todavía. Espera confirmación en 1 y 3 minutos."
@@ -2747,6 +2754,15 @@ def build_forward_guidance(
     elif opposite_1m or opposite_3m:
         stage = "OBSERVAR · MOVIMIENTOS EN CONFLICTO"
         note = "El movimiento corto contradice la dirección principal. Espera que se estabilice."
+    elif flow_conflict:
+        stage = "TENDENCIA EN CONFLICTO"
+        opposite_side = "vendedores" if direction == "ALCISTA" else "compradores"
+        note = (
+            "La lectura técnica apunta " + direction + ", pero el flujo real de 60 segundos "
+            + "favorece a los " + opposite_side + " ("
+            + str(round(sellers_value if direction == "ALCISTA" else buyers_value, 1))
+            + "%). No se confirma entrada mientras ambas lecturas estén enfrentadas."
+        )
     elif side_probability >= 55 and strength >= 20 and align_1m:
         stage = "PREALERTA"
         note = (
@@ -2820,6 +2836,7 @@ def build_forward_guidance(
         "guidance_ema_aligned": ema_aligned,
         "guidance_candles_aligned": candles_aligned,
         "guidance_flow_aligned": flow_aligned,
+        "guidance_flow_conflict": flow_conflict,
         "guidance_closed_candles": len(last_two_candles),
         "guidance_buyers_pct": buyers_value,
         "guidance_sellers_pct": sellers_value,
@@ -5031,15 +5048,17 @@ function handleRadarAlert(data){
     message.hidden = false;
     detail.hidden = false;
 
+    const isConflict = !!data.guidance_flow_conflict;
     const visibleKind = isExit ? "exit" : isNewEntry ? "entry" :
-        isHold ? "hold" : isPrealert ? "prealert" : "neutral";
+        isHold ? "hold" : (isPrealert || isConflict) ? "prealert" : "neutral";
     state.className = "radar-alert-state " + visibleKind;
     state.textContent = isExit ? "SALIDA · TENDENCIA PERDIENDO FUERZA" :
         isNewEntry ? "ENTRADA CONFIRMADA · " + (data.entry_direction || data.direction || "") :
         isHold ? "MANTENER · " + (data.entry_direction || data.direction || "") :
+        isConflict ? "TENDENCIA EN CONFLICTO · OBSERVAR" :
         isPrealert ? "PREPARANDO ENTRADA · " + (data.short_direction || data.direction || "") :
         isDirectionChange ? "CAMBIO DE DIRECCIÓN · OBSERVAR" : "OBSERVAR";
-    panel.classList.toggle("has-event", isExit || isNewEntry || isPrealert || isDirectionChange);
+    panel.classList.toggle("has-event", isExit || isNewEntry || isPrealert || isDirectionChange || isConflict);
 
     // Entrada y mantener permanecen iluminadas mientras la entrada siga vigente.
     // Al confirmar entrada, mantener encendidos ENTRAR y MANTENER durante toda la posición.
@@ -5053,6 +5072,7 @@ function handleRadarAlert(data){
     message.textContent = alertData.message || (
         isNewEntry ? "ENTRADA CONFIRMADA · " + (data.entry_direction || data.direction || "") :
         isHold ? "La entrada sigue confirmada. No es una nueva entrada." :
+        isConflict ? "La tendencia técnica y el flujo de compradores/vendedores se contradicen. No hay entrada nueva." :
         isPrealert ? "Hay una posible señal, pero todavía no está confirmada." :
         isExit ? "La señal perdió confirmación. Revisa la salida." :
         isDirectionChange ? "La dirección cambió. Un cambio de dirección por sí solo no confirma una entrada." :
@@ -5179,6 +5199,7 @@ function updateRadar(d){
     updateCurrentPriceAxisTag();
 
     const direction=d.direction || "RECOPILANDO";
+    const flowConflict = !!d.guidance_flow_conflict;
     window.currentRadarTicker = String(d.kalshi_market_ticker || "RADAR-" + new Date().toISOString().slice(0,10));
     renderRadarDirectionMark(window.currentRadarTicker);
     if(direction === "ALCISTA" || direction === "BAJISTA"){
@@ -5199,7 +5220,7 @@ function updateRadar(d){
     const predictedElement=$("predictedPrice");
     predictedElement.textContent=money(d.predicted_price);
     predictedElement.className="price predicted "+(
-        directionTransition ? "uncertain" :
+        (directionTransition || flowConflict) ? "uncertain" :
         direction==="ALCISTA" ? "bullish" :
         direction==="BAJISTA" ? "bearish" :
         "uncertain"
@@ -5237,13 +5258,14 @@ function updateRadar(d){
         : "BRTI actualizado hace " + d.brti_age + " s";
 
 
-    $("direction").textContent=directionTransition
-        ? "TRANSICIÓN · OBSERVAR"
+    $("direction").textContent=flowConflict
+        ? "CONFLICTO · " + direction
+        : directionTransition ? "TRANSICIÓN · OBSERVAR"
         : direction;
 
     $("direction").className="signal "+
         (
-            directionTransition ? "yellow" :
+            (directionTransition || flowConflict) ? "yellow" :
             direction==="ALCISTA" ? "green":
             direction==="BAJISTA" ? "red":
             "yellow"
@@ -5276,6 +5298,7 @@ function updateRadar(d){
         Number(d.technical_strength ?? 0)+"%";
 
     $("signalStage").textContent =
+        (flowConflict ? "TENDENCIA EN CONFLICTO · " : "") +
         (d.signal_stage || (
             direction==="RECOPILANDO"
             ? "Esperando historial BRTI suficiente"
