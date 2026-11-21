@@ -135,7 +135,20 @@ class RadarService : Service() {
         panel = box
     }
 
-    override fun onStartCommand(i: Intent?, f: Int, id: Int) = START_STICKY
+    override fun onStartCommand(i: Intent?, f: Int, id: Int): Int {
+        // The service may already be running from notification monitoring when
+        // the user grants overlay permission. Re-check here so the bubble appears
+        // without requiring an app reinstall or a process restart.
+        if (Settings.canDrawOverlays(this) && panel == null) {
+            try {
+                show()
+            } catch (_: Exception) {
+                // Keep the foreground monitoring service alive even if Android
+                // temporarily rejects the overlay window.
+            }
+        }
+        return START_STICKY
+    }
     override fun onDestroy() {
         handler.removeCallbacks(task)
         try { panel?.let { wm.removeView(it) } } catch (_: Exception) {}
