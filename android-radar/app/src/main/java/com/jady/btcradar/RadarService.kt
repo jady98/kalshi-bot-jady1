@@ -72,7 +72,7 @@ class RadarService : Service() {
     private fun notifyRadarEvent(d: Snapshot) {
         val now = System.currentTimeMillis() / 1000L
         val fresh = d.alertTimestamp > 0L && now >= d.alertTimestamp && now - d.alertTimestamp <= 300L
-        val type = d.alertType.uppercase()
+        val type = d.alertType.orEmpty().uppercase()
         val event = when {
             fresh && type == "CAMBIO_DIRECCION" -> "CAMBIO DE TENDENCIA"
             fresh && type == "ENTRADA" -> "ENTRADA"
