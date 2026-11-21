@@ -172,7 +172,10 @@ class RadarService : Service() {
         panel = box
     }
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int) = START_STICKY
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (panel == null && Settings.canDrawOverlays(this)) show()
+        return START_STICKY
+    }
 
     override fun onDestroy() {
         handler.removeCallbacks(task)
