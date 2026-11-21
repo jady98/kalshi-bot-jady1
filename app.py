@@ -5054,8 +5054,8 @@ function handleRadarAlert(data){
     state.className = "radar-alert-state " + visibleKind;
     state.textContent = isExit ? "SALIDA · TENDENCIA PERDIENDO FUERZA" :
         isNewEntry ? "ENTRADA CONFIRMADA · " + (data.entry_direction || data.direction || "") :
-        isHold ? "MANTENER · " + (data.entry_direction || data.direction || "") :
         isConflict ? "TENDENCIA EN CONFLICTO · OBSERVAR" :
+        isHold ? "MANTENER · " + (data.entry_direction || data.direction || "") :
         isPrealert ? "PREPARANDO ENTRADA · " + (data.short_direction || data.direction || "") :
         isDirectionChange ? "CAMBIO DE DIRECCIÓN · OBSERVAR" : "OBSERVAR";
     panel.classList.toggle("has-event", isExit || isNewEntry || isPrealert || isDirectionChange || isConflict);
@@ -5071,8 +5071,8 @@ function handleRadarAlert(data){
 
     message.textContent = alertData.message || (
         isNewEntry ? "ENTRADA CONFIRMADA · " + (data.entry_direction || data.direction || "") :
-        isHold ? "La entrada sigue confirmada. No es una nueva entrada." :
         isConflict ? "La tendencia técnica y el flujo de compradores/vendedores se contradicen. No hay entrada nueva." :
+        isHold ? "La entrada sigue confirmada. No es una nueva entrada." :
         isPrealert ? "Hay una posible señal, pero todavía no está confirmada." :
         isExit ? "La señal perdió confirmación. Revisa la salida." :
         isDirectionChange ? "La dirección cambió. Un cambio de dirección por sí solo no confirma una entrada." :
