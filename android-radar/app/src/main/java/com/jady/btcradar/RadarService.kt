@@ -15,109 +15,32 @@ class RadarService : Service() {
     private lateinit var wm: WindowManager
     private var panel: LinearLayout? = null
     private val handler = Handler(Looper.getMainLooper())
-    private var lastAlertKey = ""
-
-    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
-
-    private fun rounded(color: Int, radius: Int, stroke: Int = 0): GradientDrawable =
-        GradientDrawable().apply {
-            setColor(color)
-            cornerRadius = dp(radius).toFloat()
-            if (stroke != 0) setStroke(dp(1), stroke)
-        }
-
-    private fun label(value: String, size: Float, color: Int, bold: Boolean = false): TextView =
-        TextView(this).apply {
-            text = value
-            textSize = size
-            setTextColor(color)
-            if (bold) setTypeface(typeface, Typeface.BOLD)
-            includeFontPadding = false
-        }
-
-    private fun addSpace(parent: LinearLayout, height: Int) {
-        parent.addView(View(this), LinearLayout.LayoutParams(1, dp(height)))
-    }
-
-    private fun makeBar(up: Int): LinearLayout {
-        val bar = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            tag = "bar"
-            background = rounded(Color.rgb(40, 48, 61), 8)
-            clipToOutline = true
-        }
-        val bullish = View(this).apply {
-            tag = "green"
-            setBackgroundColor(Color.rgb(0, 220, 145))
-        }
-        val bearish = View(this).apply {
-            tag = "red"
-            setBackgroundColor(Color.rgb(255, 65, 91))
-        }
-        bar.addView(bullish, LinearLayout.LayoutParams(0, dp(9), up.coerceAtLeast(1).toFloat()))
-        bar.addView(bearish, LinearLayout.LayoutParams(0, dp(9), (100 - up).coerceAtLeast(1).toFloat()))
-        return bar
-    }
-
-    private fun updateBar(up: Int) {
-        val bar = panel?.findViewWithTag<LinearLayout>("bar") ?: return
-        bar.removeAllViews()
-        bar.addView(View(this).apply { setBackgroundColor(Color.rgb(0, 220, 145)) },
-            LinearLayout.LayoutParams(0, dp(9), up.coerceAtLeast(1).toFloat()))
-        bar.addView(View(this).apply { setBackgroundColor(Color.rgb(255, 65, 91)) },
-            LinearLayout.LayoutParams(0, dp(9), (100 - up).coerceAtLeast(1).toFloat()))
-    }
-
+    private var lastSignal = ""
     private val task = object : Runnable {
         override fun run() {
             Thread {
                 try {
                     val d = RadarData.load()
                     handler.post {
-                        panel?.findViewWithTag<TextView>("price")?.text = "$" + "%,.2f".format(d.price)
-                        panel?.findViewWithTag<TextView>("up")?.text = "ALCISTA  " + d.up + "%"
-                        panel?.findViewWithTag<TextView>("down")?.text = "BAJISTA  " + (100 - d.up) + "%"
-                        panel?.findViewWithTag<TextView>("close")?.text = "$" + "%,.2f".format(d.prediction)
-                        panel?.findViewWithTag<TextView>("timer")?.text = d.time
-                        panel?.findViewWithTag<TextView>("direction")?.text = d.direction.uppercase()
-                        updateBar(d.up)
-
-                        val eventType = d.alertType.uppercase()
-                        val fresh = d.alertKey.isNotBlank() &&
-                            d.alertKey != "||0" &&
-                            d.alertKey != lastAlertKey &&
-                            eventType in setOf("PREALERTA", "ENTRADA", "MANTENER", "SALIDA", "PROTEGER", "CAMBIO_DIRECCION")
-                        if (fresh) {
-                            val title = when (eventType) {
-                                "PREALERTA" -> "BTC Radar · PREALERTA"
-                                "ENTRADA" -> "BTC Radar · SEÑAL CONFIRMADA"
-                                "MANTENER" -> "BTC Radar · SEÑAL ACTIVA"
-                                "SALIDA", "PROTEGER" -> "BTC Radar · AVISO DE SALIDA"
-                                else -> "BTC Radar · CAMBIO DE DIRECCIÓN"
-                            }
-                            val body = d.alertMessage.ifBlank {
-                                "Dirección: " + d.direction + " · Alcista " + d.up + "%"
-                            }
-                            val openApp = PendingIntent.getActivity(
-                                this@RadarService, 10,
-                                Intent(this@RadarService, MainActivity::class.java),
-                                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-                            )
-                            val notification = Notification.Builder(this@RadarService, "btc")
+                        panel?.findViewWithTag<TextView>("p")?.text = "BTC  $" + "%,.0f".format(d.price)
+                        panel?.findViewWithTag<TextView>("t")?.text = "ALCISTA  ${d.up}%     BAJISTA  ${100-d.up}%"
+                        panel?.findViewWithTag<ProgressBar>("tb")?.progress = d.up
+                        panel?.findViewWithTag<TextView>("b")?.text = "COMPRADORES  ${d.buyers}%     VENDEDORES  ${100-d.buyers}%"
+                        panel?.findViewWithTag<ProgressBar>("bb")?.progress = d.buyers
+                        panel?.findViewWithTag<TextView>("c")?.text = "CIERRE EN 15 MIN\n$" + "%,.2f".format(d.prediction) + "   •   " + d.time
+                        val signal = if (d.up >= 75) "ALCISTA" else if (d.up <= 25) "BAJISTA" else ""
+                        if (signal.isNotEmpty() && signal != lastSignal) {
+                            val n = Notification.Builder(this@RadarService, "btc")
                                 .setSmallIcon(android.R.drawable.ic_dialog_info)
-                                .setContentTitle(title)
-                                .setContentText(body.take(180))
-                                .setStyle(Notification.BigTextStyle().bigText(body))
-                                .setContentIntent(openApp)
-                                .setAutoCancel(true)
+                                .setContentTitle("BTC: $signal")
+                                .setContentText("Probabilidad estimada " + (if (signal == "ALCISTA") d.up else 100-d.up) + "%")
                                 .build()
-                            getSystemService(NotificationManager::class.java).notify(10, notification)
-                            lastAlertKey = d.alertKey
+                            getSystemService(NotificationManager::class.java).notify(9, n)
+                            lastSignal = signal
                         }
+                        if (signal.isEmpty()) lastSignal = ""
                     }
-                } catch (_: Exception) {
-                    // Mantiene la última lectura si Render no responde temporalmente.
-                }
+                } catch (_: Exception) {}
             }.start()
             handler.postDelayed(this, 5000)
         }
@@ -125,158 +48,100 @@ class RadarService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        val manager = getSystemService(NotificationManager::class.java)
-        if (Build.VERSION.SDK_INT >= 26) {
-            manager.createNotificationChannel(
-                NotificationChannel("btc", "Alertas BTC", NotificationManager.IMPORTANCE_HIGH)
-            )
-        }
-        val openApp = PendingIntent.getActivity(
-            this, 1, Intent(this, MainActivity::class.java),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-        val foreground = Notification.Builder(this, "btc")
-            .setSmallIcon(android.R.drawable.ic_dialog_info)
-            .setContentTitle("BTC Radar activo")
-            .setContentText("Vigilando las alertas de Render")
-            .setContentIntent(openApp)
-            .build()
-        startForeground(1, foreground)
+        val nm = getSystemService(NotificationManager::class.java)
+        if (Build.VERSION.SDK_INT >= 26) nm.createNotificationChannel(NotificationChannel("btc", "Alertas BTC", NotificationManager.IMPORTANCE_DEFAULT))
+        startForeground(1, Notification.Builder(this, "btc").setSmallIcon(android.R.drawable.ic_dialog_info).setContentTitle("BTC Radar activo").setContentText("Monitoreando BTC/USD").build())
         if (Settings.canDrawOverlays(this)) show()
         handler.post(task)
     }
 
-    private fun hidePanel() {
-        val current = panel ?: return
-        try { wm.removeView(current) } catch (_: Exception) {}
-        panel = null
-    }
+    private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
+    private fun rounded(color: Int, radius: Int = 18): GradientDrawable =
+        GradientDrawable().apply { setColor(color); cornerRadius = dp(radius).toFloat() }
+
+    private fun label(value: String, tagName: String, size: Float, color: Int = Color.WHITE): TextView =
+        TextView(this).apply {
+            text = value; tag = tagName; textSize = size; setTextColor(color)
+            setPadding(dp(3), dp(5), dp(3), dp(5))
+            if (size >= 16f) typeface = Typeface.create("sans-serif", Typeface.BOLD)
+        }
+
+    private fun bar(progressTag: String, green: Boolean): ProgressBar =
+        ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+            max = 100; progress = 50; tag = progressTag
+            progressDrawable = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = dp(8).toFloat()
+                setColor(if (green) Color.rgb(0, 220, 145) else Color.rgb(255, 72, 100))
+            }
+            progressTintList = android.content.res.ColorStateList.valueOf(if (green) Color.rgb(0, 220, 145) else Color.rgb(255, 72, 100))
+            progressBackgroundTintList = android.content.res.ColorStateList.valueOf(Color.rgb(47, 58, 73))
+            minimumHeight = dp(9)
+        }
 
     private fun show() {
         if (panel != null) return
         wm = getSystemService(WINDOW_SERVICE) as WindowManager
-
-        val card = LinearLayout(this).apply {
+        val box = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(15), dp(12), dp(15), dp(14))
-            background = rounded(Color.rgb(10, 17, 30), 18, Color.rgb(42, 65, 91))
+            setPadding(dp(14), dp(11), dp(14), dp(13))
+            background = GradientDrawable(
+                GradientDrawable.Orientation.TOP_BOTTOM,
+                intArrayOf(Color.rgb(20, 31, 48), Color.rgb(7, 12, 21))
+            ).apply {
+                cornerRadius = dp(20).toFloat()
+                setStroke(dp(1), Color.rgb(55, 93, 126))
+            }
             elevation = dp(12).toFloat()
         }
 
-        val header = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-        val title = label("BTC RADAR", 14f, Color.WHITE, true)
-        header.addView(title, LinearLayout.LayoutParams(0, dp(30), 1f))
+        val header = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        val title = label("BTC RADAR  •  EN VIVO", "h", 13f, Color.rgb(100, 205, 255))
+        header.addView(title, LinearLayout.LayoutParams(0, -2, 1f))
         val close = TextView(this).apply {
-            text = "×"
-            textSize = 25f
-            gravity = Gravity.CENTER
-            setTextColor(Color.WHITE)
-            background = rounded(Color.rgb(43, 54, 72), 30)
+            text = "×"; textSize = 27f; gravity = Gravity.CENTER; setTextColor(Color.WHITE)
+            background = rounded(Color.rgb(175, 43, 63), 30)
             contentDescription = "Cerrar ventana flotante"
-            setOnClickListener { hidePanel() }
         }
         header.addView(close, LinearLayout.LayoutParams(dp(34), dp(34)))
-        card.addView(header)
+        close.setOnClickListener { try { wm.removeView(box) } catch (_: Exception) {}; panel = null }
+        box.addView(header)
+        box.addView(label("BTC —", "p", 21f))
+        box.addView(label("ALCISTA  —%     BAJISTA  —%", "t", 13f))
+        box.addView(bar("tb", true), LinearLayout.LayoutParams(-1, dp(10)).apply { bottomMargin = dp(10) })
+        box.addView(label("COMPRADORES  —%     VENDEDORES  —%", "b", 11f, Color.rgb(190, 204, 220)))
+        box.addView(bar("bb", false), LinearLayout.LayoutParams(-1, dp(8)).apply { bottomMargin = dp(11) })
+        val closeInfo = label("CIERRE EN 15 MIN\n—", "c", 13f, Color.rgb(255, 213, 105))
+        closeInfo.background = rounded(Color.rgb(29, 39, 55), 12)
+        closeInfo.setPadding(dp(10), dp(8), dp(10), dp(8))
+        box.addView(closeInfo)
 
-        addSpace(card, 8)
-        card.addView(label("PRECIO ACTUAL", 10f, Color.rgb(145, 163, 185), true))
-        addSpace(card, 3)
-        card.addView(label("BTC —", 24f, Color.WHITE, true).apply { tag = "price" })
-        addSpace(card, 12)
-
-        val percentages = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-        percentages.addView(label("ALCISTA --%", 12f, Color.rgb(0, 230, 150), true).apply { tag = "up" },
-            LinearLayout.LayoutParams(0, dp(22), 1f))
-        percentages.addView(label("BAJISTA --%", 12f, Color.rgb(255, 82, 105), true).apply {
-            tag = "down"
-            gravity = Gravity.END
-        }, LinearLayout.LayoutParams(0, dp(22), 1f))
-        card.addView(percentages)
-        addSpace(card, 4)
-        card.addView(makeBar(50), LinearLayout.LayoutParams(-1, dp(9)))
-        addSpace(card, 13)
-
-        val closeRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            background = rounded(Color.rgb(20, 31, 48), 12)
-            setPadding(dp(11), dp(9), dp(11), dp(9))
-        }
-        val closeLabels = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        closeLabels.addView(label("PREDICCIÓN AL CIERRE", 9f, Color.rgb(145, 163, 185), true))
-        addSpace(closeLabels, 5)
-        closeLabels.addView(label("—", 17f, Color.WHITE, true).apply { tag = "close" })
-        closeRow.addView(closeLabels, LinearLayout.LayoutParams(0, -2, 1f))
-        val timerBox = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.END
-        }
-        timerBox.addView(label("CIERRE 15M", 9f, Color.rgb(145, 163, 185), true))
-        addSpace(timerBox, 5)
-        timerBox.addView(label("--:--", 17f, Color.rgb(255, 205, 75), true).apply { tag = "timer" })
-        closeRow.addView(timerBox)
-        card.addView(closeRow)
-        addSpace(card, 8)
-        card.addView(label("DIRECCIÓN: —", 10f, Color.rgb(177, 194, 214), true).apply { tag = "direction" })
-
-        val type = if (Build.VERSION.SDK_INT >= 26)
-            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-        else WindowManager.LayoutParams.TYPE_PHONE
-        val layout = WindowManager.LayoutParams(
+        val type = if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE
+        val lp = WindowManager.LayoutParams(
             dp(290), WindowManager.LayoutParams.WRAP_CONTENT, type,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
-            PixelFormat.TRANSLUCENT
-        ).apply {
-            gravity = Gravity.TOP or Gravity.END
-            x = dp(12)
-            y = dp(150)
-        }
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, PixelFormat.TRANSLUCENT
+        ).apply { gravity = Gravity.TOP or Gravity.END; x = dp(12); y = dp(150) }
 
-        header.setOnTouchListener(object : View.OnTouchListener {
-            var startX = 0f
-            var startY = 0f
-            var originalX = 0
-            var originalY = 0
-            override fun onTouch(view: View, event: MotionEvent): Boolean {
-                when (event.action) {
-                    MotionEvent.ACTION_DOWN -> {
-                        startX = event.rawX
-                        startY = event.rawY
-                        originalX = layout.x
-                        originalY = layout.y
-                        return true
-                    }
-                    MotionEvent.ACTION_MOVE -> {
-                        layout.x = (originalX + startX - event.rawX).toInt()
-                        layout.y = (originalY + event.rawY - startY).toInt()
-                        try { wm.updateViewLayout(card, layout) } catch (_: Exception) {}
-                        return true
-                    }
+        box.setOnTouchListener(object : View.OnTouchListener {
+            var sx = 0f; var sy = 0f; var ox = 0; var oy = 0
+            override fun onTouch(v: View, e: MotionEvent): Boolean {
+                when (e.action) {
+                    MotionEvent.ACTION_DOWN -> { sx=e.rawX; sy=e.rawY; ox=lp.x; oy=lp.y; return true }
+                    MotionEvent.ACTION_MOVE -> { lp.x=(ox+sx-e.rawX).toInt(); lp.y=(oy+e.rawY-sy).toInt(); wm.updateViewLayout(box,lp); return true }
                 }
                 return false
             }
         })
-
-        wm.addView(card, layout)
-        panel = card
+        wm.addView(box, lp)
+        panel = box
     }
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (panel == null && Settings.canDrawOverlays(this)) show()
-        return START_STICKY
-    }
-
+    override fun onStartCommand(i: Intent?, f: Int, id: Int) = START_STICKY
     override fun onDestroy() {
         handler.removeCallbacks(task)
-        hidePanel()
+        try { panel?.let { wm.removeView(it) } } catch (_: Exception) {}
+        panel = null
         super.onDestroy()
     }
-
-    override fun onBind(intent: Intent?): IBinder? = null
+    override fun onBind(i: Intent?): IBinder? = null
 }
