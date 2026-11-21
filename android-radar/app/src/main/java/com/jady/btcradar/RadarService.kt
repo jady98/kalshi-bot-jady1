@@ -10,6 +10,7 @@ import android.os.*
 import android.provider.Settings
 import android.view.*
 import android.widget.*
+import android.media.RingtoneManager
 import android.webkit.WebView
 import android.widget.FrameLayout
 import android.text.SpannableString
@@ -42,7 +43,7 @@ class RadarService : Service() {
                         colored.setSpan(ForegroundColorSpan(Color.rgb(255, 86, 112)), bearishStart, signalText.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
                         panel?.findViewWithTag<TextView>("updown")?.text = colored
                         panel?.findViewWithTag<ProgressBar>("trend")?.progress = d.up
-                        panel?.findViewWithTag<MiniChartView>("mini_chart")?.setCandles(d.candles)
+                        // Las velas se reservan para la pantalla principal; aquí se muestra la alerta.
                         panel?.findViewWithTag<TextView>("prediction")?.text = "$" + "%,.2f".format(d.prediction)
                         panel?.findViewWithTag<TextView>("timer")?.text = d.time
                         panel?.findViewWithTag<TextView>("position")?.text =
@@ -102,6 +103,7 @@ class RadarService : Service() {
                 .setAutoCancel(true)
                 .setContentIntent(PendingIntent.getActivity(this, 41, Intent(this, MainActivity::class.java), PendingIntent.FLAG_UPDATE_CURRENT or if (Build.VERSION.SDK_INT >= 23) PendingIntent.FLAG_IMMUTABLE else 0))
                 .build()
+            notification.defaults = Notification.DEFAULT_SOUND or Notification.DEFAULT_VIBRATE
             getSystemService(NotificationManager::class.java).notify(key.hashCode(), notification)
             prefs.edit().putString("last_event", key).apply()
             return
@@ -118,6 +120,7 @@ class RadarService : Service() {
                         .setAutoCancel(true)
                         .setContentIntent(PendingIntent.getActivity(this, 42, Intent(this, MainActivity::class.java), PendingIntent.FLAG_UPDATE_CURRENT or if (Build.VERSION.SDK_INT >= 23) PendingIntent.FLAG_IMMUTABLE else 0))
                         .build()
+                    notification.defaults = Notification.DEFAULT_SOUND or Notification.DEFAULT_VIBRATE
                     getSystemService(NotificationManager::class.java).notify(42, notification)
                     prefs.edit().putString("last_event", key).apply()
                 }
@@ -155,11 +158,36 @@ class RadarService : Service() {
                     val js = """
                         (function(){
                           if(document.getElementById('btc-floating-style')) return;
-                          const s=document.createElement('style'); s.id='btc-floating-style';
-                          s.textContent='html,body{margin:0!important;padding:0!important;background:#080b14!important}body{padding:44px 7px 8px!important}main{max-width:none!important;width:100%!important;margin:0!important}.header{margin:0 0 7px!important}.logo{font-size:15px!important}.status{font-size:7px!important}.grid{grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:5px!important;margin-bottom:6px!important}.grid .target-card{display:none!important}.grid .card{padding:7px!important;margin:0!important;border-radius:10px!important}.grid .price{font-size:17px!important;margin:4px 0!important}.grid .label{font-size:8px!important}.grid .small{font-size:7px!important}main>section.card:has(#direction){padding:8px!important;margin-bottom:6px!important}main>section.card:has(#direction) .section-title{font-size:9px!important}main>section.card:has(#direction) .signal{font-size:13px!important;margin:3px 0!important}main>section.card:has(#direction) .price{font-size:16px!important;margin:3px 0!important}.bar{display:flex!important;width:100%!important;height:12px!important;overflow:hidden!important;border-radius:8px!important;gap:0!important}.bar .bull{display:block!important;flex:0 0 auto!important;background:#00d995!important;min-width:0!important}.bar .bear{display:block!important;flex:0 0 auto!important;background:#ff536b!important;min-width:0!important}main>section.card:has(#chart){padding:7px!important;margin:0!important}main>section.card:has(#chart) .section-title{font-size:9px!important}#chart{height:245px!important;min-height:245px!important}.chart-wrap{height:245px!important;min-height:245px!important}main> :not(.header):not(.grid):not(section:has(#direction)):not(section:has(#chart)){display:none!important}.technical-card,.radar-alert-panel{display:none!important}';
-                          document.head.appendChild(s);
-                          setTimeout(()=>{window.dispatchEvent(new Event('resize'));},500);
-                          setTimeout(()=>window.dispatchEvent(new Event('resize')),1500);
+                          const style=document.createElement('style'); style.id='btc-floating-style';
+                          style.textContent='html,body{margin:0!important;padding:0!important;background:#080b14!important}body{padding:44px 8px 8px!important}main{max-width:none!important;width:100%!important;margin:0!important}.header{margin:0 0 7px!important}.logo{font-size:15px!important}.status{font-size:7px!important}.grid{grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:5px!important;margin-bottom:7px!important}.grid .target-card{display:none!important}.grid .card{padding:8px!important;margin:0!important;border-radius:10px!important}.grid .price{font-size:17px!important;margin:4px 0!important}.grid .label{font-size:8px!important}.grid .small{font-size:7px!important}.bar{display:flex!important;width:100%!important;height:12px!important;overflow:hidden!important;border-radius:8px!important;gap:0!important}.bar .bull{display:block!important;flex:0 0 auto!important;background:#00d995!important;min-width:0!important}.bar .bear{display:block!important;flex:0 0 auto!important;background:#ff536b!important;min-width:0!important}#chart,.chart-wrap,canvas,svg.chart{display:none!important}main>section:has(#chart){display:none!important}.technical-card,.radar-alert-panel{display:none!important}#btc-float-alert{display:block;margin:9px 0 0;padding:15px 12px;border-radius:13px;background:linear-gradient(145deg,#101f32,#0b1321);border:1px solid #294867;box-shadow:inset 0 1px 0 #ffffff18,0 5px 16px #0008;text-align:center}#btc-float-alert .alert-kicker{font-size:9px;letter-spacing:1.5px;color:#8caac5;font-weight:700}#btc-float-alert .alert-title{font-size:22px;font-weight:900;letter-spacing:.5px;margin:8px 0}#btc-float-alert .alert-sub{font-size:11px;color:#c2d2e2;line-height:1.4}#btc-float-alert.bull{border-color:#00a979}#btc-float-alert.bull .alert-title{color:#00e6a0;text-shadow:0 0 14px #00d99555}#btc-float-alert.bear{border-color:#d44760}#btc-float-alert.bear .alert-title{color:#ff637b;text-shadow:0 0 14px #ff526955}#btc-float-alert.neutral .alert-title{color:#e8c66d}';
+                          document.head.appendChild(style);
+                          const alert=document.createElement('div'); alert.id='btc-float-alert'; alert.className='neutral';
+                          alert.innerHTML='<div class="alert-kicker">SEÑAL DEL RADAR · EN VIVO</div><div class="alert-title">CONECTANDO…</div><div class="alert-sub">Leyendo tendencia de BTC</div>';
+                          const main=document.querySelector('main')||document.body;
+                          main.appendChild(alert);
+                          let previous='';
+                          async function updateSignal(){
+                            try{
+                              const response=await fetch('/api?t='+Date.now(),{cache:'no-store'});
+                              const d=await response.json();
+                              let direction=String(d.direction||'').toUpperCase();
+                              if(direction!=='ALCISTA'&&direction!=='BAJISTA'){
+                                const pct=Number(d.bullish_score??50);
+                                direction=pct>=55?'ALCISTA':pct<=45?'BAJISTA':'INDECISO';
+                              }
+                              const title=direction==='ALCISTA'?'TENDENCIA ALCISTA':direction==='BAJISTA'?'TENDENCIA BAJISTA':'TENDENCIA INDECISA';
+                              const detail=(d.alert&& (d.alert.message||d.alert.detail))||d.entry_stage||'La señal se actualiza automáticamente';
+                              alert.className=direction==='ALCISTA'?'bull':direction==='BAJISTA'?'bear':'neutral';
+                              alert.querySelector('.alert-title').textContent=title;
+                              alert.querySelector('.alert-sub').textContent=String(detail);
+                              if(previous && direction!==previous && direction!=='INDECISO'){
+                                alert.animate([{filter:'brightness(1)'},{filter:'brightness(1.8)'},{filter:'brightness(1)'}],{duration:900});
+                              }
+                              previous=direction;
+                            }catch(e){alert.querySelector('.alert-sub').textContent='Reconectando con el radar…';}
+                          }
+                          updateSignal(); setInterval(updateSignal,1000);
+                          setTimeout(()=>window.dispatchEvent(new Event('resize')),500);
                         })();
                     """.trimIndent()
                     evaluateJavascript(js, null)
