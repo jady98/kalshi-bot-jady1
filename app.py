@@ -61,6 +61,8 @@ brti_time = 0
 
 coinbase_price = None
 coinbase_time = 0
+# Flujo real de operaciones Coinbase: (timestamp, lado agresor, volumen USD).
+coinbase_trades = deque(maxlen=20000)
 
 kalshi_connected = False
 coinbase_connected = False
@@ -1791,10 +1793,17 @@ def coinbase_open(ws):
 
     global coinbase_connected
 
+    # Ticker para precio en vivo.
     ws.send(json.dumps({
         "type": "subscribe",
         "product_ids": [PRODUCT],
         "channel": "ticker"
+    }))
+    # Operaciones ejecutadas: side indica el lado agresor BUY/SELL.
+    ws.send(json.dumps({
+        "type": "subscribe",
+        "product_ids": [PRODUCT],
+        "channel": "market_trades"
     }))
 
     with lock:
@@ -1809,17 +1818,37 @@ def coinbase_message(ws, message):
 
         data = json.loads(message)
 
-        if data.get("channel") == "ticker":
-
+        channel = data.get("channel")
+        if channel == "ticker":
             for event in data.get("events", []):
-
                 for item in event.get("tickers", []):
-
                     if item.get("product_id") == PRODUCT:
+                        set_coinbase(item.get("price"))
 
-                        set_coinbase(
-                            item.get("price")
-                        )
+        elif channel == "market_trades":
+            received_at = time.time()
+            parsed = []
+            for event in data.get("events", []):
+                for trade in event.get("trades", []):
+                    if trade.get("product_id") != PRODUCT:
+                        continue
+                    side = str(trade.get("side") or "").upper()
+                    if side not in ("BUY", "SELL"):
+                        continue
+                    try:
+                        price = float(trade.get("price"))
+                        size = float(trade.get("size"))
+                        ts = normalize_timestamp(trade.get("time"))
+                        usd_volume = price * size
+                    except (TypeError, ValueError, OverflowError):
+                        continue
+                    if (valid_price(price) and math.isfinite(size) and size > 0
+                            and math.isfinite(usd_volume)
+                            and 0 < received_at - ts <= 120):
+                        parsed.append((ts, side, usd_volume))
+            if parsed:
+                with lock:
+                    coinbase_trades.extend(parsed)
 
         with lock:
             coinbase_error = ""
@@ -2923,6 +2952,7 @@ def get_data():
 
         cp = coinbase_price
         ct = coinbase_time
+        flow_trades = list(coinbase_trades)
 
         ticks = list(brti_ticks)
 
@@ -2946,6 +2976,19 @@ def get_data():
         ce = coinbase_error
 
     now = time.time()
+
+    # Flujo comprador/vendedor de operaciones Coinbase en ventana móvil de 60 s.
+    flow_start = now - 60
+    recent_flow = [
+        row for row in flow_trades
+        if len(row) == 3 and flow_start <= float(row[0]) <= now
+    ]
+    buy_volume = sum(float(row[2]) for row in recent_flow if row[1] == "BUY")
+    sell_volume = sum(float(row[2]) for row in recent_flow if row[1] == "SELL")
+    total_flow_volume = buy_volume + sell_volume
+    flow_available = total_flow_volume > 0 and bool(recent_flow)
+    buyers_pct = round(buy_volume / total_flow_volume * 100, 1) if flow_available else None
+    sellers_pct = round(sell_volume / total_flow_volume * 100, 1) if flow_available else None
 
     # Encolar el contrato vencido ANTES de limpiar sus datos locales.
     # Si se borran primero ticker/cierre, el bloque de resolución nunca puede
@@ -3359,6 +3402,13 @@ def get_data():
         "coinbase_age": coinbase_age,
         "coinbase_connected": cc,
         "coinbase_error": ce,
+        "buyers_pct": buyers_pct,
+        "sellers_pct": sellers_pct,
+        "buyer_volume_usd_60s": round(buy_volume, 2) if flow_available else None,
+        "seller_volume_usd_60s": round(sell_volume, 2) if flow_available else None,
+        "trade_count_60s": len(recent_flow),
+        "flow_window_seconds": 60,
+        "flow_source": "COINBASE_MARKET_TRADES" if flow_available else None,
 
         "price_difference": difference,
         "divergence_pct": (
