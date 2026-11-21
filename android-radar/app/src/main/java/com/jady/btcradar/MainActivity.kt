@@ -3,6 +3,7 @@ package com.jady.btcradar
 import android.app.Activity
 import android.content.Intent
 import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
@@ -14,12 +15,15 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Button
 import android.widget.FrameLayout
+import android.widget.LinearLayout
+import android.widget.Switch
 import android.widget.ProgressBar
 import android.widget.Toast
 
 class MainActivity : Activity() {
     private lateinit var web: WebView
     private lateinit var bubbleButton: Button
+    private lateinit var alertsSwitch: Switch
     private val prefs by lazy { getSharedPreferences("radar_settings", MODE_PRIVATE) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -62,21 +66,61 @@ class MainActivity : Activity() {
         root.addView(web, FrameLayout.LayoutParams(-1, -1))
         root.addView(progress, FrameLayout.LayoutParams(-1, 4, Gravity.TOP))
 
+        val controls = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            setPadding(dp(9), dp(7), dp(9), dp(7))
+            background = GradientDrawable().apply {
+                setColor(Color.rgb(15, 27, 43))
+                cornerRadius = dp(28).toFloat()
+                setStroke(dp(1), Color.rgb(54, 82, 111))
+            }
+            elevation = dp(12).toFloat()
+        }
+
         bubbleButton = Button(this).apply {
-            textSize = 12f
+            text = "ACTIVAR VENTANA"
+            textSize = 11f
+            isAllCaps = false
             setTextColor(Color.WHITE)
-            elevation = 10 * resources.displayMetrics.density
+            minHeight = dp(42)
+            minimumHeight = dp(42)
+            background = GradientDrawable().apply {
+                setColor(Color.rgb(65, 78, 96))
+                cornerRadius = dp(24).toFloat()
+            }
+            setPadding(dp(16), 0, dp(16), 0)
             setOnClickListener { toggleBubble() }
         }
-        val buttonParams = FrameLayout.LayoutParams(
-            (164 * resources.displayMetrics.density).toInt(),
-            (48 * resources.displayMetrics.density).toInt(),
-            Gravity.TOP or Gravity.END
-        ).apply {
-            val margin = (12 * resources.displayMetrics.density).toInt()
-            setMargins(margin, margin, margin, margin)
+        controls.addView(bubbleButton, LinearLayout.LayoutParams(dp(154), dp(42)))
+
+        alertsSwitch = Switch(this).apply {
+            text = "ALERTAS"
+            textSize = 11f
+            setTextColor(Color.WHITE)
+            isChecked = getSharedPreferences("radar_notifications", MODE_PRIVATE)
+                .getBoolean("alerts_enabled", true)
+            setPadding(dp(9), 0, dp(4), 0)
+            setOnCheckedChangeListener { _, checked ->
+                getSharedPreferences("radar_notifications", MODE_PRIVATE)
+                    .edit().putBoolean("alerts_enabled", checked).apply()
+                Toast.makeText(
+                    this@MainActivity,
+                    if (checked) "Alertas activadas" else "Alertas desactivadas",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
         }
-        root.addView(bubbleButton, buttonParams)
+        controls.addView(alertsSwitch, LinearLayout.LayoutParams(dp(116), dp(42)))
+
+        val controlsParams = FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.WRAP_CONTENT,
+            FrameLayout.LayoutParams.WRAP_CONTENT,
+            Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
+        ).apply {
+            bottomMargin = dp(18)
+        }
+        root.addView(controls, controlsParams)
 
         setContentView(root)
         refreshBubbleButton()
@@ -84,6 +128,8 @@ class MainActivity : Activity() {
         if (savedInstanceState == null) web.loadUrl("https://kalshi-bot-jady1.onrender.com/")
         else web.restoreState(savedInstanceState)
     }
+
+    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
     private fun toggleBubble() {
         if (!Settings.canDrawOverlays(this)) {
@@ -107,8 +153,11 @@ class MainActivity : Activity() {
     private fun refreshBubbleButton() {
         if (!::bubbleButton.isInitialized) return
         val enabled = prefs.getBoolean("bubble_enabled", false)
-        bubbleButton.text = if (enabled) "BURBUJA: ACTIVADA" else "BURBUJA: DESACTIVADA"
-        bubbleButton.setBackgroundColor(if (enabled) Color.rgb(20, 145, 104) else Color.rgb(65, 78, 96))
+        bubbleButton.text = if (enabled) "VENTANA ACTIVADA" else "ACTIVAR VENTANA"
+        bubbleButton.background = GradientDrawable().apply {
+            setColor(if (enabled) Color.rgb(20, 145, 104) else Color.rgb(65, 78, 96))
+            cornerRadius = dp(24).toFloat()
+        }
     }
 
     private fun sendServiceAction(action: String) {
