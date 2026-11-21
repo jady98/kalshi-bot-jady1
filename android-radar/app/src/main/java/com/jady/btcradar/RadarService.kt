@@ -43,17 +43,9 @@ class RadarService : Service() {
                         panel?.findViewWithTag<MiniChartView>("mini_chart")?.setCandles(d.candles)
                         panel?.findViewWithTag<TextView>("prediction")?.text = "$" + "%,.2f".format(d.prediction)
                         panel?.findViewWithTag<TextView>("timer")?.text = d.time
-                        val signal = if (d.up >= 75) "ALCISTA" else if (d.up <= 25) "BAJISTA" else ""
-                        if (signal.isNotEmpty() && signal != lastSignal) {
-                            val n = Notification.Builder(this@RadarService, "btc")
-                                .setSmallIcon(android.R.drawable.ic_dialog_info)
-                                .setContentTitle("BTC: $signal")
-                                .setContentText("Probabilidad estimada " + (if (signal == "ALCISTA") d.up else 100-d.up) + "%")
-                                .build()
-                            getSystemService(NotificationManager::class.java).notify(9, n)
-                            lastSignal = signal
-                        }
-                        if (signal.isEmpty()) lastSignal = ""
+                        panel?.findViewWithTag<TextView>("position")?.text =
+                            if (d.manualSide == "YES" || d.manualSide == "NO") "TU POSICIÓN: \${d.manualSide}" else "POSICIÓN: SIN MARCAR"
+                        notifyRadarEvent(d)
                     }
                 } catch (_: Exception) {
                 } finally {
@@ -68,10 +60,68 @@ class RadarService : Service() {
     override fun onCreate() {
         super.onCreate()
         val nm = getSystemService(NotificationManager::class.java)
-        if (Build.VERSION.SDK_INT >= 26) nm.createNotificationChannel(NotificationChannel("btc", "Alertas BTC", NotificationManager.IMPORTANCE_DEFAULT))
+        if (Build.VERSION.SDK_INT >= 26) {
+            nm.createNotificationChannel(NotificationChannel("btc", "Servicio BTC Radar", NotificationManager.IMPORTANCE_LOW))
+            nm.createNotificationChannel(NotificationChannel("btc_events", "Cambios de tendencia y posición", NotificationManager.IMPORTANCE_HIGH))
+        }
         startForeground(1, Notification.Builder(this, "btc").setSmallIcon(android.R.drawable.ic_dialog_info).setContentTitle("BTC Radar activo").setContentText("Monitoreando BTC/USD").build())
         if (Settings.canDrawOverlays(this) && getSharedPreferences("radar_settings", MODE_PRIVATE).getBoolean("bubble_enabled", false)) show()
         handler.post(task)
+    }
+
+    private fun notifyRadarEvent(d: Snapshot) {
+        val now = System.currentTimeMillis() / 1000L
+        val fresh = d.alertTimestamp > 0L && now >= d.alertTimestamp && now - d.alertTimestamp <= 300L
+        val type = d.alertType.uppercase()
+        val event = when {
+            fresh && type == "CAMBIO_DIRECCION" -> "CAMBIO DE TENDENCIA"
+            fresh && type == "ENTRADA" -> "ENTRADA"
+            fresh && type == "MANTENER" -> "MANTENER"
+            fresh && (type == "SALIDA" || type == "PROTEGER") -> "SALIDA"
+            fresh && type == "PREALERTA" -> "PREALERTA"
+            else -> ""
+        }
+        val prefs = getSharedPreferences("radar_notifications", MODE_PRIVATE)
+        val expected = if (d.manualSide == "YES") "ALCISTA" else if (d.manualSide == "NO") "BAJISTA" else ""
+        val alignment = when {
+            d.manualSide.isEmpty() -> "No has marcado YES o NO."
+            d.entryDirection == expected || d.direction == expected -> "Tu posición \${d.manualSide} coincide con la señal."
+            else -> "ATENCIÓN: la señal va contra tu posición \${d.manualSide}."
+        }
+        if (event.isNotEmpty()) {
+            val key = listOf(event, d.alertKey).joinToString("|")
+            if (prefs.getString("last_event", "") == key) return
+            val body = listOf(d.alertMessage.ifBlank { "BTC Radar detectó: $event." }, alignment).joinToString("\\n")
+            val notification = Notification.Builder(this, "btc_events")
+                .setSmallIcon(android.R.drawable.ic_dialog_info)
+                .setContentTitle("BTC Radar · $event")
+                .setContentText(body)
+                .setStyle(Notification.BigTextStyle().bigText(body))
+                .setAutoCancel(true)
+                .setContentIntent(PendingIntent.getActivity(this, 41, Intent(this, MainActivity::class.java), PendingIntent.FLAG_UPDATE_CURRENT or if (Build.VERSION.SDK_INT >= 23) PendingIntent.FLAG_IMMUTABLE else 0))
+                .build()
+            getSystemService(NotificationManager::class.java).notify(key.hashCode(), notification)
+            prefs.edit().putString("last_event", key).apply()
+            return
+        }
+        if (d.direction == "ALCISTA" || d.direction == "BAJISTA") {
+            val previous = prefs.getString("last_direction", "")
+            if (previous.isNotEmpty() && previous != d.direction) {
+                val key = "DIRECTION|\${d.direction}|\${d.alertKey}"
+                if (prefs.getString("last_event", "") != key) {
+                    val notification = Notification.Builder(this, "btc_events")
+                        .setSmallIcon(android.R.drawable.ic_dialog_info)
+                        .setContentTitle("BTC Radar · CAMBIO DE TENDENCIA")
+                        .setContentText("\${d.direction} · $alignment")
+                        .setAutoCancel(true)
+                        .setContentIntent(PendingIntent.getActivity(this, 42, Intent(this, MainActivity::class.java), PendingIntent.FLAG_UPDATE_CURRENT or if (Build.VERSION.SDK_INT >= 23) PendingIntent.FLAG_IMMUTABLE else 0))
+                        .build()
+                    getSystemService(NotificationManager::class.java).notify(42, notification)
+                    prefs.edit().putString("last_event", key).apply()
+                }
+            }
+            prefs.edit().putString("last_direction", d.direction).apply()
+        }
     }
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
@@ -175,6 +225,8 @@ class RadarService : Service() {
             topMargin = dp(7)
             bottomMargin = dp(4)
         })
+
+        box.addView(txt("POSICIÓN: SIN MARCAR", 10f, Color.rgb(173, 190, 210), true, "position"))
 
         val timerRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
