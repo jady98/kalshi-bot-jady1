@@ -117,6 +117,29 @@ class RadarService : Service() {
             prefs.edit().putString("last_event", key).apply()
             return
         }
+        val confidenceDirection = when {
+            d.up >= 75 -> "ALCISTA"
+            d.up <= 25 -> "BAJISTA"
+            else -> ""
+        }
+        if (confidenceDirection.isEmpty()) {
+            prefs.edit().putString("last_confidence_alert", "").apply()
+        } else {
+            val confidenceKey = "CONFIDENCE|$confidenceDirection"
+            if (prefs.getString("last_confidence_alert", "") != confidenceKey) {
+                val confidencePercent = if (confidenceDirection == "ALCISTA") d.up else 100 - d.up
+                val body = "Probabilidad ${if (confidenceDirection == "ALCISTA") "alcista" else "bajista"}: $confidencePercent%."
+                val notification = Notification.Builder(this, "btc_events_v2")
+                    .setSmallIcon(android.R.drawable.ic_dialog_info)
+                    .setContentTitle("BTC Radar · TENDENCIA $confidenceDirection")
+                    .setContentText(body)
+                    .setAutoCancel(true)
+                    .setContentIntent(PendingIntent.getActivity(this, 43, Intent(this, MainActivity::class.java), PendingIntent.FLAG_UPDATE_CURRENT or if (Build.VERSION.SDK_INT >= 23) PendingIntent.FLAG_IMMUTABLE else 0))
+                    .build()
+                getSystemService(NotificationManager::class.java).notify(43, notification)
+                prefs.edit().putString("last_confidence_alert", confidenceKey).apply()
+            }
+        }
         if (d.direction == "ALCISTA" || d.direction == "BAJISTA") {
             val previous = prefs.getString("last_direction", "")
             if (previous.orEmpty().isNotEmpty() && previous != d.direction) {
@@ -219,7 +242,9 @@ class RadarService : Service() {
                 </script></body></html>
                 """.trimIndent(), "text/html", "UTF-8", null)
         }
-        root.addView(web, FrameLayout.LayoutParams(-1, -1).apply { topMargin = dp(40) })
+        root.addView(web, FrameLayout.LayoutParams(dp(340), dp(260)).apply { topMargin = dp(40) })
+        web.pivotX = 0f
+        web.pivotY = 0f
 
 
         val topBar = LinearLayout(this).apply {
@@ -255,7 +280,9 @@ class RadarService : Service() {
             getSharedPreferences("radar_settings", MODE_PRIVATE).edit().putBoolean("bubble_enabled", false).apply()
             removePanel()
         }
-        root.addView(topBar, FrameLayout.LayoutParams(-1, dp(40), Gravity.TOP))
+        root.addView(topBar, FrameLayout.LayoutParams(dp(340), dp(40), Gravity.TOP))
+        topBar.pivotX = 0f
+        topBar.pivotY = 0f
 
         topBar.setOnTouchListener(object : View.OnTouchListener {
             var sx=0f; var sy=0f; var ox=0; var oy=0
@@ -278,33 +305,54 @@ class RadarService : Service() {
                 cornerRadius = dp(8).toFloat()
                 setStroke(dp(1), Color.rgb(67, 105, 139))
             }
-            contentDescription = "Arrastra esta esquina para cambiar el tamaño"
+            contentDescription = "Arrastra para reducir o ampliar la ventana"
         }
         root.addView(resizeHandle, FrameLayout.LayoutParams(dp(30), dp(30), Gravity.BOTTOM or Gravity.RIGHT).apply {
             rightMargin = dp(4)
             bottomMargin = dp(4)
         })
+        var panelScale = 1f
+        fun applyPanelScale(value: Float) {
+            panelScale = value.coerceIn(0.55f, 1f)
+            lp.width = dp((340 * panelScale).toInt())
+            lp.height = dp((300 * panelScale).toInt())
+            web.scaleX = panelScale
+            web.scaleY = panelScale
+            topBar.scaleX = panelScale
+            topBar.scaleY = panelScale
+            resizeHandle.scaleX = panelScale
+            resizeHandle.scaleY = panelScale
+            wm.updateViewLayout(root, lp)
+        }
         resizeHandle.setOnTouchListener(object : View.OnTouchListener {
             var startX = 0f
             var startY = 0f
-            var startWidth = 0
-            var startHeight = 0
+            var startScale = 1f
+            var moved = false
             override fun onTouch(v: View, e: MotionEvent): Boolean {
                 when (e.action) {
                     MotionEvent.ACTION_DOWN -> {
                         startX = e.rawX
                         startY = e.rawY
-                        startWidth = lp.width
-                        startHeight = lp.height
+                        startScale = panelScale
+                        moved = false
                         return true
                     }
                     MotionEvent.ACTION_MOVE -> {
-                        lp.width = (startWidth + (e.rawX - startX).toInt()).coerceIn(dp(250), dp(440))
-                        lp.height = (startHeight + (e.rawY - startY).toInt()).coerceIn(dp(300), dp(460))
-                        wm.updateViewLayout(root, lp)
+                        val dx = e.rawX - startX
+                        val dy = e.rawY - startY
+                        if (kotlin.math.abs(dx) + kotlin.math.abs(dy) > dp(8)) moved = true
+                        if (moved) {
+                            val change = (dx + dy) / (2f * dp(340))
+                            applyPanelScale(startScale + change)
+                        }
                         return true
                     }
-                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> return true
+                    MotionEvent.ACTION_UP -> {
+                        if (!moved) applyPanelScale(if (panelScale > 0.8f) 0.62f else 1f)
+                        return true
+                    }
+                    MotionEvent.ACTION_CANCEL -> return true
                 }
                 return false
             }
