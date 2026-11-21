@@ -4,6 +4,8 @@ import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
 
+data class Candle(val low: Float, val high: Float, val open: Float, val close: Float, val ema9: Float, val ema21: Float)
+
 data class Snapshot(
     val price: Double,
     val prediction: Double,
