@@ -3696,7 +3696,7 @@ HTML = r"""
 <html lang="es">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#080b14">
 
 <title>BTC USD Radar</title>
@@ -3747,7 +3747,7 @@ button{border:1px solid #35476b;background:#182640;color:white;border-radius:9px
 @media(max-width:600px){
  html,body{width:100%;height:100%;min-height:0;overflow:hidden}
  body{padding:0}
- main{width:100%;max-width:none;height:100vh;height:100dvh;min-height:0;margin:0;padding:5px;display:grid;grid-template-rows:auto auto auto auto minmax(150px,1fr) auto;gap:5px;overflow:hidden}
+ main{width:100%;max-width:none;height:100vh;height:100dvh;min-height:0;margin:0;padding:max(28px,env(safe-area-inset-top,0px)) 5px max(7px,env(safe-area-inset-bottom,0px));display:grid;grid-template-rows:auto auto auto auto minmax(130px,1fr) auto;gap:5px;overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain}
  .header{min-height:28px;margin:0;padding:0 2px;justify-content:center;position:relative}.logo{font-size:17px;line-height:1.1;text-align:center}.status{font-size:7px;position:absolute;right:2px;top:50%;transform:translateY(-50%)}
  #signalStage,#newsIntel,#newsHeadlines,#entryEconomics{display:none!important}
  .grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:5px;margin:0;min-height:0}
@@ -3785,7 +3785,7 @@ button{border:1px solid #35476b;background:#182640;color:white;border-radius:9px
  button{padding:7px 8px;font-size:8px}
 }
 @media(max-width:380px){
- main{padding:4px;gap:4px}
+ main{padding:max(28px,env(safe-area-inset-top,0px)) 4px max(7px,env(safe-area-inset-bottom,0px));gap:4px}
  .grid .card{padding:6px 3px}
  .grid .label{font-size:7px}
  .grid .price{font-size:11px}
@@ -3794,7 +3794,7 @@ button{border:1px solid #35476b;background:#182640;color:white;border-radius:9px
  .alert-card .alert-detail{font-size:7px}
 }
 @media(max-height:720px) and (max-width:600px){
- main{grid-template-rows:auto auto auto auto minmax(120px,1fr) auto;gap:3px;padding:4px}
+ main{grid-template-rows:auto auto auto auto minmax(110px,1fr) auto;gap:3px;padding:max(28px,env(safe-area-inset-top,0px)) 4px max(7px,env(safe-area-inset-bottom,0px))}
  .header{min-height:21px}
  .grid .card{padding:5px 3px}
  main>section.card{padding:5px 7px}
