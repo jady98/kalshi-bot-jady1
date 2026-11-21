@@ -19,7 +19,8 @@ data class Snapshot(
     val alertTimestamp: Long,
     val entryStage: String,
     val entryDirection: String,
-    val manualSide: String
+    val manualSide: String,
+    val secondsToClose: Int
 )
 
 object RadarData {
@@ -93,7 +94,8 @@ object RadarData {
             alertTimestamp = timestamp,
             entryStage = entryStage,
             entryDirection = entryDirection,
-            manualSide = manualSide
+            manualSide = manualSide,
+            secondsToClose = seconds
         )
     }
 }
