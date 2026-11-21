@@ -3824,11 +3824,18 @@ button{border:1px solid #35476b;background:#182640;color:white;border-radius:9px
 }
 
 .radar-alert-panel{border:1px solid #35415b;background:linear-gradient(135deg,rgba(20,27,48,.98),rgba(9,14,29,.98))}
-.radar-alert-heading{gap:7px;align-items:center}
-.radar-alert-heading button{white-space:nowrap;font-size:9px;padding:6px 7px}
-.alert-sound-toggle{border:1px solid #65728b!important;background:#172238!important;color:#dce7f8!important;transition:box-shadow .2s,border-color .2s,background .2s}
-.alert-sound-toggle.alerts-enabled{border:1px solid #00e6a0!important;background:#063c2b!important;color:#8bffd0!important;box-shadow:0 0 6px rgba(0,230,160,.8),0 0 16px rgba(0,230,160,.35);animation:radarSoundGlow 1.8s ease-in-out infinite}
-@keyframes radarSoundGlow{0%,100%{box-shadow:0 0 5px rgba(0,230,160,.55),0 0 12px rgba(0,230,160,.2)}50%{box-shadow:0 0 10px rgba(0,230,160,1),0 0 20px rgba(0,230,160,.5)}}
+.radar-alert-heading{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;text-align:center}
+.radar-alert-controls{display:flex;align-items:center;justify-content:center;gap:12px;width:100%;flex-wrap:wrap}
+.radar-switch{display:inline-flex;align-items:center;justify-content:center;gap:6px;border:0!important;background:transparent!important;color:#dce7f8!important;padding:4px 6px!important;font-size:9px;font-weight:800;white-space:nowrap;cursor:pointer}
+.radar-switch-track{display:inline-flex;align-items:center;width:38px;height:22px;padding:2px;border-radius:20px;background:#46536a;border:1px solid #71809a;transition:background .18s,border-color .18s}
+.radar-switch-knob{display:block;width:16px;height:16px;border-radius:50%;background:#fff;transform:translateX(0);transition:transform .18s}
+.radar-switch[aria-checked="true"] .radar-switch-track{background:#07895f;border-color:#25e6a0}
+.radar-switch[aria-checked="true"] .radar-switch-knob{transform:translateX(16px)}
+.radar-switch[aria-checked="true"] .radar-switch-label{color:#75f5c0}
+.floating-window-button{border:1px solid #526b89!important;border-radius:18px!important;background:#1b3451!important;color:#edf5ff!important;padding:7px 13px!important;font-size:9px!important;font-weight:800;white-space:nowrap}
+.floating-window-button:active{background:#28527a!important}
+.compact-radar-alert .radar-alert-heading .section-title{margin:0;font-size:11px}
+@media(max-width:360px){.radar-alert-controls{gap:6px}.floating-window-button{padding:6px 9px!important;font-size:8px!important}}
 .compact-radar-alert{padding:7px 8px!important;margin:3px 0!important}
 .compact-radar-alert .radar-alert-heading .section-title{margin:0;font-size:11px}
 .compact-radar-alert .radar-alert-heading .small{font-size:8px;line-height:1.15}
@@ -4065,12 +4072,16 @@ button{border:1px solid #35476b;background:#182640;color:white;border-radius:9px
 </section>
 
 <section class="card radar-alert-panel compact-radar-alert" id="radarAlertPanel" aria-live="polite">
-    <div class="row radar-alert-heading">
-        <div>
-            <div class="section-title">ALERTAS</div>
-            <div class="small" id="radarAlertStatus">BRTI · 15 MIN</div>
+    <div class="radar-alert-heading">
+        <div class="section-title">ALERTAS</div>
+        <div class="radar-alert-controls">
+            <button type="button" id="alertsEnableButton" class="radar-switch" role="switch" aria-checked="false" onclick="enableRadarAlerts()" aria-label="Activar o desactivar alertas">
+                <span class="radar-switch-track"><span class="radar-switch-knob"></span></span>
+                <span class="radar-switch-label">ALERTAS</span>
+            </button>
+            <button type="button" id="activateFloatingButton" class="floating-window-button" onclick="activateFloatingWindow()">ACTIVAR VENTANA</button>
         </div>
-        <button id="alertsEnableButton" class="alert-sound-toggle" onclick="enableRadarAlerts()" aria-pressed="false">ACTIVAR SONIDO</button>
+        <div class="small" id="radarAlertStatus">BRTI · 15 MIN</div>
     </div>
     <div class="radar-mark-row" aria-label="Registrar dirección indicada por el radar">
         <span class="radar-mark-label">MARCAR RADAR</span>
@@ -4807,6 +4818,12 @@ function goLive(){
 let radarAudioContext = null;
 let radarServiceWorkerRegistration = null;
 let radarAlertsEnabled = false;
+try{
+    if(window.AndroidRadar && typeof window.AndroidRadar.getAlertsEnabled === "function"){
+        radarAlertsEnabled = !!window.AndroidRadar.getAlertsEnabled();
+    }
+}catch(e){}
+
 let lastRadarAlertKey = "";
 let lastAnnouncedDirection = "";
 let lastExitTicker = null;
@@ -4815,29 +4832,39 @@ function paintRadarAlertToggle(){
     const button = $("alertsEnableButton");
     const status = $("radarAlertStatus");
     if(button){
-        button.textContent = radarAlertsEnabled ? "SONIDO: SÍ" : "SONIDO: NO";
-        button.classList.toggle("alerts-enabled",radarAlertsEnabled);
+        button.setAttribute("aria-checked",radarAlertsEnabled ? "true" : "false");
         button.setAttribute("aria-pressed",radarAlertsEnabled ? "true" : "false");
     }
     if(status){
         status.textContent = radarAlertsEnabled
-            ? "SONIDO ENCENDIDO · ENTRAR, MANTENER y SALIR"
-            : "SONIDO APAGADO · pulsa para activar";
+            ? "ALERTAS ACTIVADAS · SONIDO Y AVISOS"
+            : "ALERTAS DESACTIVADAS";
+    }
+}
+
+function activateFloatingWindow(){
+    const status = $("radarAlertStatus");
+    if(window.AndroidRadar && typeof window.AndroidRadar.activateWindow === "function"){
+        window.AndroidRadar.activateWindow();
+        if(status) status.textContent = "VENTANA FLOTANTE ACTIVADA";
+    }else if(status){
+        status.textContent = "ACTIVA LA VENTANA DESDE LA APLICACIÓN BTC RADAR";
     }
 }
 
 async function enableRadarAlerts(){
     if(radarAlertsEnabled){
         radarAlertsEnabled = false;
+        try{ if(window.AndroidRadar) window.AndroidRadar.setAlertsEnabled(false); }catch(e){}
         paintRadarAlertToggle();
         return;
     }
     try{
         const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-        if(!AudioContextClass) throw new Error("Este navegador no permite sonido web.");
-        radarAudioContext = radarAudioContext || new AudioContextClass();
-        if(radarAudioContext.state === "suspended") await radarAudioContext.resume();
-        if(radarAudioContext.state !== "running") throw new Error("Android no habilitó el audio. Vuelve a pulsar el botón.");
+        if(AudioContextClass){
+            radarAudioContext = radarAudioContext || new AudioContextClass();
+            if(radarAudioContext.state === "suspended") await radarAudioContext.resume();
+        }
         if("serviceWorker" in navigator){
             try{
                 radarServiceWorkerRegistration = await navigator.serviceWorker.register("/service-worker.js",{scope:"/"});
@@ -4847,20 +4874,22 @@ async function enableRadarAlerts(){
             }
         }
         radarAlertsEnabled = true;
+        try{ if(window.AndroidRadar) window.AndroidRadar.setAlertsEnabled(true); }catch(e){}
         paintRadarAlertToggle();
-        playRadarTone("entry");
+        if(radarAudioContext && radarAudioContext.state === "running") playRadarTone("entry");
         if("Notification" in window && Notification.permission === "default"){
             const permission = await Notification.requestPermission();
             if(permission !== "granted"){
                 const status = $("radarAlertStatus");
-                if(status) status.textContent = "SONIDO ENCENDIDO · permite notificaciones para avisos del sistema";
+                if(status) status.textContent = "ALERTAS ACTIVADAS · permite notificaciones para avisos del sistema";
             }
         }
     }catch(error){
         radarAlertsEnabled = false;
+        try{ if(window.AndroidRadar) window.AndroidRadar.setAlertsEnabled(false); }catch(e){}
         paintRadarAlertToggle();
         const status = $("radarAlertStatus");
-        if(status) status.textContent = error.message || "No se pudo activar el sonido.";
+        if(status) status.textContent = error.message || "No se pudieron activar las alertas.";
     }
 }
 
@@ -5422,6 +5451,7 @@ window.addEventListener("resize", () => {
     });
 });
 
+paintRadarAlertToggle();
 refreshData();
 refreshAccuracy();
 
