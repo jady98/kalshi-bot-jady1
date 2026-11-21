@@ -2607,7 +2607,7 @@ def _candle_change_over_seconds(candles, price, seconds, now):
 def build_forward_guidance(
     ticks, price, indicators, candles=None,
     contract_active=False, ticker=None, close_ts=None,
-    validation=None
+    validation=None, buyers_pct=None, sellers_pct=None
 ):
     """Proyección corta separada del pronóstico principal al cierre de 15 minutos."""
     now = time.time()
@@ -2685,6 +2685,48 @@ def build_forward_guidance(
         )
     )
 
+    # Confirmar dos velas BRTI de un minuto ya cerradas; nunca contar la vela en formación.
+    closed_candles = []
+    for candle in (candles or []):
+        try:
+            candle_time = int(candle.get("time", 0) or 0)
+            candle_open = float(candle.get("open"))
+            candle_close = float(candle.get("close"))
+            if (
+                candle_time > 0 and candle_time + 60 <= now + 1
+                and math.isfinite(candle_open) and math.isfinite(candle_close)
+            ):
+                closed_candles.append((candle_time, candle_open, candle_close))
+        except (TypeError, ValueError, AttributeError, OverflowError):
+            continue
+    closed_candles.sort(key=lambda row: row[0])
+    last_two_candles = closed_candles[-2:]
+    candles_aligned = (
+        len(last_two_candles) == 2
+        and direction in ("ALCISTA", "BAJISTA")
+        and all(
+            close > open_price if direction == "ALCISTA" else close < open_price
+            for _, open_price, close in last_two_candles
+        )
+    )
+
+    try:
+        buyers_value = float(buyers_pct) if buyers_pct is not None else None
+        sellers_value = float(sellers_pct) if sellers_pct is not None else None
+        flow_available = (
+            buyers_value is not None and sellers_value is not None
+            and math.isfinite(buyers_value) and math.isfinite(sellers_value)
+            and buyers_value >= 0 and sellers_value >= 0
+        )
+    except (TypeError, ValueError):
+        buyers_value = sellers_value = None
+        flow_available = False
+    flow_aligned = (
+        flow_available and direction == "ALCISTA" and buyers_value >= 52.5
+    ) or (
+        flow_available and direction == "BAJISTA" and sellers_value >= 52.5
+    )
+
     stage = "OBSERVAR"
     note = "Sin coincidencia suficiente todavía. Espera confirmación en 1 y 3 minutos."
     if not valid_price(price):
@@ -2718,31 +2760,37 @@ def build_forward_guidance(
         # exige 1m alineado, que 3m no contradiga, EMA alineadas y fuerza/probabilidad
         # moderadas. No espera obligatoriamente a que 3m también esté alineado.
         if (
-            side_probability >= 65
+            side_probability >= 70
             and strength >= 35
             and align_1m
             and align_3m
             and ema_aligned
+            and candles_aligned
+            and flow_aligned
             and not rsi_blocked
         ):
             stage = "ENTRADA"
             note = (
                 "ENTRADA CONFIRMADA " + direction + " · " + str(round(side_probability, 1))
                 + "% a favor · fuerza " + str(round(strength))
-                + "% · 1 min alineado · 3 min "
-                + ("alineado" if align_3m else "sin contradicción")
-                + " · EMA 9/21 alineadas"
+                + "% · 1 min y 3 min alineados"
+                + " · dos velas cerradas en la misma dirección"
+                + " · EMA 9/21 alineadas · flujo comprador/vendedor a favor"
                 + (" · RSI " + str(round(float(rsi), 1)) if rsi is not None else "")
-                + ". Comprueba el precio ejecutable y el riesgo antes de decidir."
+                + ". Revisa el precio ejecutable y el riesgo antes de decidir."
             )
         elif rsi_blocked:
             note += " RSI muy extendido: no perseguir el movimiento."
+        elif not candles_aligned:
+            note += " Esperando dos velas cerradas consecutivas que confirmen la dirección."
+        elif not flow_aligned:
+            note += " El flujo real de compradores/vendedores todavía no confirma."
         elif not ema_aligned:
             note += " Falta confirmación de EMA 9/21."
-        elif strength < 32:
+        elif strength < 35:
             note += " La fuerza técnica aún es insuficiente para confirmar."
-        elif side_probability < 63:
-            note += " La probabilidad todavía no alcanza el umbral de confirmación."
+        elif side_probability < 70:
+            note += " La probabilidad todavía no alcanza el umbral de confirmación (70%)."
     elif side_probability < 55:
         note = "Probabilidad direccional inferior al umbral de prealerta (55%)."
     elif strength < 20:
@@ -2770,6 +2818,11 @@ def build_forward_guidance(
         "guidance_1m_aligned": align_1m,
         "guidance_3m_aligned": align_3m,
         "guidance_ema_aligned": ema_aligned,
+        "guidance_candles_aligned": candles_aligned,
+        "guidance_flow_aligned": flow_aligned,
+        "guidance_closed_candles": len(last_two_candles),
+        "guidance_buyers_pct": buyers_value,
+        "guidance_sellers_pct": sellers_value,
         "guidance_note": note,
         "entry_validation": validation,
         "short_direction": direction if direction in ("ALCISTA", "BAJISTA") else "INDECISO",
@@ -3318,7 +3371,9 @@ def get_data():
         contract_active=guidance_active,
         ticker=guidance_ticker,
         close_ts=guidance_close,
-        validation=entry_validation
+        validation=entry_validation,
+        buyers_pct=buyers_pct,
+        sellers_pct=sellers_pct
     )
     entry_economics = calculate_entry_economics(
         indicators.get("direction"), indicators.get("bullish_score"),
