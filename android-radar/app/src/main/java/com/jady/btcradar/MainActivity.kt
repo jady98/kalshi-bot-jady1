@@ -130,7 +130,6 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
-        refreshBubbleButton()
     }
 
     private fun enableRadarNotifications() {
