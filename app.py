@@ -3760,6 +3760,13 @@ button{border:1px solid #35476b;background:#182640;color:white;border-radius:9px
 .compact-radar-alert{padding:7px 8px!important;margin:3px 0!important}
 .compact-radar-alert .radar-alert-heading .section-title{margin:0;font-size:11px}
 .compact-radar-alert .radar-alert-heading .small{font-size:8px;line-height:1.15}
+.accuracy-strip{display:flex;flex-direction:column;gap:7px;margin-top:12px;padding:11px 12px;border:1px solid rgba(120,160,200,.24);border-radius:12px;background:rgba(10,18,31,.82)}
+.accuracy-strip-top,.accuracy-strip-score{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.accuracy-strip-top strong{font-size:11px;letter-spacing:.6px;color:#b8cce2}
+.accuracy-strip-top span,.accuracy-strip>span{font-size:10px;color:#91a8c2}
+.accuracy-strip-score{font-size:12px;font-weight:800}
+.accuracy-strip-score strong{font-size:22px;color:#f4f7ff}
+.accuracy-correct{color:#55e0a6}.accuracy-wrong{color:#ff7c8d}
 .accuracy-mini{display:flex;align-items:center;gap:12px;width:max-content;max-width:100%;margin:5px 0 4px;padding:4px 7px;border:1px solid #34415b;border-radius:7px;background:#101a2b;font-size:8px;font-weight:850;white-space:nowrap}
 .accuracy-mini b{font-size:9px;color:#fff;font-variant-numeric:tabular-nums}
 .accuracy-mini .accuracy-correct{color:#55e0a6}.accuracy-mini .accuracy-wrong{color:#ff7c8d}
@@ -3969,9 +3976,16 @@ button{border:1px solid #35476b;background:#182640;color:white;border-radius:9px
     <div class="small" id="newsHeadlines">Esperando titulares de fuentes públicas.</div>
     <div class="small" id="entryEconomics">Precio ejecutable Kalshi: esperando libro de órdenes</div>
 
-    <div id="accuracyStrip" hidden>
-        <span id="accuracyUpdated">CARGANDO...</span>
-        <strong id="accuracyPercent">--</strong>
+    <div id="accuracyStrip" class="accuracy-strip">
+        <div class="accuracy-strip-top">
+            <strong>RESULTADOS REALES · 15 MIN</strong>
+            <span id="accuracyUpdated">CARGANDO...</span>
+        </div>
+        <div class="accuracy-strip-score">
+            <span class="accuracy-correct">ACIERTOS <b id="accuracyCorrect">--</b></span>
+            <strong id="accuracyPercent">--</strong>
+            <span class="accuracy-wrong">ERRORES <b id="accuracyIncorrect">--</b></span>
+        </div>
         <span id="accuracyBasis">POR CONTRATO</span>
         <span id="accuracyNote">Se calcula con contratos de 15 minutos ya resueltos.</span>
     </div>
