@@ -100,10 +100,10 @@ class RadarService : Service() {
         val type = d.alertType.orEmpty().uppercase()
         val event = when {
             fresh && type == "CAMBIO_DIRECCION" -> "CAMBIO DE TENDENCIA"
-            fresh && type == "ENTRADA" -> "ENTRADA"
-            fresh && type == "MANTENER" -> "MANTENER"
-            fresh && (type == "SALIDA" || type == "PROTEGER") -> "SALIDA"
-            fresh && type == "PREALERTA" -> "PREALERTA"
+            fresh && type == "ENTRADA" && d.entryStage == "ENTRADA" -> "ENTRADA"
+            fresh && type == "MANTENER" && d.entryStage == "ENTRADA" -> "MANTENER"
+            fresh && (type == "SALIDA" || type == "PROTEGER") && d.entryStage == "SALIDA" -> "SALIDA"
+            fresh && type == "PREALERTA" && d.entryStage == "PREALERTA" -> "PREALERTA"
             else -> ""
         }
         val prefs = getSharedPreferences("radar_notifications", MODE_PRIVATE)
@@ -121,9 +121,8 @@ class RadarService : Service() {
         if (event.isNotEmpty()) {
             val key = listOf(event, d.alertKey).joinToString("|")
             if (prefs.getString("last_event", "") == key) return
-            playEventTone(event)
             val body = listOf(d.alertMessage.ifBlank { "BTC Radar detectó: $event." }, alignment).joinToString("\\n")
-            val notification = Notification.Builder(this, "btc_events_v3")
+            val notification = Notification.Builder(this, "btc_events_v2")
                 .setSmallIcon(android.R.drawable.ic_dialog_info)
                 .setContentTitle("BTC Radar · $event")
                 .setContentText(body)
@@ -135,37 +134,12 @@ class RadarService : Service() {
             prefs.edit().putString("last_event", key).apply()
             return
         }
-        val confidenceDirection = when {
-            d.up >= 75 -> "ALCISTA"
-            d.up <= 25 -> "BAJISTA"
-            else -> ""
-        }
-        if (confidenceDirection.isEmpty()) {
-            prefs.edit().putString("last_confidence_alert", "").apply()
-        } else {
-            val confidenceKey = "CONFIDENCE|$confidenceDirection"
-            if (prefs.getString("last_confidence_alert", "") != confidenceKey) {
-                val confidencePercent = if (confidenceDirection == "ALCISTA") d.up else 100 - d.up
-                val body = "Probabilidad ${if (confidenceDirection == "ALCISTA") "alcista" else "bajista"}: $confidencePercent%."
-                playEventTone("TENDENCIA")
-                val notification = Notification.Builder(this, "btc_events_v3")
-                    .setSmallIcon(android.R.drawable.ic_dialog_info)
-                    .setContentTitle("BTC Radar · TENDENCIA $confidenceDirection")
-                    .setContentText(body)
-                    .setAutoCancel(true)
-                    .setContentIntent(PendingIntent.getActivity(this, 43, Intent(this, MainActivity::class.java), PendingIntent.FLAG_UPDATE_CURRENT or if (Build.VERSION.SDK_INT >= 23) PendingIntent.FLAG_IMMUTABLE else 0))
-                    .build()
-                getSystemService(NotificationManager::class.java).notify(43, notification)
-                prefs.edit().putString("last_confidence_alert", confidenceKey).apply()
-            }
-        }
         if (d.direction == "ALCISTA" || d.direction == "BAJISTA") {
             val previous = prefs.getString("last_direction", "")
             if (previous.orEmpty().isNotEmpty() && previous != d.direction) {
                 val key = "DIRECTION|${d.direction}|${d.alertKey}"
                 if (prefs.getString("last_event", "") != key) {
-                    playEventTone("CAMBIO")
-                    val notification = Notification.Builder(this, "btc_events_v3")
+                    val notification = Notification.Builder(this, "btc_events_v2")
                         .setSmallIcon(android.R.drawable.ic_dialog_info)
                         .setContentTitle("BTC Radar · CAMBIO DE TENDENCIA")
                         .setContentText("\${d.direction} · $alignment")
@@ -274,7 +248,7 @@ class RadarService : Service() {
                     document.getElementById('up').textContent='ALCISTA '+(valid?up.toFixed(0)+'%':'--');document.getElementById('down').textContent='BAJISTA '+(valid?down.toFixed(0)+'%':'--');
                     const buyRaw=d.buyers_pct??d.buyer_pct??d.buy_volume_pct;const sellRaw=d.sellers_pct??d.seller_pct??d.sell_volume_pct;const buy=Number(buyRaw),sell=Number(sellRaw);const flowValid=buyRaw!=null&&sellRaw!=null&&Number.isFinite(buy)&&Number.isFinite(sell)&&buy>=0&&sell>=0&&(buy+sell)>0;document.getElementById('buyers').textContent=flowValid?'COMPRADORES '+buy.toFixed(0)+'%':'COMPRADORES —';document.getElementById('sellers').textContent=flowValid?'VENDEDORES '+sell.toFixed(0)+'%':'VENDEDORES —';document.getElementById('flowBuy').style.width=(flowValid?buy:50)+'%';document.getElementById('flowSell').style.width=(flowValid?sell:50)+'%';
                     let dir=String(d.direction||'').toUpperCase();if(dir!=='ALCISTA'&&dir!=='BAJISTA')dir=up>=55?'ALCISTA':up<=45?'BAJISTA':'INDECISA';
-                    const emaUp=d.ema9!=null&&d.ema21!=null&&Number(d.ema9)>Number(d.ema21);const emaDown=d.ema9!=null&&d.ema21!=null&&Number(d.ema9)<Number(d.ema21);const mom=Number(d.momentum_pct);const rsi=d.rsi==null?null:Number(d.rsi);const base=Number(d.brti_price??d.coinbase_price);const delta=Number(d.predicted_price)>0&&base>0?((Number(d.predicted_price)/base-1)*100):null;const factors=[];if(emaUp)factors.push('EMA 9 sobre 21');else if(emaDown)factors.push('EMA 9 bajo 21');if(Number.isFinite(mom))factors.push('impulso '+(mom>=0?'+':'')+mom.toFixed(3)+'%');if(rsi!==null&&Number.isFinite(rsi))factors.push('RSI '+rsi.toFixed(0));if(d.pattern)factors.push(String(d.pattern).replace(/[<>]/g,'').slice(0,30));const outlook=dir;const projection=delta===null?'':'; proyección '+(delta>=0?'+':'')+delta.toFixed(2)+'%';const caution=(emaUp&&mom<0)||(emaDown&&mom>0)?' · señales mixtas':'';const note=factors.slice(0,2).join(' y ')||'analizando señales';document.getElementById('direction').textContent=outlook;document.getElementById('direction').style.color=dir==='ALCISTA'?'#36d99a':dir==='BAJISTA'?'#ff7185':'#f3c969';document.getElementById('why').textContent=note+caution+'.';
+                    const emaUp=d.ema9!=null&&d.ema21!=null&&Number(d.ema9)>Number(d.ema21);const emaDown=d.ema9!=null&&d.ema21!=null&&Number(d.ema9)<Number(d.ema21);const mom=Number(d.momentum_pct);const rsi=d.rsi==null?null:Number(d.rsi);const base=Number(d.brti_price??d.coinbase_price);const delta=Number(d.predicted_price)>0&&base>0?((Number(d.predicted_price)/base-1)*100):null;const factors=[];if(emaUp)factors.push('EMA 9 sobre 21');else if(emaDown)factors.push('EMA 9 bajo 21');if(Number.isFinite(mom))factors.push('impulso '+(mom>=0?'+':'')+mom.toFixed(3)+'%');if(rsi!==null&&Number.isFinite(rsi))factors.push('RSI '+rsi.toFixed(0));if(d.pattern)factors.push(String(d.pattern).replace(/[<>]/g,'').slice(0,30));const outlook=dir;const projection=delta===null?'':'; proyección '+(delta>=0?'+':'')+delta.toFixed(2)+'%';const caution=(emaUp&&mom<0)||(emaDown&&mom>0)?' · señales mixtas':'';const note=factors.slice(0,2).join(' y ')||'analizando señales';document.getElementById('direction').textContent=outlook;document.getElementById('direction').style.color=dir==='ALCISTA'?'#36d99a':dir==='BAJISTA'?'#ff7185':'#f3c969';const entryStage=String(d.entry_stage||'').toUpperCase();const stageLabel=entryStage==='ENTRADA'?'ENTRADA CONFIRMADA · '+(d.entry_direction||dir):entryStage==='PREALERTA'?'PREPARANDO ENTRADA · '+(d.short_direction||dir):entryStage==='SALIDA'?'TENDENCIA PERDIENDO FUERZA':entryStage.startsWith('ENTRADA BLOQUEADA')?'ENTRADA BLOQUEADA':entryStage||'OBSERVAR';const detail=String(d.guidance_note||'').replace(/\\s+/g,' ').trim();document.getElementById('why').textContent=stageLabel+(detail?' · '+detail:'');
                     
                     const box=document.getElementById('panel');box.className='wrap '+(dir==='ALCISTA'?'bull':dir==='BAJISTA'?'bear':'neutral');
                                         let secs=Number(d.seconds_to_close??d.countdown);if(!Number.isFinite(secs)||secs<0){const close=Number(d.kalshi_market_close),now=Number(d.server_time);secs=close>0&&now>0?Math.max(0,Math.floor(close-now)):0;}
