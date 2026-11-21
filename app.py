@@ -5093,13 +5093,19 @@ function updateRadar(d){
         );
 
 
-    const kalshiProbability = Number(d.kalshi_yes_probability_pct);
-    const hasKalshiProbability = d.kalshi_yes_probability_pct != null &&
-        Number.isFinite(kalshiProbability);
-    const bullish = hasKalshiProbability
-        ? Math.max(0, Math.min(100, kalshiProbability))
+    // La barra principal representa el pronóstico propio del radar.
+    // La probabilidad de Kalshi es precio de mercado y se mantiene separada.
+    const modelBullish = Number(d.bullish_score);
+    const modelBearish = Number(d.bearish_score);
+    const hasModelProbability = d.bullish_score != null &&
+        d.bearish_score != null &&
+        Number.isFinite(modelBullish) && Number.isFinite(modelBearish);
+    const bullish = hasModelProbability
+        ? Math.max(0, Math.min(100, modelBullish))
         : null;
-    const bearish = bullish == null ? null : 100 - bullish;
+    const bearish = hasModelProbability
+        ? Math.max(0, Math.min(100, modelBearish))
+        : null;
 
     $("bullText").textContent =
         bullish == null ? "--" : bullish.toFixed(1) + "%";
