@@ -65,7 +65,17 @@ class RadarService : Service() {
         val nm = getSystemService(NotificationManager::class.java)
         if (Build.VERSION.SDK_INT >= 26) {
             nm.createNotificationChannel(NotificationChannel("btc", "Servicio BTC Radar", NotificationManager.IMPORTANCE_LOW))
-            nm.createNotificationChannel(NotificationChannel("btc_events", "Cambios de tendencia y posición", NotificationManager.IMPORTANCE_HIGH))
+            val eventChannel = NotificationChannel("btc_events_v2", "Alertas BTC Radar", NotificationManager.IMPORTANCE_HIGH).apply {
+                setSound(
+                    RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION),
+                    android.media.AudioAttributes.Builder()
+                        .setUsage(android.media.AudioAttributes.USAGE_NOTIFICATION)
+                        .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build()
+                )
+                enableVibration(true)
+            }
+            nm.createNotificationChannel(eventChannel)
         }
         startForeground(1, Notification.Builder(this, "btc").setSmallIcon(android.R.drawable.ic_dialog_info).setContentTitle("BTC Radar activo").setContentText("Monitoreando BTC/USD").build())
         if (Settings.canDrawOverlays(this) && getSharedPreferences("radar_settings", MODE_PRIVATE).getBoolean("bubble_enabled", false)) show()
@@ -95,7 +105,7 @@ class RadarService : Service() {
             val key = listOf(event, d.alertKey).joinToString("|")
             if (prefs.getString("last_event", "") == key) return
             val body = listOf(d.alertMessage.ifBlank { "BTC Radar detectó: $event." }, alignment).joinToString("\\n")
-            val notification = Notification.Builder(this, "btc_events")
+            val notification = Notification.Builder(this, "btc_events_v2")
                 .setSmallIcon(android.R.drawable.ic_dialog_info)
                 .setContentTitle("BTC Radar · $event")
                 .setContentText(body)
@@ -103,7 +113,6 @@ class RadarService : Service() {
                 .setAutoCancel(true)
                 .setContentIntent(PendingIntent.getActivity(this, 41, Intent(this, MainActivity::class.java), PendingIntent.FLAG_UPDATE_CURRENT or if (Build.VERSION.SDK_INT >= 23) PendingIntent.FLAG_IMMUTABLE else 0))
                 .build()
-            notification.defaults = Notification.DEFAULT_SOUND or Notification.DEFAULT_VIBRATE
             getSystemService(NotificationManager::class.java).notify(key.hashCode(), notification)
             prefs.edit().putString("last_event", key).apply()
             return
@@ -193,7 +202,6 @@ class RadarService : Service() {
         }
         root.addView(web, FrameLayout.LayoutParams(-1, -1))
 
-        web.loadUrl("https://kalshi-bot-jady1.onrender.com/?floating=1&v=2")
 
         val topBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -216,16 +224,6 @@ class RadarService : Service() {
             lp.height = (lp.height + dp((delta * 0.45).toInt())).coerceIn(dp(150), dp(280))
             wm.updateViewLayout(root, lp)
         }
-        val smaller = TextView(this).apply {
-            text = "−"; textSize = 22f; gravity = Gravity.CENTER; setTextColor(Color.WHITE)
-            setPadding(dp(7), 0, dp(7), 0); setOnClickListener { resizePanel(-30) }
-        }
-        val larger = TextView(this).apply {
-            text = "+"; textSize = 20f; gravity = Gravity.CENTER; setTextColor(Color.WHITE)
-            setPadding(dp(7), 0, dp(7), 0); setOnClickListener { resizePanel(30) }
-        }
-        topBar.addView(smaller, LinearLayout.LayoutParams(dp(32), dp(36)))
-        topBar.addView(larger, LinearLayout.LayoutParams(dp(32), dp(36)))
         val close = TextView(this).apply {
             text = "×"; textSize = 25f; gravity = Gravity.CENTER
             setTextColor(Color.WHITE)
@@ -251,6 +249,48 @@ class RadarService : Service() {
                 return false
             }
         })
+        val resizeHandle = TextView(this).apply {
+            text = "◢"
+            textSize = 22f
+            gravity = Gravity.CENTER
+            setTextColor(Color.rgb(111, 207, 255))
+            background = GradientDrawable().apply {
+                setColor(Color.argb(220, 20, 43, 66))
+                cornerRadius = dp(8).toFloat()
+                setStroke(dp(1), Color.rgb(67, 105, 139))
+            }
+            contentDescription = "Arrastra esta esquina para cambiar el tamaño"
+        }
+        root.addView(resizeHandle, FrameLayout.LayoutParams(dp(30), dp(30), Gravity.BOTTOM or Gravity.RIGHT).apply {
+            rightMargin = dp(4)
+            bottomMargin = dp(4)
+        })
+        resizeHandle.setOnTouchListener(object : View.OnTouchListener {
+            var startX = 0f
+            var startY = 0f
+            var startWidth = 0
+            var startHeight = 0
+            override fun onTouch(v: View, e: MotionEvent): Boolean {
+                when (e.action) {
+                    MotionEvent.ACTION_DOWN -> {
+                        startX = e.rawX
+                        startY = e.rawY
+                        startWidth = lp.width
+                        startHeight = lp.height
+                        return true
+                    }
+                    MotionEvent.ACTION_MOVE -> {
+                        lp.width = (startWidth + (e.rawX - startX).toInt()).coerceIn(dp(250), dp(440))
+                        lp.height = (startHeight + (e.rawY - startY).toInt()).coerceIn(dp(150), dp(360))
+                        wm.updateViewLayout(root, lp)
+                        return true
+                    }
+                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> return true
+                }
+                return false
+            }
+        })
+
         wm.addView(root, lp)
         panel = root
     }
