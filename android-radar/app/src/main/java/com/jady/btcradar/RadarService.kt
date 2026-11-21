@@ -29,7 +29,7 @@ class RadarService : Service() {
                         panel?.findViewWithTag<TextView>("price")?.text = "$" + "%,.0f".format(d.price)
                         panel?.findViewWithTag<TextView>("updown")?.text = "ALCISTA  ${d.up}%     BAJISTA  ${100-d.up}%"
                         panel?.findViewWithTag<ProgressBar>("trend")?.progress = d.up
-                        panel?.findViewWithTag<TextView>("buyers")?.text = "COMPRADORES  —%     VENDEDORES  —%"
+                        panel?.findViewWithTag<MiniChartView>("mini_chart")?.setCandles(d.candles)
                         panel?.findViewWithTag<TextView>("prediction")?.text = "$" + "%,.2f".format(d.prediction)
                         panel?.findViewWithTag<TextView>("timer")?.text = d.time
                         val signal = if (d.up >= 75) "ALCISTA" else if (d.up <= 25) "BAJISTA" else ""
@@ -46,7 +46,7 @@ class RadarService : Service() {
                     }
                 } catch (_: Exception) {}
             }.start()
-            handler.postDelayed(this, 5000)
+            handler.postDelayed(this, 1000)
         }
     }
 
@@ -152,15 +152,14 @@ class RadarService : Service() {
         box.addView(txt("ALCISTA  —%     BAJISTA  —%", 12f, Color.WHITE, true, "updown"))
         box.addView(horizontalBar("trend"), LinearLayout.LayoutParams(-1, dp(10)).apply { topMargin = dp(5); bottomMargin = dp(8) })
 
-        val flowCard = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(9), dp(7), dp(9), dp(7))
-            background = bg(Color.rgb(19, 29, 44), 11, Color.rgb(43, 60, 79))
+        val miniChart = MiniChartView(this).apply {
+            tag = "mini_chart"
+            setBackgroundColor(Color.rgb(10, 18, 29))
         }
-        flowCard.addView(txt("FLUJO DE MERCADO", 9f, Color.rgb(157, 178, 202), true))
-        flowCard.addView(txt("COMPRADORES  —%     VENDEDORES  —%", 10f, Color.rgb(210, 222, 235), true, "buyers"))
-        flowCard.addView(txt("Porcentaje no publicado por la fuente", 8f, Color.rgb(117, 137, 159)))
-        box.addView(flowCard)
+        box.addView(miniChart, LinearLayout.LayoutParams(-1, dp(94)).apply {
+            topMargin = dp(7)
+            bottomMargin = dp(4)
+        })
 
         val timerRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
