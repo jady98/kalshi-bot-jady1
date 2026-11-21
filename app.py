@@ -5042,6 +5042,7 @@ try{
 }catch(e){}
 
 let lastRadarAlertKey = "";
+let lastScalpAlertKey = "";
 let lastAnnouncedDirection = "";
 let lastExitTicker = null;
 
@@ -5130,6 +5131,53 @@ function playRadarTone(kind){
             oscillator.stop(now + spacing + 0.15);
         });
     }catch(error){ console.warn("No se pudo reproducir el aviso",error); }
+}
+
+
+function handleScalpTradeAlert(trade){
+    if(!trade || !trade.ticker) return;
+    const status = String(trade.status || "");
+    if(status !== "ABIERTA" && status !== "CERRADA") return;
+    const reason = String(trade.exit_reason || "");
+    const event = status === "ABIERTA" ? "ENTRADA_SIMULADA" : reason;
+    const key = [trade.ticker,status,event,trade.opened_ts || "",trade.closed_ts || ""].join("|");
+    if(key === lastScalpAlertKey) return;
+    lastScalpAlertKey = key;
+
+    const isProfit = status === "CERRADA" && reason.includes("TAKE PROFIT");
+    const isStop = status === "CERRADA" && reason.includes("STOP LOSS");
+    const isClosed = status === "CERRADA";
+    const title = status === "ABIERTA" ? "BTC Radar · ENTRADA SIMULADA" :
+        isProfit ? "BTC Radar · TAKE PROFIT" :
+        isStop ? "BTC Radar · STOP LOSS" : "BTC Radar · SALIDA";
+    const pnlText = trade.net_pnl == null ? "" :
+        " · P/L neto " + (Number(trade.net_pnl) >= 0 ? "+" : "") + "$" + Number(trade.net_pnl).toFixed(4);
+    const body = status === "ABIERTA"
+        ? "Entrada " + (trade.direction || trade.side || "") +
+          " · TP " + Number(trade.take_profit_price || 0).toFixed(2) +
+          " · SL " + Number(trade.stop_loss_price || 0).toFixed(2)
+        : (reason || "Posición cerrada") + pnlText;
+
+    if(radarAlertsEnabled){
+        playRadarTone(isClosed ? (isProfit ? "entry" : "exit") : "entry");
+        if(window.navigator && typeof window.navigator.vibrate === "function"){
+            window.navigator.vibrate(isClosed ? (isProfit ? [100,60,100,60,180] : [220,90,220]) : [120,70,120]);
+        }
+    }
+    if(radarAlertsEnabled && "Notification" in window && Notification.permission === "granted"){
+        const options = {
+            body, tag: key, renotify: true, silent: false,
+            requireInteraction: isClosed,
+            vibrate: isClosed ? [220,100,220,100,220] : [160,80,160]
+        };
+        if(radarServiceWorkerRegistration && radarServiceWorkerRegistration.showNotification){
+            radarServiceWorkerRegistration.showNotification(title,options)
+                .catch(error=>console.warn("No se pudo mostrar la alerta de entrada/salida",error));
+        }else{
+            try{ new Notification(title,options); }
+            catch(error){ console.warn("Notificación no disponible",error); }
+        }
+    }
 }
 
 
@@ -5520,6 +5568,7 @@ function updateRadar(d){
         $("entryEconomics").style.color = "#aab2c5";
     }
 
+    handleScalpTradeAlert(d.scalp_trade || {});
     updateScalpTrade(d.scalp_trade || {});
     window.currentRadarTicker = d.kalshi_market_active ? d.kalshi_market_ticker : null;
     const manualPanel = $("manualPosition");
