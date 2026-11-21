@@ -95,6 +95,10 @@ class RadarService : Service() {
             else -> ""
         }
         val prefs = getSharedPreferences("radar_notifications", MODE_PRIVATE)
+        if (!prefs.getBoolean("alerts_enabled", true)) {
+            prefs.edit().putString("last_direction", d.direction).apply()
+            return
+        }
         val expected = if (d.manualSide == "YES") "ALCISTA" else if (d.manualSide == "NO") "BAJISTA" else ""
         val alignment = when {
             d.manualSide.isEmpty() -> "No has marcado YES o NO."
