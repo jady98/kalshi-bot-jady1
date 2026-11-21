@@ -10,6 +10,9 @@ import android.os.*
 import android.provider.Settings
 import android.view.*
 import android.widget.*
+import android.text.SpannableString
+import android.text.Spanned
+import android.text.style.ForegroundColorSpan
 
 class RadarService : Service() {
     companion object {
@@ -20,14 +23,22 @@ class RadarService : Service() {
     private var panel: LinearLayout? = null
     private val handler = Handler(Looper.getMainLooper())
     private var lastSignal = ""
+    @Volatile private var loading = false
     private val task = object : Runnable {
         override fun run() {
-            Thread {
+            if (!loading) {
+                loading = true
+                Thread {
                 try {
                     val d = RadarData.load()
                     handler.post {
                         panel?.findViewWithTag<TextView>("price")?.text = "$" + "%,.0f".format(d.price)
-                        panel?.findViewWithTag<TextView>("updown")?.text = "ALCISTA  ${d.up}%     BAJISTA  ${100-d.up}%"
+                        val signalText = "ALCISTA  ${d.up}%     BAJISTA  ${100-d.up}%"
+                        val colored = SpannableString(signalText)
+                        colored.setSpan(ForegroundColorSpan(Color.rgb(0, 230, 150)), 0, ("ALCISTA  ${d.up}%").length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                        val bearishStart = signalText.indexOf("BAJISTA")
+                        colored.setSpan(ForegroundColorSpan(Color.rgb(255, 86, 112)), bearishStart, signalText.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                        panel?.findViewWithTag<TextView>("updown")?.text = colored
                         panel?.findViewWithTag<ProgressBar>("trend")?.progress = d.up
                         panel?.findViewWithTag<MiniChartView>("mini_chart")?.setCandles(d.candles)
                         panel?.findViewWithTag<TextView>("prediction")?.text = "$" + "%,.2f".format(d.prediction)
@@ -44,8 +55,12 @@ class RadarService : Service() {
                         }
                         if (signal.isEmpty()) lastSignal = ""
                     }
-                } catch (_: Exception) {}
+                } catch (_: Exception) {
+                } finally {
+                    loading = false
+                }
             }.start()
+            }
             handler.postDelayed(this, 1000)
         }
     }
