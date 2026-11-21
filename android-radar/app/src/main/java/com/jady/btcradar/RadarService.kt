@@ -12,6 +12,10 @@ import android.view.*
 import android.widget.*
 
 class RadarService : Service() {
+    companion object {
+        const val ACTION_SHOW = "com.jady.btcradar.SHOW_BUBBLE"
+        const val ACTION_HIDE = "com.jady.btcradar.HIDE_BUBBLE"
+    }
     private lateinit var wm: WindowManager
     private var panel: LinearLayout? = null
     private val handler = Handler(Looper.getMainLooper())
@@ -51,7 +55,7 @@ class RadarService : Service() {
         val nm = getSystemService(NotificationManager::class.java)
         if (Build.VERSION.SDK_INT >= 26) nm.createNotificationChannel(NotificationChannel("btc", "Alertas BTC", NotificationManager.IMPORTANCE_DEFAULT))
         startForeground(1, Notification.Builder(this, "btc").setSmallIcon(android.R.drawable.ic_dialog_info).setContentTitle("BTC Radar activo").setContentText("Monitoreando BTC/USD").build())
-        if (Settings.canDrawOverlays(this)) show()
+        if (Settings.canDrawOverlays(this) && getSharedPreferences("radar_settings", MODE_PRIVATE).getBoolean("bubble_enabled", false)) show()
         handler.post(task)
     }
 
@@ -127,8 +131,8 @@ class RadarService : Service() {
         }
         header.addView(close, LinearLayout.LayoutParams(dp(31), dp(31)))
         close.setOnClickListener {
-            try { wm.removeView(box) } catch (_: Exception) {}
-            panel = null
+            getSharedPreferences("radar_settings", MODE_PRIVATE).edit().putBoolean("bubble_enabled", false).apply()
+            removePanel()
         }
         box.addView(header)
 
@@ -176,6 +180,12 @@ class RadarService : Service() {
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, PixelFormat.TRANSLUCENT
         ).apply { gravity = Gravity.TOP or Gravity.END; x = dp(10); y = dp(145) }
 
+        // Tocar la burbuja abre el radar completo.
+        box.setOnClickListener {
+            val open = Intent(this, MainActivity::class.java).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP) }
+            startActivity(open)
+        }
+
         // Arrastrar desde la cabecera, sin bloquear el toque de la X.
         header.setOnTouchListener(object : View.OnTouchListener {
             var sx = 0f; var sy = 0f; var ox = 0; var oy = 0
@@ -183,7 +193,13 @@ class RadarService : Service() {
                 when (e.action) {
                     MotionEvent.ACTION_DOWN -> { sx=e.rawX; sy=e.rawY; ox=lp.x; oy=lp.y; return true }
                     MotionEvent.ACTION_MOVE -> { lp.x=(ox+sx-e.rawX).toInt(); lp.y=(oy+e.rawY-sy).toInt(); wm.updateViewLayout(box,lp); return true }
-                    MotionEvent.ACTION_UP -> return true
+                    MotionEvent.ACTION_UP -> {
+                        if (kotlin.math.abs(e.rawX-sx) < dp(8) && kotlin.math.abs(e.rawY-sy) < dp(8)) {
+                            val open = Intent(this@RadarService, MainActivity::class.java).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP) }
+                            startActivity(open)
+                        }
+                        return true
+                    }
                 }
                 return false
             }
@@ -192,17 +208,30 @@ class RadarService : Service() {
         panel = box
     }
 
+    private fun removePanel() {
+        try { panel?.let { wm.removeView(it) } } catch (_: Exception) {}
+        panel = null
+    }
+
     override fun onStartCommand(i: Intent?, f: Int, id: Int): Int {
-        if (Settings.canDrawOverlays(this) && panel == null) {
-            try { show() } catch (_: Exception) {}
+        when (i?.action) {
+            ACTION_HIDE -> removePanel()
+            ACTION_SHOW -> {
+                if (Settings.canDrawOverlays(this)) {
+                    getSharedPreferences("radar_settings", MODE_PRIVATE).edit().putBoolean("bubble_enabled", true).apply()
+                    if (panel == null) try { show() } catch (_: Exception) {}
+                }
+            }
+            else -> {
+                if (Settings.canDrawOverlays(this) && getSharedPreferences("radar_settings", MODE_PRIVATE).getBoolean("bubble_enabled", false) && panel == null) try { show() } catch (_: Exception) {}
+            }
         }
         return START_STICKY
     }
 
     override fun onDestroy() {
         handler.removeCallbacks(task)
-        try { panel?.let { wm.removeView(it) } } catch (_: Exception) {}
-        panel = null
+        removePanel()
         super.onDestroy()
     }
     override fun onBind(i: Intent?): IBinder? = null
