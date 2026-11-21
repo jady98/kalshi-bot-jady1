@@ -168,27 +168,33 @@ class RadarService : Service() {
                 .value{font-size:17px;font-weight:800;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
                 .barline{display:flex;height:13px;border-radius:8px;overflow:hidden;margin-top:10px;background:#273449}
                 #bull{width:50%;background:#00d995}#bear{width:50%;background:#ff536b}
-                .perc{display:flex;justify-content:space-between;font-size:10px;font-weight:700;margin-top:4px}
+                .probLabel{font-size:8px;color:#829bb5;letter-spacing:.6px;margin-top:8px}
+                .perc{display:flex;justify-content:space-between;font-size:10px;font-weight:700;margin-top:3px}
                 #up{color:#00e6a0}#down{color:#ff7185}
+                .reason{font-size:9px;line-height:1.35;color:#c1d0e2;margin-top:6px;white-space:normal}
+                .reason b{color:#8fcaff}
                 .bottom{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:7px;font-size:10px}
                 #trend{font-weight:800;white-space:nowrap}#close{color:#9db2c9;white-space:nowrap}
                 .bull #trend{color:#00e6a0}.bear #trend{color:#ff7185}.neutral #trend{color:#e8c66d}
                 </style></head><body><div class="wrap neutral" id="panel">
                 <div class="prices"><div class="card"><div class="label">PRECIO ACTUAL</div><div class="value" id="price">--</div></div>
                 <div class="card"><div class="label">PREDICCIÓN AL CIERRE</div><div class="value" id="prediction">--</div></div></div>
+                <div class="probLabel">PRONÓSTICO PROPIO DEL RADAR · PRÓXIMOS 15 MIN</div>
                 <div class="barline"><div id="bull"></div><div id="bear"></div></div>
                 <div class="perc"><span id="up">ALCISTA --%</span><span id="down">BAJISTA --%</span></div>
+                <div class="reason" id="why">Analizando momentum, estructura y fuerza del movimiento…</div>
                 <div class="bottom"><span id="trend">TENDENCIA INDECISA</span><span id="close">CIERRE --:--</span></div>
                 </div><script>
                 const money=v=>Number.isFinite(Number(v))&&Number(v)>0?'$'+Number(v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}):'--';
                 async function refresh(){
                   try{
                     const r=await fetch('/api?t='+Date.now(),{cache:'no-store'});if(!r.ok)throw Error('api');const d=await r.json();
-                    const p=Number(d.kalshi_yes_probability_pct??d.bullish_score??50);const up=Math.max(0,Math.min(100,Number.isFinite(p)?p:50));const down=100-up;
+                    const p=Number(d.bullish_score);const q=Number(d.bearish_score);const valid=d.bullish_score!=null&&d.bearish_score!=null&&Number.isFinite(p)&&Number.isFinite(q);const up=valid?Math.max(0,Math.min(100,p)):50;const down=valid?Math.max(0,Math.min(100,q)):50;
                     document.getElementById('price').textContent=money(d.brti_price??d.coinbase_price);
                     document.getElementById('prediction').textContent=money(d.predicted_price);
                     document.getElementById('bull').style.width=up+'%';document.getElementById('bear').style.width=down+'%';
-                    document.getElementById('up').textContent='ALCISTA '+up.toFixed(0)+'%';document.getElementById('down').textContent='BAJISTA '+down.toFixed(0)+'%';
+                    document.getElementById('up').textContent='ALCISTA '+(valid?up.toFixed(0)+'%':'--');document.getElementById('down').textContent='BAJISTA '+(valid?down.toFixed(0)+'%':'--');
+                    const emaUp=d.ema9!=null&&d.ema21!=null&&Number(d.ema9)>Number(d.ema21);const emaDown=d.ema9!=null&&d.ema21!=null&&Number(d.ema9)<Number(d.ema21);const mom=Number(d.momentum_pct);const rsi=d.rsi==null?'RSI sin datos':'RSI '+Number(d.rsi).toFixed(0);const pattern=String(d.pattern||'estructura sin confirmar');const evidence=[emaUp?'EMA 9 sobre 21':emaDown?'EMA 9 bajo 21':'EMA sin cruce claro',Number.isFinite(mom)?'momento '+(mom>=0?'+':'')+mom.toFixed(3)+'%':'momento sin datos',rsi,pattern].slice(0,3);document.getElementById('why').innerHTML='<b>POR QUÉ:</b> '+evidence.join(' · ')+(d.guidance_note?' <br><b>CONFIRMACIÓN:</b> '+String(d.guidance_note).replace(/[<>]/g,'').slice(0,135):'');
                     let dir=String(d.direction||'').toUpperCase();if(dir!=='ALCISTA'&&dir!=='BAJISTA')dir=up>=55?'ALCISTA':up<=45?'BAJISTA':'INDECISA';
                     const box=document.getElementById('panel');box.className='wrap '+(dir==='ALCISTA'?'bull':dir==='BAJISTA'?'bear':'neutral');
                     document.getElementById('trend').textContent='TENDENCIA '+dir;
@@ -215,12 +221,12 @@ class RadarService : Service() {
         }
         topBar.addView(title, LinearLayout.LayoutParams(0, -1, 1f))
         val type = if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE
-        val lp = WindowManager.LayoutParams(dp(340), dp(190), type,
+        val lp = WindowManager.LayoutParams(dp(340), dp(230), type,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, PixelFormat.TRANSLUCENT
         ).apply { gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL; y = dp(70) }
         fun resizePanel(delta: Int) {
             lp.width = (lp.width + dp(delta)).coerceIn(dp(250), dp(440))
-            lp.height = (lp.height + dp((delta * 0.45).toInt())).coerceIn(dp(150), dp(280))
+            lp.height = (lp.height + dp((delta * 0.45).toInt())).coerceIn(dp(190), dp(320))
             wm.updateViewLayout(root, lp)
         }
         val close = TextView(this).apply {
