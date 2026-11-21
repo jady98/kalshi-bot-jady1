@@ -44,7 +44,7 @@ class RadarService : Service() {
                         panel?.findViewWithTag<TextView>("prediction")?.text = "$" + "%,.2f".format(d.prediction)
                         panel?.findViewWithTag<TextView>("timer")?.text = d.time
                         panel?.findViewWithTag<TextView>("position")?.text =
-                            if (d.manualSide == "YES" || d.manualSide == "NO") "TU POSICIÓN: \${d.manualSide}" else "POSICIÓN: SIN MARCAR"
+                            if (d.manualSide == "YES" || d.manualSide == "NO") "TU POSICIÓN: ${d.manualSide}" else "POSICIÓN: SIN MARCAR"
                         notifyRadarEvent(d)
                     }
                 } catch (_: Exception) {
@@ -106,8 +106,8 @@ class RadarService : Service() {
         }
         if (d.direction == "ALCISTA" || d.direction == "BAJISTA") {
             val previous = prefs.getString("last_direction", "")
-            if (previous.isNotEmpty() && previous != d.direction) {
-                val key = "DIRECTION|\${d.direction}|\${d.alertKey}"
+            if (previous.orEmpty().isNotEmpty() && previous != d.direction) {
+                val key = "DIRECTION|${d.direction}|${d.alertKey}"
                 if (prefs.getString("last_event", "") != key) {
                     val notification = Notification.Builder(this, "btc_events")
                         .setSmallIcon(android.R.drawable.ic_dialog_info)
