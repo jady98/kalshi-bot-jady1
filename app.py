@@ -3748,7 +3748,8 @@ button{border:1px solid #35476b;background:#182640;color:white;border-radius:9px
  html,body{width:100%;height:100%;min-height:0;overflow:hidden}
  body{padding:0}
  main{width:100%;max-width:none;height:100vh;height:100dvh;min-height:0;margin:0;padding:5px;display:grid;grid-template-rows:auto auto auto auto minmax(150px,1fr) auto;gap:5px;overflow:hidden}
- .header{min-height:24px;margin:0;padding:0 2px}.logo{font-size:19px}.status{font-size:8px}
+ .header{min-height:28px;margin:0;padding:0 2px;justify-content:center;position:relative}.logo{font-size:17px;line-height:1.1;text-align:center}.status{font-size:7px;position:absolute;right:2px;top:50%;transform:translateY(-50%)}
+ #signalStage,#newsIntel,#newsHeadlines,#entryEconomics{display:none!important}
  .grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:5px;margin:0;min-height:0}
  .grid .card{min-width:0;margin:0;padding:7px 5px;border-radius:10px}
  .grid .brand-mark{display:none}.grid .label{font-size:clamp(7px,2vw,9px);line-height:1.12;overflow-wrap:anywhere}
