@@ -13,6 +13,7 @@ import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.webkit.JavascriptInterface
 import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.LinearLayout
@@ -22,8 +23,6 @@ import android.widget.Toast
 
 class MainActivity : Activity() {
     private lateinit var web: WebView
-    private lateinit var bubbleButton: Button
-    private lateinit var alertsSwitch: Switch
     private val prefs by lazy { getSharedPreferences("radar_settings", MODE_PRIVATE) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -36,6 +35,7 @@ class MainActivity : Activity() {
         web = WebView(this).apply {
             setBackgroundColor(Color.rgb(11, 17, 26))
             settings.javaScriptEnabled = true
+            addJavascriptInterface(RadarBridge(), "AndroidRadar")
             settings.domStorageEnabled = true
             settings.databaseEnabled = true
             settings.loadsImagesAutomatically = true
@@ -66,67 +66,37 @@ class MainActivity : Activity() {
         root.addView(web, FrameLayout.LayoutParams(-1, -1))
         root.addView(progress, FrameLayout.LayoutParams(-1, 4, Gravity.TOP))
 
-        val controls = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER
-            setPadding(dp(9), dp(7), dp(9), dp(7))
-            background = GradientDrawable().apply {
-                setColor(Color.rgb(15, 27, 43))
-                cornerRadius = dp(28).toFloat()
-                setStroke(dp(1), Color.rgb(54, 82, 111))
-            }
-            elevation = dp(12).toFloat()
-        }
-
-        bubbleButton = Button(this).apply {
-            text = "ACTIVAR VENTANA"
-            textSize = 11f
-            isAllCaps = false
-            setTextColor(Color.WHITE)
-            minHeight = dp(42)
-            minimumHeight = dp(42)
-            background = GradientDrawable().apply {
-                setColor(Color.rgb(65, 78, 96))
-                cornerRadius = dp(24).toFloat()
-            }
-            setPadding(dp(16), 0, dp(16), 0)
-            setOnClickListener { toggleBubble() }
-        }
-        controls.addView(bubbleButton, LinearLayout.LayoutParams(dp(154), dp(42)))
-
-        alertsSwitch = Switch(this).apply {
-            text = "ALERTAS"
-            textSize = 11f
-            setTextColor(Color.WHITE)
-            isChecked = getSharedPreferences("radar_notifications", MODE_PRIVATE)
-                .getBoolean("alerts_enabled", true)
-            setPadding(dp(9), 0, dp(4), 0)
-            setOnCheckedChangeListener { _, checked ->
-                getSharedPreferences("radar_notifications", MODE_PRIVATE)
-                    .edit().putBoolean("alerts_enabled", checked).apply()
-                Toast.makeText(
-                    this@MainActivity,
-                    if (checked) "Alertas activadas" else "Alertas desactivadas",
-                    Toast.LENGTH_SHORT
-                ).show()
-            }
-        }
-        controls.addView(alertsSwitch, LinearLayout.LayoutParams(dp(116), dp(42)))
-
-        val controlsParams = FrameLayout.LayoutParams(
-            FrameLayout.LayoutParams.WRAP_CONTENT,
-            FrameLayout.LayoutParams.WRAP_CONTENT,
-            Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
-        ).apply {
-            bottomMargin = dp(18)
-        }
-        root.addView(controls, controlsParams)
-
         setContentView(root)
-        refreshBubbleButton()
         enableRadarNotifications()
         if (savedInstanceState == null) web.loadUrl("https://kalshi-bot-jady1.onrender.com/")
         else web.restoreState(savedInstanceState)
+    }
+
+    private inner class RadarBridge {
+        @JavascriptInterface
+        fun setAlertsEnabled(enabled: Boolean) {
+            getSharedPreferences("radar_notifications", MODE_PRIVATE)
+                .edit().putBoolean("alerts_enabled", enabled).apply()
+        }
+
+        @JavascriptInterface
+        fun getAlertsEnabled(): Boolean {
+            return getSharedPreferences("radar_notifications", MODE_PRIVATE)
+                .getBoolean("alerts_enabled", true)
+        }
+
+        @JavascriptInterface
+        fun activateWindow() {
+            runOnUiThread {
+                if (!Settings.canDrawOverlays(this@MainActivity)) {
+                    Toast.makeText(this@MainActivity, "Permite mostrar sobre otras aplicaciones para usar la ventana.", Toast.LENGTH_LONG).show()
+                    startActivityForResult(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + packageName)), 411)
+                } else {
+                    prefs.edit().putBoolean("bubble_enabled", true).apply()
+                    sendServiceAction(RadarService.ACTION_SHOW)
+                }
+            }
+        }
     }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
@@ -146,17 +116,6 @@ class MainActivity : Activity() {
             prefs.edit().putBoolean("bubble_enabled", true).apply()
             sendServiceAction(RadarService.ACTION_SHOW)
             Toast.makeText(this, "Burbuja activada", Toast.LENGTH_SHORT).show()
-        }
-        refreshBubbleButton()
-    }
-
-    private fun refreshBubbleButton() {
-        if (!::bubbleButton.isInitialized) return
-        val enabled = prefs.getBoolean("bubble_enabled", false)
-        bubbleButton.text = if (enabled) "VENTANA ACTIVADA" else "ACTIVAR VENTANA"
-        bubbleButton.background = GradientDrawable().apply {
-            setColor(if (enabled) Color.rgb(20, 145, 104) else Color.rgb(65, 78, 96))
-            cornerRadius = dp(24).toFloat()
         }
     }
 
@@ -203,7 +162,6 @@ class MainActivity : Activity() {
         if (requestCode == 411 && Settings.canDrawOverlays(this)) {
             prefs.edit().putBoolean("bubble_enabled", true).apply()
             sendServiceAction(RadarService.ACTION_SHOW)
-            refreshBubbleButton()
         }
     }
 
