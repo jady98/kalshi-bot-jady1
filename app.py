@@ -348,6 +348,8 @@ def update_scalp_trade(guidance, ticker, orderbook, economics,
     preview_sl_fee = _estimated_contract_fee(preview_sl) if preview_sl is not None else None
     preview_profit = round(preview_tp - preview_tp_fee - preview_total_cost, 4) if preview_ask is not None else None
     preview_loss = round(preview_sl - preview_sl_fee - preview_total_cost, 4) if preview_ask is not None else None
+    preview_max_profit = round(1.0 - preview_total_cost, 4) if preview_ask is not None else None
+    preview_max_loss = preview_total_cost
     preview = {
         "available": preview_ask is not None,
         "side": preview_side if preview_ask is not None else None,
@@ -359,6 +361,8 @@ def update_scalp_trade(guidance, ticker, orderbook, economics,
         "stop_loss_price": preview_sl,
         "profit_at_take_profit": preview_profit,
         "loss_at_stop_loss": preview_loss,
+        "max_profit_at_settlement": preview_max_profit,
+        "max_loss_at_settlement": preview_max_loss,
         "contracts_assumed": 1,
         "price_source": "ASK REAL DEL LIBRO DE KALSHI",
         "fee_note": "Tarifa taker estimada; la tarifa final depende de la serie y de la orden"
@@ -5521,8 +5525,10 @@ function updateScalpTrade(trade){
         const loss = Number(preview.loss_at_stop_loss);
         const cost = Number(preview.total_cost);
         estimate.textContent = "Costo total aprox.: " + price(cost) +
-            " (incluye tarifa de compra). Si llega al TP: " + (gain >= 0 ? "+" : "") + price(gain) +
-            ". Si toca SL: " + price(loss) + ". Estimado por 1 contrato, incluye tarifas taker aproximadas.";
+            " por 1 contrato. Al TP: " + (gain >= 0 ? "+" : "") + price(gain) +
+            ". Al SL: " + price(loss) + ". Si vence en contra: puedes perder hasta " +
+            price(preview.max_loss_at_settlement) + ". Si vence a favor: máximo " +
+            price(preview.max_profit_at_settlement) + ". Tarifas aproximadas.";
         pnl.textContent = "Riesgo " + price(Math.abs(loss));
         pnl.style.color = "#ff8999";
     }else{
