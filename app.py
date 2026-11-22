@@ -4470,11 +4470,10 @@ button{border:1px solid #35476b;background:#182640;color:white;border-radius:9px
     <div class="manual-position" id="manualPosition">
         <div class="small manual-position-title">¿QUÉ COMPRASTE EN ESTE CONTRATO?</div>
         <div class="manual-position-buttons">
-            <button type="button" id="manualYes" onclick="registerManualPosition('YES')">COMPRÉ YES</button>
-            <button type="button" id="manualNo" onclick="registerManualPosition('NO')">COMPRÉ NO</button>
+            <button type="button" id="manualYes" onclick="registerManualPosition('YES')">ENTRÉ YES</button>
+            <button type="button" id="manualNo" onclick="registerManualPosition('NO')">ENTRÉ NO</button>
         </div>
-        <label class="small" for="manualEntryPrice">PRECIO REAL EJECUTADO (ej. 0.54)</label>
-        <input class="manual-entry-price" id="manualEntryPrice" type="number" min="0.01" max="0.99" step="0.01" placeholder="0.54" inputmode="decimal">
+        <div class="small" id="manualEntryQuote">Al tocar YES o NO, el radar captura el ASK en vivo de Kalshi como entrada estimada.</div>
         <label class="small" for="manualContracts">CANTIDAD DE CONTRATOS</label>
         <input class="manual-entry-price" id="manualContracts" type="number" min="1" max="100000" step="1" value="1" inputmode="numeric">
         <div class="small" id="manualPositionStatus">Registra tu precio ejecutado y cantidad. El radar vigilará el BID real de salida.</div>
@@ -5343,18 +5342,15 @@ async function registerManualPosition(side){
         status.textContent = "No hay un contrato activo de Kalshi para registrar.";
         return;
     }
-    const entryPrice = Number($("manualEntryPrice") && $("manualEntryPrice").value);
     const contracts = Number($("manualContracts") && $("manualContracts").value || 1);
-    if(!Number.isFinite(entryPrice) || entryPrice <= 0 || entryPrice >= 1){
-        status.textContent = "Escribe el precio real al que te ejecutaron la compra (ej. 0.54).";
-        return;
-    }
     if(!Number.isFinite(contracts) || contracts <= 0){
-        status.textContent = "Escribe cuántos contratos compraste.";
+        status.textContent = "Escribe una cantidad válida de contratos.";
         return;
     }
-    const payload = {side, ticker, entry_price: entryPrice, contracts};
-    status.textContent = "Guardando tu posición...";
+    // El servidor consulta el libro vivo y captura el ASK del lado elegido
+    // exactamente al recibir este clic. Es una entrada estimada, no un fill confirmado.
+    const payload = {side, ticker, contracts};
+    status.textContent = "Capturando ASK real de Kalshi y registrando entrada...";
     try{
         const response = await fetch("/api/manual-position",{
             method:"POST",
@@ -5363,9 +5359,16 @@ async function registerManualPosition(side){
         });
         const result = await response.json();
         if(!response.ok || !result.ok) throw new Error(result.error || "No se pudo guardar.");
+        const capturedEntry = Number(result.entry_price);
         $("manualYes").classList.toggle("selected",side==="YES");
         $("manualNo").classList.toggle("selected",side==="NO");
-        status.textContent = "POSICIÓN REGISTRADA: " + side + " · " + contracts + " contratos · entrada $" + entryPrice.toFixed(2) + ". Vigilando BID.";
+        status.textContent = "ENTRADA REGISTRADA: " + side + " · " + contracts + " contratos · ASK capturado $" + capturedEntry.toFixed(2) + " (estimado). Vigilando BID, objetivo y stop.";
+        if(radarAlertsEnabled){
+            playRadarTone("entry");
+            if(window.navigator && typeof window.navigator.vibrate === "function"){
+                window.navigator.vibrate([100,60,160]);
+            }
+        }
     }catch(error){
         status.textContent = error.message || "Error al registrar la posición.";
     }
