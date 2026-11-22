@@ -330,6 +330,24 @@ def update_scalp_trade(guidance, ticker, orderbook, economics,
     """
     stage = str((guidance or {}).get("entry_stage") or "")
     seconds_left = int((guidance or {}).get("entry_seconds_remaining") or 0)
+    # Previsión visible basada exclusivamente en el ask vigente del libro real de Kalshi.
+    preview_direction = (guidance or {}).get("entry_direction") or (guidance or {}).get("short_direction")
+    preview_side = "YES" if preview_direction == "ALCISTA" else "NO" if preview_direction == "BAJISTA" else None
+    preview_ask = None
+    if contract_active and ticker and orderbook and orderbook.get("available") and preview_side:
+        raw_ask = orderbook.get("best_yes_ask" if preview_side == "YES" else "best_no_ask")
+        if valid_price(raw_ask):
+            raw_ask = float(raw_ask)
+            if 0 < raw_ask < 1:
+                preview_ask = round(raw_ask, 4)
+    preview = {
+        "available": preview_ask is not None,
+        "side": preview_side if preview_ask is not None else None,
+        "direction": preview_direction if preview_ask is not None else None,
+        "entry_price": preview_ask,
+        "take_profit_price": round(min(0.99, preview_ask * 1.20), 4) if preview_ask is not None else None,
+        "stop_loss_price": round(max(0.01, preview_ask * 0.88), 4) if preview_ask is not None else None
+    }
     with lock:
         state = _scalp_trade
         if not contract_active or not ticker:
@@ -416,7 +434,15 @@ def update_scalp_trade(guidance, ticker, orderbook, economics,
             "pnl_pct": round(pnl_pct, 2) if pnl_pct is not None else None,
             "exit_price": state.get("exit_price"),
             "exit_reason": state.get("exit_reason"),
-            "seconds_remaining": seconds_left
+            "seconds_remaining": seconds_left,
+            "preview": preview,
+            "message": (
+                "Entrada simulada confirmada" if state.get("status") == "ABIERTA"
+                else state.get("exit_reason") or (
+                    "Previsión con ask real de Kalshi · " + str(preview_side)
+                    if preview.get("available") else "Esperando precios reales del libro de Kalshi"
+                )
+            )
         }
 
 
@@ -5437,15 +5463,19 @@ function updateScalpTrade(trade){
     const status = String(trade.status || "ESPERANDO");
     panel.classList.toggle("open",status === "ABIERTA");
     panel.classList.toggle("closed",status === "CERRADA");
+    const preview = trade.preview || {};
+    const isLiveTrade = status === "ABIERTA" || status === "CERRADA";
+    const showPreview = !isLiveTrade && !!preview.available;
+    panel.classList.toggle("preview", showPreview);
     $("scalpTradeStatus").textContent = status === "ABIERTA" ? "EN CURSO" :
-        status === "CERRADA" ? "SALIDA" : "ESPERANDO";
-    const price = value => value == null ? "--" : "$" + Number(value).toFixed(2);
-    $("scalpEntryPrice").textContent = price(trade.entry_price);
-    $("scalpTakeProfit").textContent = price(trade.take_profit_price);
-    $("scalpStopLoss").textContent = price(trade.stop_loss_price);
+        status === "CERRADA" ? "SALIDA" : showPreview ? "PREVISIÓN REAL" : "ESPERANDO";
+    const price = value => value == null ? "--" : "$" + Number(value).toFixed(4);
+    $("scalpEntryPrice").textContent = price(isLiveTrade ? trade.entry_price : preview.entry_price);
+    $("scalpTakeProfit").textContent = price(isLiveTrade ? trade.take_profit_price : preview.take_profit_price);
+    $("scalpStopLoss").textContent = price(isLiveTrade ? trade.stop_loss_price : preview.stop_loss_price);
     $("scalpTradeDetail").textContent = trade.status === "ABIERTA"
         ? (trade.side || "") + " · BID " + price(trade.current_bid) + " · " + (trade.seconds_remaining || 0) + " s restantes"
-        : (trade.message || "Esperando entrada confirmada");
+        : (trade.message || "Esperando precios reales del libro de Kalshi");
     const pnl = $("scalpTradePnl");
     if(trade.net_pnl == null){
         pnl.textContent = "--";
