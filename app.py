@@ -5279,8 +5279,8 @@ async function enableRadarAlerts(){
     }
 }
 
-function playRadarTone(kind){
-    if(!radarAlertsEnabled || !radarAudioContext) return;
+function playRadarTone(kind, force=false){
+    if((!radarAlertsEnabled && !force) || !radarAudioContext) return;
     try{
         const now = radarAudioContext.currentTime;
         const frequencies = kind === "exit" ? [330,247,196] : kind === "hold" ? [784,1046] : kind === "bearish" ? [330,247] : [660,988];
@@ -5350,6 +5350,17 @@ function handleScalpTradeAlert(trade){
 
 
 async function registerManualPosition(side){
+    // El toque YES/NO habilita el audio del navegador desde un gesto explícito.
+    try{
+        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+        if(AudioContextClass){
+            radarAudioContext = radarAudioContext || new AudioContextClass();
+            if(radarAudioContext.state === "suspended") await radarAudioContext.resume();
+        }
+        radarAlertsEnabled = true;
+        try{ if(window.AndroidRadar) window.AndroidRadar.setAlertsEnabled(true); }catch(e){}
+        paintRadarAlertToggle();
+    }catch(audioError){ console.warn("Audio no disponible",audioError); }
     const ticker = window.currentRadarTicker;
     const status = $("manualPositionStatus");
     if(!ticker){
@@ -5378,7 +5389,7 @@ async function registerManualPosition(side){
         $("manualNo").classList.toggle("selected",side==="NO");
         status.textContent = "ENTRADA REGISTRADA: " + side + " · " + contracts + " contratos · ASK capturado $" + capturedEntry.toFixed(2) + " (estimado). Vigilando BID, objetivo y stop.";
         // El toque del usuario desbloquea audio; la confirmación de entrada siempre se anuncia.
-        playRadarTone("entry");
+        playRadarTone("entry",true);
         if(window.navigator && typeof window.navigator.vibrate === "function"){
             window.navigator.vibrate([100,60,160]);
         }
