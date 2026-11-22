@@ -5797,7 +5797,7 @@ function updateRadar(d){
     const manualPanel = $("manualPosition");
     const manualStatus = $("manualPositionStatus");
     const manualPosition = d.manual_position || null;
-    const canRegister = String(d.entry_stage || "").toUpperCase() === "ENTRADA";
+    const canRegister = !!d.kalshi_market_active;
     if(manualPanel) manualPanel.hidden = !canRegister && !manualPosition;
     if(manualPosition){
         $("manualYes").classList.toggle("selected",manualPosition.side==="YES");
@@ -5814,7 +5814,7 @@ function updateRadar(d){
         if($("manualYes")) $("manualYes").disabled = !canRegister;
         if($("manualNo")) $("manualNo").disabled = !canRegister;
         if(manualStatus) manualStatus.textContent = canRegister
-            ? "Entrada confirmada. Introduce el precio ejecutado y la cantidad; luego marca YES o NO."
+            ? "Contrato activo. Registra tu compra real: precio ejecutado, cantidad y YES/NO. También puedes hacerlo aunque el radar no haya dado entrada."
             : window.currentRadarTicker
                 ? "Se habilitará cuando el radar confirme la entrada."
                 : "Esperando un contrato activo de Kalshi.";
