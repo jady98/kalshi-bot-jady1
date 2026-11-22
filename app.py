@@ -340,13 +340,28 @@ def update_scalp_trade(guidance, ticker, orderbook, economics,
             raw_ask = float(raw_ask)
             if 0 < raw_ask < 1:
                 preview_ask = round(raw_ask, 4)
+    preview_tp = round(min(0.99, preview_ask * 1.20), 4) if preview_ask is not None else None
+    preview_sl = round(max(0.01, preview_ask * 0.88), 4) if preview_ask is not None else None
+    preview_entry_fee = _estimated_contract_fee(preview_ask) if preview_ask is not None else None
+    preview_total_cost = round(preview_ask + preview_entry_fee, 4) if preview_ask is not None else None
+    preview_tp_fee = _estimated_contract_fee(preview_tp) if preview_tp is not None else None
+    preview_sl_fee = _estimated_contract_fee(preview_sl) if preview_sl is not None else None
+    preview_profit = round(preview_tp - preview_tp_fee - preview_total_cost, 4) if preview_ask is not None else None
+    preview_loss = round(preview_sl - preview_sl_fee - preview_total_cost, 4) if preview_ask is not None else None
     preview = {
         "available": preview_ask is not None,
         "side": preview_side if preview_ask is not None else None,
         "direction": preview_direction if preview_ask is not None else None,
         "entry_price": preview_ask,
-        "take_profit_price": round(min(0.99, preview_ask * 1.20), 4) if preview_ask is not None else None,
-        "stop_loss_price": round(max(0.01, preview_ask * 0.88), 4) if preview_ask is not None else None
+        "entry_fee": preview_entry_fee,
+        "total_cost": preview_total_cost,
+        "take_profit_price": preview_tp,
+        "stop_loss_price": preview_sl,
+        "profit_at_take_profit": preview_profit,
+        "loss_at_stop_loss": preview_loss,
+        "contracts_assumed": 1,
+        "price_source": "ASK REAL DEL LIBRO DE KALSHI",
+        "fee_note": "Tarifa taker estimada; la tarifa final depende de la serie y de la orden"
     }
     with lock:
         state = _scalp_trade
@@ -430,8 +445,11 @@ def update_scalp_trade(guidance, ticker, orderbook, economics,
             "take_profit_price": state.get("take_profit_price"),
             "stop_loss_price": state.get("stop_loss_price"),
             "current_bid": bid,
+            "entry_fee": state.get("entry_fee"),
+            "total_cost": state.get("total_cost"),
             "net_pnl": round(pnl, 4) if pnl is not None else None,
             "pnl_pct": round(pnl_pct, 2) if pnl_pct is not None else None,
+            "contracts_assumed": 1,
             "exit_price": state.get("exit_price"),
             "exit_reason": state.get("exit_reason"),
             "seconds_remaining": seconds_left,
@@ -4126,6 +4144,7 @@ button{border:1px solid #35476b;background:#182640;color:white;border-radius:9px
 .scalp-trade-levels div:nth-child(2) b{color:#55e0a6}
 .scalp-trade-levels div:nth-child(3) b{color:#ff8999}
 .scalp-trade-bottom{font-size:8px;line-height:1.2}
+.scalp-trade-estimate{margin-top:5px;padding-top:5px;border-top:1px solid #26354b;color:#aebbd1;font-size:8px;line-height:1.35;white-space:pre-line}
 #scalpTradePnl{font-size:10px;font-variant-numeric:tabular-nums;color:#dce6f8}
 @media(max-width:380px){.scalp-trade-panel{padding:6px}.scalp-trade-levels b{font-size:11px}}
 
@@ -4395,11 +4414,12 @@ button{border:1px solid #35476b;background:#182640;color:white;border-radius:9px
     <div class="scalp-trade-panel" id="scalpTradePanel" aria-live="polite">
         <div class="scalp-trade-heading"><strong>ENTRADA / SALIDA · 15 MIN</strong><span id="scalpTradeStatus">ESPERANDO</span></div>
         <div class="scalp-trade-levels">
-            <div><small>ENTRADA</small><b id="scalpEntryPrice">--</b></div>
-            <div><small>TAKE PROFIT</small><b id="scalpTakeProfit">--</b></div>
-            <div><small>STOP LOSS</small><b id="scalpStopLoss">--</b></div>
+            <div><small>COMPRA ASK</small><b id="scalpEntryPrice">--</b></div>
+            <div><small>OBJETIVO TP</small><b id="scalpTakeProfit">--</b></div>
+            <div><small>STOP SL</small><b id="scalpStopLoss">--</b></div>
         </div>
-        <div class="scalp-trade-bottom"><span id="scalpTradeDetail">Esperando entrada confirmada</span><strong id="scalpTradePnl">--</strong></div>
+        <div class="scalp-trade-bottom"><span id="scalpTradeDetail">Esperando precios reales de Kalshi</span><strong id="scalpTradePnl">--</strong></div>
+        <div class="scalp-trade-estimate" id="scalpTradeEstimate">Importes estimados por 1 contrato. No se envían órdenes.</div>
     </div>
     <div class="manual-position" id="manualPosition">
         <div class="small manual-position-title">¿QUÉ COMPRASTE EN ESTE CONTRATO?</div>
@@ -5467,24 +5487,49 @@ function updateScalpTrade(trade){
     const isLiveTrade = status === "ABIERTA" || status === "CERRADA";
     const showPreview = !isLiveTrade && !!preview.available;
     panel.classList.toggle("preview", showPreview);
-    $("scalpTradeStatus").textContent = status === "ABIERTA" ? "EN CURSO" :
-        status === "CERRADA" ? "SALIDA" : showPreview ? "PREVISIÓN REAL" : "ESPERANDO";
-    const price = value => value == null ? "--" : "$" + Number(value).toFixed(4);
+    $("scalpTradeStatus").textContent = status === "ABIERTA" ? "SEGUIMIENTO SIMULADO" :
+        status === "CERRADA" ? "SEGUIMIENTO CERRADO" : showPreview ? "PRECIOS REALES · PREVISIÓN" : "ESPERANDO LIBRO";
+    const price = value => value == null ? "--" : "$" + Number(value).toFixed(2);
     $("scalpEntryPrice").textContent = price(isLiveTrade ? trade.entry_price : preview.entry_price);
     $("scalpTakeProfit").textContent = price(isLiveTrade ? trade.take_profit_price : preview.take_profit_price);
     $("scalpStopLoss").textContent = price(isLiveTrade ? trade.stop_loss_price : preview.stop_loss_price);
-    $("scalpTradeDetail").textContent = trade.status === "ABIERTA"
-        ? (trade.side || "") + " · BID " + price(trade.current_bid) + " · " + (trade.seconds_remaining || 0) + " s restantes"
-        : (trade.message || "Esperando precios reales del libro de Kalshi");
+    const detail = $("scalpTradeDetail");
+    const estimate = $("scalpTradeEstimate");
     const pnl = $("scalpTradePnl");
-    if(trade.net_pnl == null){
+    if(status === "ABIERTA" || status === "CERRADA"){
+        const liveBid = trade.current_bid == null ? trade.exit_price : trade.current_bid;
+        detail.textContent = (trade.side || "") + " · venta ahora BID " + price(liveBid) +
+            (trade.seconds_remaining == null ? "" : " · " + trade.seconds_remaining + " s");
+        if(status === "ABIERTA" && trade.net_pnl != null){
+            const value = Number(trade.net_pnl);
+            pnl.textContent = (value >= 0 ? "+" : "") + "$" + value.toFixed(2);
+            pnl.style.color = value >= 0 ? "#55e0a6" : "#ff8999";
+        }else if(status === "CERRADA" && trade.net_pnl != null){
+            const value = Number(trade.net_pnl);
+            pnl.textContent = (value >= 0 ? "+" : "") + "$" + value.toFixed(2);
+            pnl.style.color = value >= 0 ? "#55e0a6" : "#ff8999";
+        }else{
+            pnl.textContent = "P/L --";
+            pnl.style.color = "#dce6f8";
+        }
+        estimate.textContent = status === "CERRADA"
+            ? (trade.exit_reason || "Posición cerrada") + " · resultado neto estimado después de tarifas."
+            : "Resultado flotante calculado con el BID real disponible y tarifa estimada. Seguimiento simulado; no se envió ninguna orden.";
+    }else if(showPreview){
+        detail.textContent = preview.side + " · compra al ASK real · 1 contrato";
+        const gain = Number(preview.profit_at_take_profit);
+        const loss = Number(preview.loss_at_stop_loss);
+        const cost = Number(preview.total_cost);
+        estimate.textContent = "Costo total aprox.: " + price(cost) +
+            " (incluye tarifa de compra). Si llega al TP: " + (gain >= 0 ? "+" : "") + price(gain) +
+            ". Si toca SL: " + price(loss) + ". Estimado por 1 contrato, incluye tarifas taker aproximadas.";
+        pnl.textContent = "Riesgo " + price(Math.abs(loss));
+        pnl.style.color = "#ff8999";
+    }else{
+        detail.textContent = trade.message || "Esperando precios reales del libro de Kalshi";
+        estimate.textContent = "Sin ASK/BID actual no se calcula compra, ganancia ni pérdida. No se inventan precios.";
         pnl.textContent = "--";
         pnl.style.color = "#dce6f8";
-    }else{
-        const value = Number(trade.net_pnl);
-        pnl.textContent = (value >= 0 ? "+" : "") + "$" + value.toFixed(4) +
-            (trade.pnl_pct == null ? "" : " · " + Number(trade.pnl_pct).toFixed(1) + "%");
-        pnl.style.color = value >= 0 ? "#55e0a6" : "#ff8999";
     }
 }
 
