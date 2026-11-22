@@ -2209,26 +2209,30 @@ def get_15m_error_diagnostics():
 
 
 
-def record_manual_position(market_ticker, side, entry_price=None, entry_ts=None):
-    """Registra la posición elegida por la usuaria; no envía órdenes a Kalshi."""
+def record_manual_position(market_ticker, side, entry_price, contracts=1, entry_ts=None):
+    """Registra una posición manual con precio ejecutado y cantidad; no envía órdenes."""
     global _db_status
     ticker = str(market_ticker or "").strip()
     side = str(side or "").strip().upper()
     try:
         ts = float(entry_ts if entry_ts is not None else time.time())
-        price = None if entry_price in (None, "") else float(entry_price)
+        price = float(entry_price)
+        qty = float(contracts)
         if not ticker or side not in ("YES", "NO") or not math.isfinite(ts) or ts <= 0:
             return False
-        if price is not None and (not math.isfinite(price) or not 0 < price < 1):
+        if not math.isfinite(price) or not 0 < price < 1:
+            return False
+        if not math.isfinite(qty) or qty <= 0 or qty > 100000:
             return False
         with _connect() as conn:
+            conn.execute("ALTER TABLE btc_manual_positions ADD COLUMN IF NOT EXISTS contracts DOUBLE PRECISION NOT NULL DEFAULT 1")
             row = conn.execute("""
                 INSERT INTO btc_manual_positions
-                    (market_ticker, side, entry_price, entry_ts)
-                VALUES (%s, %s, %s, %s)
+                    (market_ticker, side, entry_price, entry_ts, contracts)
+                VALUES (%s, %s, %s, %s, %s)
                 ON CONFLICT (market_ticker) DO NOTHING
                 RETURNING market_ticker
-            """, (ticker, side, price, ts)).fetchone()
+            """, (ticker, side, price, ts, qty)).fetchone()
         _db_status = "CONECTADA"
         return row is not None
     except Exception as exc:
@@ -2243,9 +2247,10 @@ def get_manual_position(market_ticker):
         return None
     try:
         with _connect() as conn:
+            conn.execute("ALTER TABLE btc_manual_positions ADD COLUMN IF NOT EXISTS contracts DOUBLE PRECISION NOT NULL DEFAULT 1")
             row = conn.execute("""
                 SELECT market_ticker, side, entry_price, entry_ts, status,
-                       official_result, pnl_per_contract
+                       official_result, pnl_per_contract, contracts
                 FROM btc_manual_positions
                 WHERE market_ticker = %s
             """, (ticker,)).fetchone()
@@ -2256,7 +2261,8 @@ def get_manual_position(market_ticker):
             "entry_price": float(row[2]) if row[2] is not None else None,
             "entry_ts": float(row[3]), "status": row[4],
             "official_result": row[5],
-            "pnl_per_contract": float(row[6]) if row[6] is not None else None
+            "pnl_per_contract": float(row[6]) if row[6] is not None else None,
+            "contracts": float(row[7] or 1)
         }
     except Exception as exc:
         _db_status = "ERROR: " + str(exc)[:180]
