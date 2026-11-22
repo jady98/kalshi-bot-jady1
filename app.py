@@ -4169,6 +4169,12 @@ button{border:1px solid #35476b;background:#182640;color:white;border-radius:9px
 
 .manual-position{margin-top:14px;padding:12px;border:1px solid #29344b;border-radius:12px;background:#0b1220}
 .manual-position-title{font-weight:800;letter-spacing:.5px;margin-bottom:9px;color:#cbd5ef}
+.manual-live-metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin-top:8px}
+.manual-live-metrics>div{background:#101a2b;border:1px solid #34425b;border-radius:8px;padding:7px;min-width:0}
+.manual-live-metrics small{display:block;color:#91a0b8;font-size:9px;font-weight:800}
+.manual-live-metrics strong{display:block;color:#f3f5ff;font-size:15px;margin-top:4px;overflow-wrap:anywhere}
+#manualLivePnl.profit{color:#55e0a6}#manualLivePnl.loss{color:#ff8999}
+#manualLiveState{margin-top:6px;font-weight:900;color:#f4c95d}
 .manual-position-buttons{display:flex;gap:10px;margin-bottom:10px}
 .manual-position-buttons button{flex:1;min-height:42px;border:1px solid #40506c;border-radius:9px;background:#141f33;color:#f4f6ff;font-weight:800}
 .manual-position-buttons button.selected{border-color:#00d995;background:#103b2b;color:#79ffc0;box-shadow:0 0 12px #00d99533}
@@ -4476,7 +4482,15 @@ button{border:1px solid #35476b;background:#182640;color:white;border-radius:9px
         <div class="small" id="manualEntryQuote">Al tocar YES o NO, el radar captura el ASK en vivo de Kalshi como entrada estimada.</div>
         <label class="small" for="manualContracts">CANTIDAD DE CONTRATOS</label>
         <input class="manual-entry-price" id="manualContracts" type="number" min="1" max="100000" step="1" value="1" inputmode="numeric">
-        <div class="small" id="manualPositionStatus">Registra tu precio ejecutado y cantidad. El radar vigilará el BID real de salida.</div>
+        <div class="small" id="manualPositionStatus">Elige YES o NO para capturar el ASK vivo de Kalshi.</div>
+        <div class="manual-live-metrics" id="manualLiveMetrics" hidden>
+            <div><small>ENTRADA</small><strong id="manualLiveEntry">--</strong></div>
+            <div><small>BID PARA SALIR</small><strong id="manualLiveBid">--</strong></div>
+            <div><small>GANANCIA / PÉRDIDA</small><strong id="manualLivePnl">--</strong></div>
+            <div><small>OBJETIVO</small><strong id="manualLiveTp">--</strong></div>
+            <div><small>STOP LOSS</small><strong id="manualLiveSl">--</strong></div>
+        </div>
+        <div class="small" id="manualLiveState" hidden>POSICIÓN EN SEGUIMIENTO</div>
     </div>
 </section>
 
@@ -5363,11 +5377,10 @@ async function registerManualPosition(side){
         $("manualYes").classList.toggle("selected",side==="YES");
         $("manualNo").classList.toggle("selected",side==="NO");
         status.textContent = "ENTRADA REGISTRADA: " + side + " · " + contracts + " contratos · ASK capturado $" + capturedEntry.toFixed(2) + " (estimado). Vigilando BID, objetivo y stop.";
-        if(radarAlertsEnabled){
-            playRadarTone("entry");
-            if(window.navigator && typeof window.navigator.vibrate === "function"){
-                window.navigator.vibrate([100,60,160]);
-            }
+        // El toque del usuario desbloquea audio; la confirmación de entrada siempre se anuncia.
+        playRadarTone("entry");
+        if(window.navigator && typeof window.navigator.vibrate === "function"){
+            window.navigator.vibrate([100,60,160]);
         }
     }catch(error){
         status.textContent = error.message || "Error al registrar la posición.";
@@ -5853,25 +5866,36 @@ function updateRadar(d){
     const manualPosition = d.manual_position || null;
     const canRegister = !!d.kalshi_market_active;
     if(manualPanel) manualPanel.hidden = !canRegister && !manualPosition;
+    const liveMetrics = $("manualLiveMetrics");
+    const liveState = $("manualLiveState");
     if(manualPosition){
+        const entry = Number(manualPosition.entry_price);
+        const bid = manualPosition.current_bid == null ? null : Number(manualPosition.current_bid);
+        const pnl = manualPosition.gross_pnl == null ? null : Number(manualPosition.gross_pnl);
         $("manualYes").classList.toggle("selected",manualPosition.side==="YES");
         $("manualNo").classList.toggle("selected",manualPosition.side==="NO");
-        if(manualStatus) manualStatus.textContent = "TU POSICIÓN: " + manualPosition.side +
-            " · " + Number(manualPosition.contracts || 1) + " contratos · entrada $" +
-            (manualPosition.entry_price == null ? "--" : Number(manualPosition.entry_price).toFixed(2)) +
-            " · BID $" + (manualPosition.current_bid == null ? "--" : Number(manualPosition.current_bid).toFixed(2)) +
-            " · P/L bruto " + (manualPosition.gross_pnl == null ? "SIN COTIZACIÓN" : (manualPosition.gross_pnl >= 0 ? "+$" : "-$") + Math.abs(manualPosition.gross_pnl).toFixed(2)) +
-            " · " + manualPosition.status;
+        if(manualStatus) manualStatus.textContent = "POSICIÓN " + manualPosition.side + " · " + Number(manualPosition.contracts || 1) + " contratos · " + (manualPosition.entry_source || "entrada estimada");
+        if(liveMetrics) liveMetrics.hidden = false;
+        if(liveState) liveState.hidden = false;
+        $("manualLiveEntry").textContent = Number.isFinite(entry) ? "$"+entry.toFixed(2) : "--";
+        $("manualLiveBid").textContent = bid == null || !Number.isFinite(bid) ? "SIN BID" : "$"+bid.toFixed(2);
+        const pnlNode = $("manualLivePnl");
+        pnlNode.textContent = pnl == null ? "SIN COTIZACIÓN" : (pnl>=0?"+$":"-$")+Math.abs(pnl).toFixed(2);
+        pnlNode.classList.toggle("profit",pnl!=null && pnl>=0);
+        pnlNode.classList.toggle("loss",pnl!=null && pnl<0);
+        $("manualLiveTp").textContent = manualPosition.take_profit_price == null ? "--" : "$"+Number(manualPosition.take_profit_price).toFixed(2);
+        $("manualLiveSl").textContent = manualPosition.stop_loss_price == null ? "--" : "$"+Number(manualPosition.stop_loss_price).toFixed(2);
+        if(liveState) liveState.textContent = pnl == null ? "ESPERANDO PRECIO DE VENTA DE KALSHI" : bid >= Number(manualPosition.take_profit_price) ? "OBJETIVO ALCANZADO · REVISA SALIDA" : bid <= Number(manualPosition.stop_loss_price) ? "STOP LOSS ALCANZADO · REVISA SALIDA" : "MANTENER · VIGILANDO PRECIO DEL CONTRATO";
         if($("manualYes")) $("manualYes").disabled = true;
         if($("manualNo")) $("manualNo").disabled = true;
     }else{
+        if(liveMetrics) liveMetrics.hidden = true;
+        if(liveState) liveState.hidden = true;
         if($("manualYes")) $("manualYes").disabled = !canRegister;
         if($("manualNo")) $("manualNo").disabled = !canRegister;
         if(manualStatus) manualStatus.textContent = canRegister
-            ? "Contrato activo. Elige YES o NO: se captura automáticamente el ASK vivo de Kalshi y se calcula tu seguimiento con la cantidad indicada."
-            : window.currentRadarTicker
-                ? "Se habilitará cuando el radar confirme la entrada."
-                : "Esperando un contrato activo de Kalshi.";
+            ? "Contrato activo. Al marcar YES o NO se captura el ASK disponible de Kalshi."
+            : "Esperando un contrato activo de Kalshi.";
     }
     handleManualPositionAlert(manualPosition);
     handleRadarAlert(d);
