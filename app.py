@@ -4129,7 +4129,7 @@ button{border:1px solid #35476b;background:#182640;color:white;border-radius:9px
 /* Corrección móvil: compactar Profit/YES-NO y reservar espacio real para las velas. */
 @media(max-width:600px){
   main{
-    grid-template-rows:minmax(22px,auto) minmax(58px,auto) minmax(92px,auto) minmax(76px,auto) minmax(145px,1fr) minmax(0,auto)!important;
+    grid-template-rows:minmax(22px,auto) minmax(58px,auto) minmax(92px,auto) minmax(0,180px) minmax(170px,1fr) minmax(0,auto)!important;
   }
   main>section.card,
   main>section.card:nth-of-type(2),
@@ -4178,7 +4178,7 @@ button{border:1px solid #35476b;background:#182640;color:white;border-radius:9px
   main>section.card:nth-of-type(3) .chart-wrap{min-height:0!important;flex:1 1 0!important}
 }
 @media(max-width:600px) and (max-height:720px){
-  main{grid-template-rows:minmax(20px,auto) minmax(52px,auto) minmax(82px,auto) minmax(70px,auto) minmax(135px,1fr) minmax(0,auto)!important}
+  main{grid-template-rows:minmax(20px,auto) minmax(52px,auto) minmax(82px,auto) minmax(0,145px) minmax(145px,1fr) minmax(0,auto)!important}
   main>section.card:nth-of-type(2){padding:3px 5px!important}
   .compact-radar-alert .scalp-trade-panel{padding:2px 4px!important}
   .compact-radar-alert .manual-position{padding:2px 4px!important}
