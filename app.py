@@ -437,6 +437,20 @@ def update_scalp_trade(guidance, ticker, orderbook, economics,
                 if pnl is not None and state.get("total_cost") else None
             )
 
+        entry_total = state.get("total_cost")
+        active_tp = state.get("take_profit_price")
+        active_sl = state.get("stop_loss_price")
+        active_tp_profit = (
+            round(float(active_tp) - _estimated_contract_fee(active_tp) - float(entry_total), 4)
+            if active_tp is not None and entry_total is not None else None
+        )
+        active_sl_loss = (
+            round(float(active_sl) - _estimated_contract_fee(active_sl) - float(entry_total), 4)
+            if active_sl is not None and entry_total is not None else None
+        )
+        active_max_profit = round(1.0 - float(entry_total), 4) if entry_total is not None else None
+        active_max_loss = float(entry_total) if entry_total is not None else None
+
         return {
             "status": state.get("status"),
             "message": (
@@ -451,6 +465,10 @@ def update_scalp_trade(guidance, ticker, orderbook, economics,
             "current_bid": bid,
             "entry_fee": state.get("entry_fee"),
             "total_cost": state.get("total_cost"),
+            "profit_at_take_profit": active_tp_profit,
+            "loss_at_stop_loss": active_sl_loss,
+            "max_profit_at_settlement": active_max_profit,
+            "max_loss_at_settlement": active_max_loss,
             "net_pnl": round(pnl, 4) if pnl is not None else None,
             "pnl_pct": round(pnl_pct, 2) if pnl_pct is not None else None,
             "contracts_assumed": 1,
@@ -5518,7 +5536,11 @@ function updateScalpTrade(trade){
         }
         estimate.textContent = status === "CERRADA"
             ? (trade.exit_reason || "Posición cerrada") + " · resultado neto estimado después de tarifas."
-            : "Resultado flotante calculado con el BID real disponible y tarifa estimada. Seguimiento simulado; no se envió ninguna orden.";
+            : "P/L actual según BID real. Al TP: " + (Number(trade.profit_at_take_profit) >= 0 ? "+" : "") +
+              price(trade.profit_at_take_profit) + ". Al SL: " + price(trade.loss_at_stop_loss) +
+              ". Si vence en contra: hasta " + price(trade.max_loss_at_settlement) +
+              " de pérdida; si vence a favor: máximo " + price(trade.max_profit_at_settlement) +
+              ". Seguimiento simulado, sin órdenes reales.";
     }else if(showPreview){
         detail.textContent = preview.side + " · compra al ASK real · 1 contrato";
         const gain = Number(preview.profit_at_take_profit);
