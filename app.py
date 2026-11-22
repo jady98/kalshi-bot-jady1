@@ -4125,6 +4125,65 @@ button{border:1px solid #35476b;background:#182640;color:white;border-radius:9px
   .compact-radar-alert .manual-position{margin-top:4px!important;padding:5px!important}
 }
 
+
+/* Corrección móvil: compactar Profit/YES-NO y reservar espacio real para las velas. */
+@media(max-width:600px){
+  main{
+    grid-template-rows:minmax(22px,auto) minmax(58px,auto) minmax(92px,auto) minmax(76px,auto) minmax(145px,1fr) minmax(0,auto)!important;
+  }
+  main>section.card,
+  main>section.card:nth-of-type(2),
+  main>section.card:nth-of-type(3){min-height:0!important}
+  main>section.card:nth-of-type(2){
+    overflow:hidden!important;
+    padding:4px 6px!important;
+    display:flex!important;
+    flex-direction:column!important;
+    gap:2px!important;
+  }
+  .compact-radar-alert .radar-alert-heading{margin:0!important;min-height:16px}
+  .compact-radar-alert .radar-mark-row{margin:1px 0!important}
+  .compact-radar-alert .radar-stage-list{margin:1px 0 0!important}
+  .compact-radar-alert .radar-alert-state{margin:2px 0!important;padding:3px 6px!important}
+  .compact-radar-alert .radar-alert-message{margin:1px 0!important;line-height:1.1!important}
+  .compact-radar-alert .scalp-trade-panel{
+    flex:0 0 auto!important;margin:2px 0 0!important;padding:3px 5px!important;
+  }
+  .compact-radar-alert .scalp-trade-heading,
+  .compact-radar-alert .scalp-trade-bottom{font-size:7px!important;line-height:1.1!important}
+  .compact-radar-alert .scalp-trade-levels{gap:3px!important;margin:3px 0!important}
+  .compact-radar-alert .scalp-trade-levels div{padding:2px!important}
+  .compact-radar-alert .scalp-trade-levels small{font-size:6px!important}
+  .compact-radar-alert .scalp-trade-levels b{font-size:10px!important;margin-top:1px!important}
+  .compact-radar-alert .manual-position{
+    flex:0 0 auto!important;display:grid!important;
+    grid-template-columns:minmax(0,1fr) auto!important;
+    align-items:center!important;column-gap:5px!important;
+    margin:2px 0 0!important;padding:3px 5px!important;
+  }
+  .compact-radar-alert .manual-position-title{
+    grid-column:1/-1!important;margin:0 0 2px!important;font-size:7px!important;
+  }
+  .compact-radar-alert .manual-position-buttons{gap:4px!important;margin:0!important}
+  .compact-radar-alert .manual-position-buttons button{
+    min-height:23px!important;padding:3px 7px!important;font-size:7px!important;
+  }
+  .compact-radar-alert #manualPositionStatus{
+    min-width:0!important;font-size:6px!important;line-height:1.05!important;
+    overflow:hidden!important;max-height:2.1em!important;
+  }
+  main>section.card:nth-of-type(3){
+    min-height:145px!important;height:100%!important;overflow:hidden!important;
+  }
+  main>section.card:nth-of-type(3) .chart-wrap{min-height:0!important;flex:1 1 0!important}
+}
+@media(max-width:600px) and (max-height:720px){
+  main{grid-template-rows:minmax(20px,auto) minmax(52px,auto) minmax(82px,auto) minmax(70px,auto) minmax(135px,1fr) minmax(0,auto)!important}
+  main>section.card:nth-of-type(2){padding:3px 5px!important}
+  .compact-radar-alert .scalp-trade-panel{padding:2px 4px!important}
+  .compact-radar-alert .manual-position{padding:2px 4px!important}
+}
+
 </style>
 </head>
 
