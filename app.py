@@ -5579,6 +5579,19 @@ async function markRadarDirection(side){
         const price = Number(result.entry_price).toFixed(2);
         if(status) status.textContent = "ENTRADA " + side + " REGISTRADA · ASK $" + price;
         if(manualStatus) manualStatus.textContent = "Posición registrada: " + side + " · " + contracts + " contratos · ASK $" + price + " al pulsar. El BID actualizará tu P/L.";
+        if(radarAlertsEnabled){
+            playRadarTone("entry");
+            if(window.navigator && typeof window.navigator.vibrate === "function") window.navigator.vibrate([100,60,100]);
+        }
+        if(radarAlertsEnabled && "Notification" in window && Notification.permission === "granted"){
+            const title = "BTC Radar · ENTRADA REGISTRADA";
+            const options = {body:side + " · " + contracts + " contratos · ASK Kalshi $" + price + ". El radar ya está vigilando el BID y tu resultado.",tag:"btc-entry-"+ticker,renotify:false,silent:false};
+            if(radarServiceWorkerRegistration && radarServiceWorkerRegistration.showNotification){
+                radarServiceWorkerRegistration.showNotification(title,options).catch(error=>console.warn(error));
+            }else{
+                try{ new Notification(title,options); }catch(error){ console.warn(error); }
+            }
+        }
         refreshData(false);
     }catch(error){
         if(status) status.textContent = error.message || "No se pudo registrar la entrada.";
