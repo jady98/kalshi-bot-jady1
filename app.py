@@ -3931,13 +3931,22 @@ def save_manual_position():
     data = get_data()
     if not data.get("kalshi_market_active") or ticker != str(data.get("kalshi_market_ticker") or ""):
         return jsonify({"ok": False, "error": "El contrato cambió. Actualiza el radar antes de registrar tu posición."}), 409
+    # Si no se envía un precio ejecutado, tomar el ASK vigente del libro real
+    # al pulsar YES/NO. Esto registra una entrada estimada al mercado, no una ejecución.
+    book = get_kalshi_orderbook(ticker)
+    if not book.get("available"):
+        return jsonify({"ok": False, "error": "Kalshi no está entregando un libro actualizado. No se registró la entrada."}), 503
+    ask_key = "best_yes_ask" if side == "YES" else "best_no_ask"
+    live_ask = book.get(ask_key)
+    if not valid_price(live_ask) or not 0 < float(live_ask) < 1:
+        return jsonify({"ok": False, "error": "No hay ASK disponible para ese contrato. No se registró la entrada."}), 503
     try:
-        entry_price = float(raw_price)
+        entry_price = float(raw_price) if raw_price not in (None, "") else float(live_ask)
         contracts = float(raw_contracts)
     except (TypeError, ValueError):
-        return jsonify({"ok": False, "error": "Introduce el precio real de compra y la cantidad de contratos."}), 400
+        return jsonify({"ok": False, "error": "La cantidad o el precio introducido no son válidos."}), 400
     if not math.isfinite(entry_price) or not 0 < entry_price < 1:
-        return jsonify({"ok": False, "error": "El precio real debe estar entre 0 y 1 (por ejemplo, 0.54)."}), 400
+        return jsonify({"ok": False, "error": "El precio debe estar entre 0 y 1."}), 400
     if not math.isfinite(contracts) or contracts <= 0 or contracts > 100000:
         return jsonify({"ok": False, "error": "La cantidad debe ser mayor que cero."}), 400
     saved = pattern_memory.record_manual_position(
@@ -3945,7 +3954,13 @@ def save_manual_position():
     )
     if not saved:
         return jsonify({"ok": False, "error": "Ya existe una posición registrada para este contrato o no se pudo guardar."}), 409
-    return jsonify({"ok": True, "position": pattern_memory.get_manual_position(ticker)})
+    return jsonify({
+        "ok": True,
+        "entry_source": "ASK_KALSHI_EN_EL_MOMENTO_DEL_CLIC" if raw_price in (None, "") else "PRECIO_EJECUTADO_MANUAL",
+        "entry_price": entry_price,
+        "contracts": contracts,
+        "position": pattern_memory.get_manual_position(ticker)
+    })
 
 
 @app.route("/history")
@@ -5533,18 +5548,41 @@ async function refreshAccuracy(){
     }
 }
 
-function markRadarDirection(side){
+async function markRadarDirection(side){
     if(side !== "YES" && side !== "NO") return;
-    const ticker = String(window.currentRadarTicker || "RADAR-" + new Date().toISOString().slice(0,10));
-    const record = {side, ticker, marked_at: new Date().toISOString()};
+    const ticker = String(window.currentRadarTicker || "");
+    const status = $("radarMarkStatus");
+    const manualStatus = $("manualPositionStatus");
+    if(!ticker){
+        if(status) status.textContent = "No hay contrato activo";
+        return;
+    }
+    const contracts = Number(($("manualContracts") && $("manualContracts").value) || 1);
+    if(!Number.isFinite(contracts) || contracts <= 0){
+        if(status) status.textContent = "Cantidad de contratos no válida";
+        return;
+    }
+    if(status) status.textContent = "Consultando ASK real de Kalshi...";
     try{
+        const response = await fetch("/api/manual-position",{
+            method:"POST",
+            headers:{"Content-Type":"application/json"},
+            body:JSON.stringify({side,ticker,contracts})
+        });
+        const result = await response.json();
+        if(!response.ok || !result.ok) throw new Error(result.error || "No se pudo registrar la entrada.");
+        const record = {side,ticker,marked_at:new Date().toISOString(),entry_price:result.entry_price};
         const records = JSON.parse(localStorage.getItem("radar_direction_marks") || "{}");
         records[ticker] = record;
-        localStorage.setItem("radar_direction_marks", JSON.stringify(records));
+        localStorage.setItem("radar_direction_marks",JSON.stringify(records));
         renderRadarDirectionMark(ticker);
+        const price = Number(result.entry_price).toFixed(2);
+        if(status) status.textContent = "ENTRADA " + side + " REGISTRADA · ASK $" + price;
+        if(manualStatus) manualStatus.textContent = "Posición registrada: " + side + " · " + contracts + " contratos · ASK $" + price + " al pulsar. El BID actualizará tu P/L.";
+        refreshData(false);
     }catch(error){
-        const status = $("radarMarkStatus");
-        if(status) status.textContent = "No se pudo guardar";
+        if(status) status.textContent = error.message || "No se pudo registrar la entrada.";
+        if(manualStatus) manualStatus.textContent = error.message || "No se pudo registrar la entrada.";
     }
 }
 function renderRadarDirectionMark(ticker){
