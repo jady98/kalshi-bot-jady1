@@ -3688,6 +3688,8 @@ def get_data():
         "manual_position": (lambda pos: ({
             **pos,
             "current_bid": orderbook.get("best_yes_bid" if pos.get("side") == "YES" else "best_no_bid"),
+            "take_profit_price": round(min(0.99, float(pos["entry_price"]) * 1.20), 4) if pos and pos.get("entry_price") is not None else None,
+            "stop_loss_price": round(max(0.01, float(pos["entry_price"]) * 0.88), 4) if pos and pos.get("entry_price") is not None else None,
             "gross_pnl": round((float(orderbook.get("best_yes_bid" if pos.get("side") == "YES" else "best_no_bid")) - float(pos["entry_price"])) * float(pos.get("contracts") or 1), 4)
                 if pos and pos.get("entry_price") is not None and orderbook.get("best_yes_bid" if pos.get("side") == "YES" else "best_no_bid") is not None else None
         } if pos else None))(pattern_memory.get_manual_position(market_ticker if contract_active else None)),
@@ -5354,6 +5356,44 @@ async function registerManualPosition(side){
     }
 }
 
+function handleManualPositionAlert(position){
+    if(!position || !position.ticker || position.current_bid == null) return;
+    const bid = Number(position.current_bid);
+    const tp = Number(position.take_profit_price);
+    const sl = Number(position.stop_loss_price);
+    if(!Number.isFinite(bid) || !Number.isFinite(tp) || !Number.isFinite(sl)) return;
+    const event = bid >= tp ? "TAKE_PROFIT" : bid <= sl ? "STOP_LOSS" : "";
+    if(!event) return;
+    const key = "btc_manual_position_alert|" + position.ticker + "|" + event;
+    try{
+        if(localStorage.getItem(key) === "sent") return;
+        localStorage.setItem(key,"sent");
+    }catch(error){}
+    const isProfit = event === "TAKE_PROFIT";
+    const pnl = position.gross_pnl == null ? "" :
+        " · P/L bruto " + (Number(position.gross_pnl) >= 0 ? "+$" : "-$") +
+        Math.abs(Number(position.gross_pnl)).toFixed(2);
+    const title = isProfit ? "BTC Radar · OBJETIVO ALCANZADO" : "BTC Radar · STOP LOSS ALCANZADO";
+    const body = position.side + " · BID $" + bid.toFixed(2) +
+        " · entrada $" + Number(position.entry_price).toFixed(2) + pnl +
+        ". Revisa Kalshi y decide si cierras; el radar no vende por ti.";
+    if(radarAlertsEnabled){
+        playRadarTone(isProfit ? "entry" : "exit");
+        if(window.navigator && typeof window.navigator.vibrate === "function"){
+            window.navigator.vibrate(isProfit ? [100,60,100,60,180] : [220,90,220]);
+        }
+    }
+    if(radarAlertsEnabled && "Notification" in window && Notification.permission === "granted"){
+        const options = {body,tag:key,renotify:false,silent:false,requireInteraction:true};
+        if(radarServiceWorkerRegistration && radarServiceWorkerRegistration.showNotification){
+            radarServiceWorkerRegistration.showNotification(title,options).catch(error=>console.warn(error));
+        }else{
+            try{ new Notification(title,options); }catch(error){ console.warn(error); }
+        }
+    }
+}
+
+
 function handleRadarAlert(data){
     const alertData = data.alert || {};
     const type = String(alertData.type || "").toUpperCase();
@@ -5779,6 +5819,7 @@ function updateRadar(d){
                 ? "Se habilitará cuando el radar confirme la entrada."
                 : "Esperando un contrato activo de Kalshi.";
     }
+    handleManualPositionAlert(manualPosition);
     handleRadarAlert(d);
 
 
