@@ -5868,7 +5868,7 @@ function updateRadar(d){
         if($("manualYes")) $("manualYes").disabled = !canRegister;
         if($("manualNo")) $("manualNo").disabled = !canRegister;
         if(manualStatus) manualStatus.textContent = canRegister
-            ? "Contrato activo. Registra tu compra real: precio ejecutado, cantidad y YES/NO. También puedes hacerlo aunque el radar no haya dado entrada."
+            ? "Contrato activo. Elige YES o NO: se captura automáticamente el ASK vivo de Kalshi y se calcula tu seguimiento con la cantidad indicada."
             : window.currentRadarTicker
                 ? "Se habilitará cuando el radar confirme la entrada."
                 : "Esperando un contrato activo de Kalshi.";
