@@ -3685,7 +3685,12 @@ def get_data():
         "kalshi_market_active": contract_active,
         "kalshi_market_target": market_target,
         "kalshi_market_ticker": market_ticker if contract_active else None,
-        "manual_position": pattern_memory.get_manual_position(market_ticker if contract_active else None),
+        "manual_position": (lambda pos: ({
+            **pos,
+            "current_bid": orderbook.get("best_yes_bid" if pos.get("side") == "YES" else "best_no_bid"),
+            "gross_pnl": round((float(orderbook.get("best_yes_bid" if pos.get("side") == "YES" else "best_no_bid")) - float(pos["entry_price"])) * float(pos.get("contracts") or 1), 4)
+                if pos and pos.get("entry_price") is not None and orderbook.get("best_yes_bid" if pos.get("side") == "YES" else "best_no_bid") is not None else None
+        } if pos else None))(pattern_memory.get_manual_position(market_ticker if contract_active else None)),
         "kalshi_market_close": market_close,
         "seconds_to_close": countdown,
         "kalshi_market_error": market_error,
@@ -3918,21 +3923,23 @@ def save_manual_position():
     side = str(payload.get("side") or "").strip().upper()
     ticker = str(payload.get("ticker") or "").strip()
     raw_price = payload.get("entry_price")
+    raw_contracts = payload.get("contracts", 1)
     if side not in ("YES", "NO") or not ticker:
         return jsonify({"ok": False, "error": "Selecciona YES o NO para el contrato activo."}), 400
     data = get_data()
     if not data.get("kalshi_market_active") or ticker != str(data.get("kalshi_market_ticker") or ""):
         return jsonify({"ok": False, "error": "El contrato cambió. Actualiza el radar antes de registrar tu posición."}), 409
-    entry_price = None
-    if raw_price not in (None, ""):
-        try:
-            entry_price = float(raw_price)
-        except (TypeError, ValueError):
-            return jsonify({"ok": False, "error": "El precio debe ser un número entre 0 y 1."}), 400
-        if not math.isfinite(entry_price) or not 0 < entry_price < 1:
-            return jsonify({"ok": False, "error": "El precio debe estar entre 0 y 1 (por ejemplo, 0.54)."}), 400
+    try:
+        entry_price = float(raw_price)
+        contracts = float(raw_contracts)
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "error": "Introduce el precio real de compra y la cantidad de contratos."}), 400
+    if not math.isfinite(entry_price) or not 0 < entry_price < 1:
+        return jsonify({"ok": False, "error": "El precio real debe estar entre 0 y 1 (por ejemplo, 0.54)."}), 400
+    if not math.isfinite(contracts) or contracts <= 0 or contracts > 100000:
+        return jsonify({"ok": False, "error": "La cantidad debe ser mayor que cero."}), 400
     saved = pattern_memory.record_manual_position(
-        ticker, side, entry_price, time.time()
+        ticker, side, entry_price, contracts, time.time()
     )
     if not saved:
         return jsonify({"ok": False, "error": "Ya existe una posición registrada para este contrato o no se pudo guardar."}), 409
@@ -4449,7 +4456,11 @@ button{border:1px solid #35476b;background:#182640;color:white;border-radius:9px
             <button type="button" id="manualYes" onclick="registerManualPosition('YES')">COMPRÉ YES</button>
             <button type="button" id="manualNo" onclick="registerManualPosition('NO')">COMPRÉ NO</button>
         </div>
-        <div class="small" id="manualPositionStatus">Registra tu posición cuando aparezca una entrada confirmada.</div>
+        <label class="small" for="manualEntryPrice">PRECIO REAL EJECUTADO (ej. 0.54)</label>
+        <input class="manual-entry-price" id="manualEntryPrice" type="number" min="0.01" max="0.99" step="0.01" placeholder="0.54" inputmode="decimal">
+        <label class="small" for="manualContracts">CANTIDAD DE CONTRATOS</label>
+        <input class="manual-entry-price" id="manualContracts" type="number" min="1" max="100000" step="1" value="1" inputmode="numeric">
+        <div class="small" id="manualPositionStatus">Registra tu precio ejecutado y cantidad. El radar vigilará el BID real de salida.</div>
     </div>
 </section>
 
@@ -5315,7 +5326,17 @@ async function registerManualPosition(side){
         status.textContent = "No hay un contrato activo de Kalshi para registrar.";
         return;
     }
-    const payload = {side, ticker, entry_price: null};
+    const entryPrice = Number($("manualEntryPrice") && $("manualEntryPrice").value);
+    const contracts = Number($("manualContracts") && $("manualContracts").value || 1);
+    if(!Number.isFinite(entryPrice) || entryPrice <= 0 || entryPrice >= 1){
+        status.textContent = "Escribe el precio real al que te ejecutaron la compra (ej. 0.54).";
+        return;
+    }
+    if(!Number.isFinite(contracts) || contracts <= 0){
+        status.textContent = "Escribe cuántos contratos compraste.";
+        return;
+    }
+    const payload = {side, ticker, entry_price: entryPrice, contracts};
     status.textContent = "Guardando tu posición...";
     try{
         const response = await fetch("/api/manual-position",{
@@ -5327,7 +5348,7 @@ async function registerManualPosition(side){
         if(!response.ok || !result.ok) throw new Error(result.error || "No se pudo guardar.");
         $("manualYes").classList.toggle("selected",side==="YES");
         $("manualNo").classList.toggle("selected",side==="NO");
-        status.textContent = "TU POSICIÓN REGISTRADA: " + side + " · sin precio de compra";
+        status.textContent = "POSICIÓN REGISTRADA: " + side + " · " + contracts + " contratos · entrada $" + entryPrice.toFixed(2) + ". Vigilando BID.";
     }catch(error){
         status.textContent = error.message || "Error al registrar la posición.";
     }
@@ -5742,7 +5763,10 @@ function updateRadar(d){
         $("manualYes").classList.toggle("selected",manualPosition.side==="YES");
         $("manualNo").classList.toggle("selected",manualPosition.side==="NO");
         if(manualStatus) manualStatus.textContent = "TU POSICIÓN: " + manualPosition.side +
-            " · sin precio de compra" +
+            " · " + Number(manualPosition.contracts || 1) + " contratos · entrada $" +
+            (manualPosition.entry_price == null ? "--" : Number(manualPosition.entry_price).toFixed(2)) +
+            " · BID $" + (manualPosition.current_bid == null ? "--" : Number(manualPosition.current_bid).toFixed(2)) +
+            " · P/L bruto " + (manualPosition.gross_pnl == null ? "SIN COTIZACIÓN" : (manualPosition.gross_pnl >= 0 ? "+$" : "-$") + Math.abs(manualPosition.gross_pnl).toFixed(2)) +
             " · " + manualPosition.status;
         if($("manualYes")) $("manualYes").disabled = true;
         if($("manualNo")) $("manualNo").disabled = true;
@@ -5750,7 +5774,7 @@ function updateRadar(d){
         if($("manualYes")) $("manualYes").disabled = !canRegister;
         if($("manualNo")) $("manualNo").disabled = !canRegister;
         if(manualStatus) manualStatus.textContent = canRegister
-            ? "Entrada confirmada. Selecciona YES o NO. No necesitas introducir el precio."
+            ? "Entrada confirmada. Introduce el precio ejecutado y la cantidad; luego marca YES o NO."
             : window.currentRadarTicker
                 ? "Se habilitará cuando el radar confirme la entrada."
                 : "Esperando un contrato activo de Kalshi.";
