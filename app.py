@@ -5953,7 +5953,9 @@ function updateRadar(d){
     const manualPanel = $("manualPosition");
     const manualStatus = $("manualPositionStatus");
     const manualPosition = d.manual_position || null;
-    const canRegister = !!d.kalshi_market_active;
+    // Permitir cambiar YES/NO si ya existe ticker activo en el radar,
+    // aunque el indicador de mercado activo llegue tarde o esté momentáneamente falso.
+    const canRegister = !!(d.kalshi_market_active || window.currentRadarTicker);
     if(manualPanel) manualPanel.hidden = !canRegister && !manualPosition;
     const liveMetrics = $("manualLiveMetrics");
     const liveState = $("manualLiveState");
