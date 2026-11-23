@@ -3259,12 +3259,17 @@ def get_data():
         and market_close is not None
         and float(market_close) > now
     )
+    # Conserva el ticker detectado aunque el contrato haya expirado o el estado
+    # active fluctúe; permite recuperar la posición manual ya registrada.
+    tracked_market_ticker = market_ticker
     if not contract_active:
         market_ticker = ""
         market_target = None
         market_close = None
     countdown = max(0, int(market_close - now)) if contract_active else 0
     orderbook = get_cached_kalshi_orderbook(market_ticker) if contract_active else {"available": False, "error": "SIN CONTRATO"}
+    manual_position = pattern_memory.get_manual_position(tracked_market_ticker) if tracked_market_ticker else None
+    manual_orderbook = orderbook if contract_active else (get_cached_kalshi_orderbook(tracked_market_ticker) if manual_position else orderbook)
     # Probabilidad implícita de Kalshi: punto medio entre mejor compra y venta YES.
     # Si solo existe un lado del libro, usar ese precio como referencia provisional.
     yes_bid = orderbook.get("best_yes_bid")
@@ -3687,12 +3692,12 @@ def get_data():
         "kalshi_market_ticker": market_ticker if contract_active else None,
         "manual_position": (lambda pos: ({
             **pos,
-            "current_bid": orderbook.get("best_yes_bid" if pos.get("side") == "YES" else "best_no_bid"),
+            "current_bid": manual_orderbook.get("best_yes_bid" if pos.get("side") == "YES" else "best_no_bid"),
             "take_profit_price": round(min(0.99, float(pos["entry_price"]) * 1.20), 4) if pos and pos.get("entry_price") is not None else None,
             "stop_loss_price": round(max(0.01, float(pos["entry_price"]) * 0.88), 4) if pos and pos.get("entry_price") is not None else None,
-            "gross_pnl": round((float(orderbook.get("best_yes_bid" if pos.get("side") == "YES" else "best_no_bid")) - float(pos["entry_price"])) * float(pos.get("contracts") or 1), 4)
-                if pos and pos.get("entry_price") is not None and orderbook.get("best_yes_bid" if pos.get("side") == "YES" else "best_no_bid") is not None else None
-        } if pos else None))(pattern_memory.get_manual_position(market_ticker if contract_active else None)),
+            "gross_pnl": round((float(manual_orderbook.get("best_yes_bid" if pos.get("side") == "YES" else "best_no_bid")) - float(pos["entry_price"])) * float(pos.get("contracts") or 1), 4)
+                if pos and pos.get("entry_price") is not None and manual_orderbook.get("best_yes_bid" if pos.get("side") == "YES" else "best_no_bid") is not None else None
+        } if pos else None))(manual_position),
         "kalshi_market_close": market_close,
         "seconds_to_close": countdown,
         "kalshi_market_error": market_error,
@@ -3929,8 +3934,15 @@ def save_manual_position():
     if side not in ("YES", "NO") or not ticker:
         return jsonify({"ok": False, "error": "Selecciona YES o NO para el contrato activo."}), 400
     data = get_data()
-    if not data.get("kalshi_market_active") or ticker != str(data.get("kalshi_market_ticker") or ""):
-        return jsonify({"ok": False, "error": "El contrato cambió. Actualiza el radar antes de registrar tu posición."}), 409
+    current_contract_matches = bool(
+        data.get("kalshi_market_active")
+        and ticker == str(data.get("kalshi_market_ticker") or "")
+    )
+    # Si ya existe una posición para este mismo ticker, permitir reemplazar
+    # YES por NO (o viceversa), aunque el indicador active fluctúe.
+    existing_position = pattern_memory.get_manual_position(ticker)
+    if not current_contract_matches and not existing_position:
+        return jsonify({"ok": False, "error": "El contrato cambió y no hay una posición previa para ese ticker."}), 409
     # Si no se envía un precio ejecutado, tomar el ASK vigente del libro real
     # al pulsar YES/NO. Esto registra una entrada estimada al mercado, no una ejecución.
     book = get_kalshi_orderbook(ticker)
