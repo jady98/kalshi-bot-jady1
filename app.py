@@ -4355,6 +4355,11 @@ button{border:1px solid #35476b;background:#182640;color:white;border-radius:9px
   button{font-size:10px!important}
 }
 
+#radarStepEntry.prealert{border-color:#f4c95d;background:#493914;color:#ffe08a;box-shadow:0 0 10px #f4c95d55;animation:radarPrealertPulse 1.4s ease-in-out infinite}
+#radarStepEntry.prealert b{background:#f4c95d;color:#251900}
+#radarStepEntry.active,#radarStepHold.active,#radarStepExit.active{box-shadow:0 0 12px currentColor, inset 0 0 10px rgba(255,255,255,.06)}
+@keyframes radarPrealertPulse{0%,100%{box-shadow:0 0 5px #f4c95d44}50%{box-shadow:0 0 15px #f4c95d99}}
+
 </style>
 </head>
 
@@ -5552,10 +5557,17 @@ function handleRadarAlert(data){
     // Entrada y mantener permanecen iluminadas mientras la entrada siga vigente.
     // Al confirmar entrada, mantener encendidos ENTRAR y MANTENER durante toda la posición.
     // Al activarse la salida, ambos se apagan y queda encendido únicamente SALIR.
-    const activeSteps = isExit ? ["exit"] : isNewEntry || isHold ? ["entry","hold"] : [];
+    // PREALERTA ilumina ENTRAR en ámbar; entrada confirmada ilumina
+    // ENTRAR + MANTENER; salida/protección ilumina solo SALIR en rojo.
+    const activeSteps = isExit ? ["exit"] :
+        isNewEntry || isHold ? ["entry","hold"] :
+        isPrealert && !isConflict ? ["entry"] : [];
     ["entry","hold","exit"].forEach(step=>{
         const item = $("radarStep" + step.charAt(0).toUpperCase() + step.slice(1));
-        if(item) item.classList.toggle("active", activeSteps.includes(step));
+        if(item){
+            item.classList.toggle("active", activeSteps.includes(step));
+            item.classList.toggle("prealert", step === "entry" && isPrealert && !isConflict);
+        }
     });
 
     message.textContent = alertData.message || (
