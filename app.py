@@ -5678,8 +5678,8 @@ async function markRadarDirection(side){
         localStorage.setItem("radar_direction_marks",JSON.stringify(records));
         renderRadarDirectionMark(ticker);
         const price = Number(result.entry_price).toFixed(2);
-        if(status) status.textContent = "ENTRADA " + side + " REGISTRADA · ASK $" + price;
-        if(manualStatus) manualStatus.textContent = "Posición registrada: " + side + " · " + contracts + " contratos · ASK $" + price + " al pulsar. El BID actualizará tu P/L.";
+        if(status) status.textContent = "POSICIÓN ACTUALIZADA A " + side + " · NUEVO ASK $" + price;
+        if(manualStatus) manualStatus.textContent = "Posición vigente: " + side + " · " + contracts + " contratos · nueva entrada estimada ASK $" + price + ". El BID actualizará tu P/L.";
         if(radarAlertsEnabled){
             playRadarTone("entry");
             if(window.navigator && typeof window.navigator.vibrate === "function") window.navigator.vibrate([100,60,100]);
@@ -5971,8 +5971,8 @@ function updateRadar(d){
         $("manualLiveTp").textContent = manualPosition.take_profit_price == null ? "--" : "$"+Number(manualPosition.take_profit_price).toFixed(2);
         $("manualLiveSl").textContent = manualPosition.stop_loss_price == null ? "--" : "$"+Number(manualPosition.stop_loss_price).toFixed(2);
         if(liveState) liveState.textContent = pnl == null ? "ESPERANDO PRECIO DE VENTA DE KALSHI" : bid >= Number(manualPosition.take_profit_price) ? "OBJETIVO ALCANZADO · REVISA SALIDA" : bid <= Number(manualPosition.stop_loss_price) ? "STOP LOSS ALCANZADO · REVISA SALIDA" : "MANTENER · VIGILANDO PRECIO DEL CONTRATO";
-        if($("manualYes")) $("manualYes").disabled = true;
-        if($("manualNo")) $("manualNo").disabled = true;
+        // YES y NO siguen disponibles: elegir el lado contrario reemplaza la
+        // posición registrada y toma un nuevo ASK como entrada estimada.
     }else{
         if(liveMetrics) liveMetrics.hidden = true;
         if(liveState) liveState.hidden = true;
