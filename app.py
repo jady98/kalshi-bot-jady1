@@ -5949,13 +5949,17 @@ function updateRadar(d){
 
     handleScalpTradeAlert(d.scalp_trade || {});
     updateScalpTrade(d.scalp_trade || {});
-    window.currentRadarTicker = d.kalshi_market_active ? d.kalshi_market_ticker : null;
+    const manualPosition = d.manual_position || null;
+    // Conserva el ticker de la posición ya registrada para permitir cambiar YES <-> NO
+    // dentro del mismo contrato aunque el indicador active fluctúe entre actualizaciones.
+    window.currentRadarTicker = (d.kalshi_market_active && d.kalshi_market_ticker)
+        ? d.kalshi_market_ticker
+        : (manualPosition && manualPosition.ticker ? manualPosition.ticker : null);
     const manualPanel = $("manualPosition");
     const manualStatus = $("manualPositionStatus");
-    const manualPosition = d.manual_position || null;
     // Permitir cambiar YES/NO si ya existe ticker activo en el radar,
     // aunque el indicador de mercado activo llegue tarde o esté momentáneamente falso.
-    const canRegister = !!(d.kalshi_market_active || window.currentRadarTicker);
+    const canRegister = !!((d.kalshi_market_active && d.kalshi_market_ticker) || (manualPosition && manualPosition.ticker));
     if(manualPanel) manualPanel.hidden = !canRegister && !manualPosition;
     const liveMetrics = $("manualLiveMetrics");
     const liveState = $("manualLiveState");
