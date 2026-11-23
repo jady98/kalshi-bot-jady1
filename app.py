@@ -4281,6 +4281,80 @@ button{border:1px solid #35476b;background:#182640;color:white;border-radius:9px
   .compact-radar-alert .manual-position{padding:2px 4px!important}
 }
 
+
+/* Legibilidad móvil: el panel radar no debe comprimir ni recortar mensajes. */
+@media(max-width:600px){
+  html,body{height:auto!important;min-height:100%!important;overflow-x:hidden!important;overflow-y:auto!important}
+  main{
+    display:flex!important;flex-direction:column!important;align-items:stretch!important;
+    width:100%!important;height:auto!important;min-height:100dvh!important;
+    overflow:visible!important;gap:8px!important;
+    padding:max(28px,env(safe-area-inset-top,0px)) 6px max(18px,env(safe-area-inset-bottom,0px))!important;
+  }
+  main>.header{flex:0 0 auto!important;min-height:34px!important}
+  main>.grid{flex:0 0 auto!important}
+  main>section.card{flex:0 0 auto!important;min-height:0!important;height:auto!important;overflow:visible!important}
+  main>section.card:nth-of-type(2),
+  main>section.card:nth-of-type(2).compact-radar-alert{
+    display:flex!important;flex-direction:column!important;gap:6px!important;
+    height:auto!important;max-height:none!important;overflow:visible!important;
+    padding:10px 9px!important;
+  }
+  .compact-radar-alert .radar-alert-heading{min-height:34px!important;gap:7px!important}
+  .compact-radar-alert .radar-alert-heading .section-title{font-size:13px!important}
+  .compact-radar-alert .radar-alert-heading .small{font-size:11px!important;line-height:1.3!important}
+  .compact-radar-alert .radar-alert-controls{gap:10px!important}
+  .compact-radar-alert .radar-switch{font-size:12px!important}
+  .compact-radar-alert .floating-window-button{font-size:11px!important;padding:9px 12px!important}
+  .compact-radar-alert .radar-mark-row{margin:5px 0!important;gap:8px!important;flex-wrap:wrap!important}
+  .compact-radar-alert .radar-mark-label{font-size:10px!important}
+  .compact-radar-alert .radar-mark-buttons button{font-size:11px!important;min-width:48px!important;padding:7px 10px!important}
+  .compact-radar-alert .radar-mark-status{font-size:10px!important;white-space:normal!important}
+  .compact-radar-alert .radar-stage-list{gap:6px!important;margin:5px 0!important}
+  .compact-radar-alert .radar-stage-item{
+    min-height:44px!important;height:auto!important;padding:7px 4px!important;
+    gap:4px!important;font-size:clamp(9px,2.8vw,12px)!important;
+    line-height:1.2!important;white-space:normal!important;overflow:visible!important;
+    flex-direction:column!important;
+  }
+  .compact-radar-alert .radar-stage-item b{width:19px!important;height:19px!important;flex-basis:19px!important;font-size:11px!important}
+  .compact-radar-alert .radar-alert-state{
+    margin:5px 0!important;padding:8px 9px!important;font-size:12px!important;
+    line-height:1.25!important;white-space:normal!important;
+  }
+  .compact-radar-alert .radar-alert-message{
+    display:block!important;margin:5px 0!important;padding:8px!important;
+    max-height:none!important;overflow:visible!important;
+    font-size:12px!important;line-height:1.4!important;
+    white-space:normal!important;-webkit-line-clamp:unset!important;
+  }
+  .compact-radar-alert .radar-alert-detail{
+    display:block!important;margin:3px 0!important;padding:4px 8px!important;
+    max-height:none!important;overflow:visible!important;
+    font-size:11px!important;line-height:1.4!important;
+    white-space:normal!important;text-overflow:clip!important;
+  }
+  .compact-radar-alert .scalp-trade-panel{margin:6px 0 0!important;padding:9px!important}
+  .compact-radar-alert .scalp-trade-heading,
+  .compact-radar-alert .scalp-trade-bottom{font-size:10px!important;line-height:1.3!important;gap:7px!important}
+  .compact-radar-alert .scalp-trade-levels{gap:6px!important;margin:8px 0!important}
+  .compact-radar-alert .scalp-trade-levels div{padding:7px 4px!important}
+  .compact-radar-alert .scalp-trade-levels small{font-size:9px!important;line-height:1.2!important}
+  .compact-radar-alert .scalp-trade-levels b{font-size:14px!important;margin-top:4px!important}
+  .compact-radar-alert .scalp-trade-estimate{font-size:10px!important;line-height:1.4!important}
+  .compact-radar-alert .manual-position{display:block!important;margin:7px 0 0!important;padding:9px!important}
+  .compact-radar-alert .manual-position-title{font-size:11px!important;margin-bottom:6px!important}
+  .compact-radar-alert .manual-position-buttons{gap:7px!important;margin:6px 0!important}
+  .compact-radar-alert .manual-position-buttons button{min-height:36px!important;font-size:10px!important;padding:7px!important}
+  .compact-radar-alert #manualPositionStatus{font-size:10px!important;line-height:1.4!important;max-height:none!important;overflow:visible!important}
+  main>section.card:nth-of-type(3){height:410px!important;min-height:410px!important;overflow:hidden!important}
+  main>section.card:nth-of-type(3) .chart-wrap{min-height:280px!important;flex:1 1 auto!important}
+  main>section.card:nth-of-type(5){padding:9px!important}
+  main>section.card:nth-of-type(5) .label,
+  main>section.card:nth-of-type(5) .small{font-size:10px!important;line-height:1.3!important}
+  button{font-size:10px!important}
+}
+
 </style>
 </head>
 
