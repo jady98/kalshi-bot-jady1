@@ -5432,8 +5432,33 @@ function handleScalpTradeAlert(trade){
 }
 
 
+// Selección visual independiente del seguimiento de la posición registrada.
+window.manualSelectionTicker = window.manualSelectionTicker || "";
+window.manualSelectionSide = window.manualSelectionSide === undefined ? undefined : window.manualSelectionSide;
+
 async function registerManualPosition(side){
-    // El toque YES/NO habilita el audio del navegador desde un gesto explícito.
+    const ticker = window.currentRadarTicker;
+    const status = $("manualPositionStatus");
+    if(!ticker){ if(status) status.textContent = "No hay un contrato activo de Kalshi."; return; }
+
+    if(window.manualSelectionTicker !== ticker){
+        window.manualSelectionTicker = ticker;
+        window.manualSelectionSide = undefined;
+    }
+    const currentSide = window.manualSelectionSide !== undefined
+        ? window.manualSelectionSide
+        : (document.getElementById("manualYes").classList.contains("selected") ? "YES"
+          : document.getElementById("manualNo").classList.contains("selected") ? "NO" : null);
+
+    // Tocar el mismo lado lo desmarca. No borra ni cierra la posición vigilada.
+    if(currentSide === side){
+        window.manualSelectionSide = null;
+        $("manualYes").classList.remove("selected");
+        $("manualNo").classList.remove("selected");
+        if(status) status.textContent = "Selección desmarcada. El seguimiento de la posición registrada continúa.";
+        return;
+    }
+
     try{
         const AudioContextClass = window.AudioContext || window.webkitAudioContext;
         if(AudioContextClass){
@@ -5444,40 +5469,31 @@ async function registerManualPosition(side){
         try{ if(window.AndroidRadar) window.AndroidRadar.setAlertsEnabled(true); }catch(e){}
         paintRadarAlertToggle();
     }catch(audioError){ console.warn("Audio no disponible",audioError); }
-    const ticker = window.currentRadarTicker;
-    const status = $("manualPositionStatus");
-    if(!ticker){
-        status.textContent = "No hay un contrato activo de Kalshi para registrar.";
-        return;
-    }
+
     const contracts = Number($("manualContracts") && $("manualContracts").value || 1);
     if(!Number.isFinite(contracts) || contracts <= 0){
-        status.textContent = "Escribe una cantidad válida de contratos.";
+        if(status) status.textContent = "Escribe una cantidad válida de contratos.";
         return;
     }
-    // El servidor consulta el libro vivo y captura el ASK del lado elegido
-    // exactamente al recibir este clic. Es una entrada estimada, no un fill confirmado.
-    const payload = {side, ticker, contracts};
-    status.textContent = "Capturando ASK real de Kalshi y registrando entrada...";
+    if(status) status.textContent = "Cambiando selección y capturando ASK de Kalshi...";
     try{
         const response = await fetch("/api/manual-position",{
             method:"POST",
             headers:{"Content-Type":"application/json"},
-            body:JSON.stringify(payload)
+            body:JSON.stringify({side, ticker, contracts})
         });
         const result = await response.json();
-        if(!response.ok || !result.ok) throw new Error(result.error || "No se pudo guardar.");
-        const capturedEntry = Number(result.entry_price);
+        if(!response.ok || !result.ok) throw new Error(result.error || "No se pudo cambiar el lado.");
+        window.manualSelectionTicker = ticker;
+        window.manualSelectionSide = side;
         $("manualYes").classList.toggle("selected",side==="YES");
         $("manualNo").classList.toggle("selected",side==="NO");
-        status.textContent = "ENTRADA REGISTRADA: " + side + " · " + contracts + " contratos · ASK capturado $" + capturedEntry.toFixed(2) + " (estimado). Vigilando BID, objetivo y stop.";
-        // El toque del usuario desbloquea audio; la confirmación de entrada siempre se anuncia.
+        const capturedEntry = Number(result.entry_price);
+        if(status) status.textContent = "SELECCIONADO " + side + " · ASK estimado $" + capturedEntry.toFixed(2) + ".";
         playRadarTone("entry",true);
-        if(window.navigator && typeof window.navigator.vibrate === "function"){
-            window.navigator.vibrate([100,60,160]);
-        }
+        if(window.navigator && typeof window.navigator.vibrate === "function") window.navigator.vibrate([100,60,160]);
     }catch(error){
-        status.textContent = error.message || "Error al registrar la posición.";
+        if(status) status.textContent = error.message || "Error al cambiar el lado.";
     }
 }
 
@@ -5982,8 +5998,13 @@ function updateRadar(d){
         const entry = Number(manualPosition.entry_price);
         const bid = manualPosition.current_bid == null ? null : Number(manualPosition.current_bid);
         const pnl = manualPosition.gross_pnl == null ? null : Number(manualPosition.gross_pnl);
-        $("manualYes").classList.toggle("selected",manualPosition.side==="YES");
-        $("manualNo").classList.toggle("selected",manualPosition.side==="NO");
+        if(window.manualSelectionTicker !== manualPosition.ticker){
+            window.manualSelectionTicker = manualPosition.ticker;
+            window.manualSelectionSide = undefined;
+        }
+        const visualSide = window.manualSelectionSide !== undefined ? window.manualSelectionSide : manualPosition.side;
+        $("manualYes").classList.toggle("selected",visualSide==="YES");
+        $("manualNo").classList.toggle("selected",visualSide==="NO");
         if(manualStatus) manualStatus.textContent = "POSICIÓN " + manualPosition.side + " · " + Number(manualPosition.contracts || 1) + " contratos · " + (manualPosition.entry_source || "entrada estimada");
         if(liveMetrics) liveMetrics.hidden = false;
         if(liveState) liveState.hidden = false;
