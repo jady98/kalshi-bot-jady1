@@ -5958,6 +5958,9 @@ function updateRadar(d){
     const liveMetrics = $("manualLiveMetrics");
     const liveState = $("manualLiveState");
     if(manualPosition){
+        // Mantener ambos lados habilitados para poder cambiar YES <-> NO.
+        if($("manualYes")) $("manualYes").disabled = false;
+        if($("manualNo")) $("manualNo").disabled = false;
         const entry = Number(manualPosition.entry_price);
         const bid = manualPosition.current_bid == null ? null : Number(manualPosition.current_bid);
         const pnl = manualPosition.gross_pnl == null ? null : Number(manualPosition.gross_pnl);
