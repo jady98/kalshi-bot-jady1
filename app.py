@@ -5554,19 +5554,19 @@ function handleRadarAlert(data){
         isDirectionChange ? "CAMBIO DE DIRECCIÓN · OBSERVAR" : "OBSERVAR";
     panel.classList.toggle("has-event", isExit || isNewEntry || isPrealert || isDirectionChange || isConflict);
 
-    // Entrada y mantener permanecen iluminadas mientras la entrada siga vigente.
-    // Al confirmar entrada, mantener encendidos ENTRAR y MANTENER durante toda la posición.
-    // Al activarse la salida, ambos se apagan y queda encendido únicamente SALIR.
-    // PREALERTA ilumina ENTRAR en ámbar; entrada confirmada ilumina
-    // ENTRAR + MANTENER; salida/protección ilumina solo SALIR en rojo.
+    // Secuencia visual sin encender etapas por adelantado:
+    // PREALERTA = ENTRAR ámbar; evento ENTRADA = ENTRAR verde;
+    // evento MANTENER = solo MANTENER amarillo; evento SALIDA = solo SALIR rojo.
     const activeSteps = isExit ? ["exit"] :
-        isNewEntry || isHold ? ["entry","hold"] :
+        isNewEntry ? ["entry"] :
+        isHold ? ["hold"] :
         isPrealert && !isConflict ? ["entry"] : [];
     ["entry","hold","exit"].forEach(step=>{
         const item = $("radarStep" + step.charAt(0).toUpperCase() + step.slice(1));
         if(item){
             item.classList.toggle("active", activeSteps.includes(step));
             item.classList.toggle("prealert", step === "entry" && isPrealert && !isConflict);
+            item.setAttribute("aria-pressed", activeSteps.includes(step) ? "true" : "false");
         }
     });
 
@@ -5582,8 +5582,8 @@ function handleRadarAlert(data){
     detail.textContent = alertData.detail || data.guidance_note ||
         "La dirección y el porcentaje por sí solos no confirman una entrada.";
 
-    // Un sonido por cada evento nuevo: entrada, mantener y salida.
-    // Las luces de ENTRAR + MANTENER permanecen activas durante toda la posición.
+    // Un sonido y vibración por cada evento nuevo: ENTRADA, MANTENER y SALIDA.
+    // Cada evento ilumina solo su etapa correspondiente.
     const eventType = hasFreshEvent && isExit ? "SALIDA" :
         hasFreshEvent && isNewEntry ? "ENTRADA" :
         (hasFreshEvent && isHold && type === "MANTENER") ? "MANTENER" :
