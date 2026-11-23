@@ -1776,7 +1776,14 @@ def record_paper_trade(
                     estimated_fee, total_cost, model_probability, estimated_ev
                 )
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (market_ticker) DO NOTHING
+                ON CONFLICT (market_ticker) DO UPDATE SET
+                    side = EXCLUDED.side,
+                    entry_price = EXCLUDED.entry_price,
+                    entry_ts = EXCLUDED.entry_ts,
+                    contracts = EXCLUDED.contracts,
+                    status = 'OPEN',
+                    official_result = NULL,
+                    pnl_per_contract = NULL
                 RETURNING market_ticker
             """, (
                 ticker, side, direction, entry_ts, price, fee, cost,
