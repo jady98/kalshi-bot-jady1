@@ -2237,7 +2237,14 @@ def record_manual_position(market_ticker, side, entry_price, contracts=1, entry_
                 INSERT INTO btc_manual_positions
                     (market_ticker, side, entry_price, entry_ts, contracts)
                 VALUES (%s, %s, %s, %s, %s)
-                ON CONFLICT (market_ticker) DO NOTHING
+                ON CONFLICT (market_ticker) DO UPDATE SET
+                    side = EXCLUDED.side,
+                    entry_price = EXCLUDED.entry_price,
+                    entry_ts = EXCLUDED.entry_ts,
+                    contracts = EXCLUDED.contracts,
+                    status = 'OPEN',
+                    official_result = NULL,
+                    pnl_per_contract = NULL
                 RETURNING market_ticker
             """, (ticker, side, price, ts, qty)).fetchone()
         _db_status = "CONECTADA"
