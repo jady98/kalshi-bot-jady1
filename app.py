@@ -4521,14 +4521,6 @@ button{border:1px solid #35476b;background:#182640;color:white;border-radius:9px
         </div>
         <div class="small" id="radarAlertStatus">BRTI · 15 MIN</div>
     </div>
-    <div class="radar-mark-row" aria-label="Registrar dirección indicada por el radar">
-        <span class="radar-mark-label">MARCAR RADAR</span>
-        <div class="radar-mark-buttons">
-            <button type="button" id="radarMarkYes" onclick="markRadarDirection('YES')">YES</button>
-            <button type="button" id="radarMarkNo" onclick="markRadarDirection('NO')">NO</button>
-        </div>
-        <span class="radar-mark-status" id="radarMarkStatus">Sin marcar</span>
-    </div>
     <div class="radar-stage-list" aria-label="Estados de alerta">
         <div class="radar-stage-item" id="radarStepEntry" role="status" aria-label="Puedes entrar"><b>↗</b><span>PUEDES ENTRAR</span></div>
         <div class="radar-stage-item" id="radarStepHold" role="status" aria-label="Mantenerte"><b>Ⅱ</b><span>MANTENERTE</span></div>
@@ -4548,15 +4540,15 @@ button{border:1px solid #35476b;background:#182640;color:white;border-radius:9px
         <div class="scalp-trade-estimate" id="scalpTradeEstimate">Importes estimados por 1 contrato. No se envían órdenes.</div>
     </div>
     <div class="manual-position" id="manualPosition">
-        <div class="small manual-position-title">¿QUÉ COMPRASTE EN ESTE CONTRATO?</div>
+        <div class="small manual-position-title">SELECCIONA TU CONTRATO</div>
         <div class="manual-position-buttons">
             <button type="button" id="manualYes" onclick="registerManualPosition('YES')">ENTRÉ YES</button>
             <button type="button" id="manualNo" onclick="registerManualPosition('NO')">ENTRÉ NO</button>
         </div>
-        <div class="small" id="manualEntryQuote">Al tocar YES o NO, el radar captura el ASK en vivo de Kalshi como entrada estimada.</div>
+        <div class="small" id="manualEntryQuote">Al elegir YES o NO se registra el ASK actual y comienza el seguimiento.</div>
         <label class="small" for="manualContracts">CANTIDAD DE CONTRATOS</label>
         <input class="manual-entry-price" id="manualContracts" type="number" min="1" max="100000" step="1" value="1" inputmode="numeric">
-        <div class="small" id="manualPositionStatus">Elige YES o NO para capturar el ASK vivo de Kalshi.</div>
+        <div class="small" id="manualPositionStatus">Sin posición registrada.</div>
         <div class="manual-live-metrics" id="manualLiveMetrics" hidden>
             <div><small>ENTRADA</small><strong id="manualLiveEntry">--</strong></div>
             <div><small>BID PARA SALIR</small><strong id="manualLiveBid">--</strong></div>
