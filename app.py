@@ -3695,6 +3695,9 @@ def get_data():
             "current_bid": manual_orderbook.get("best_yes_bid" if pos.get("side") == "YES" else "best_no_bid"),
             "take_profit_price": round(min(0.99, float(pos["entry_price"]) * 1.20), 4) if pos and pos.get("entry_price") is not None else None,
             "stop_loss_price": round(max(0.01, float(pos["entry_price"]) * 0.88), 4) if pos and pos.get("entry_price") is not None else None,
+            "profit_at_take_profit": round((min(0.99, float(pos["entry_price"]) * 1.20) - float(pos["entry_price"])) * float(pos.get("contracts") or 1), 4) if pos and pos.get("entry_price") is not None else None,
+            "loss_at_stop_loss": round((max(0.01, float(pos["entry_price"]) * 0.88) - float(pos["entry_price"])) * float(pos.get("contracts") or 1), 4) if pos and pos.get("entry_price") is not None else None,
+            "max_loss_at_settlement": round(float(pos["entry_price"]) * float(pos.get("contracts") or 1), 4) if pos and pos.get("entry_price") is not None else None,
             "gross_pnl": round((float(manual_orderbook.get("best_yes_bid" if pos.get("side") == "YES" else "best_no_bid")) - float(pos["entry_price"])) * float(pos.get("contracts") or 1), 4)
                 if pos and pos.get("entry_price") is not None and manual_orderbook.get("best_yes_bid" if pos.get("side") == "YES" else "best_no_bid") is not None else None
         } if pos else None))(manual_position),
@@ -4573,6 +4576,7 @@ button{border:1px solid #35476b;background:#182640;color:white;border-radius:9px
             <div><small>OBJETIVO</small><strong id="manualLiveTp">--</strong></div>
             <div><small>STOP LOSS</small><strong id="manualLiveSl">--</strong></div>
         </div>
+        <div class="small" id="manualLiveRisk" hidden style="margin-top:6px;line-height:1.5;color:#aab6cc"></div>
         <div class="small" id="manualLiveState" hidden>POSICIÓN EN SEGUIMIENTO</div>
     </div>
 </section>
@@ -5505,7 +5509,7 @@ function handleManualPositionAlert(position){
     if(!Number.isFinite(bid) || !Number.isFinite(tp) || !Number.isFinite(sl)) return;
     const event = bid >= tp ? "TAKE_PROFIT" : bid <= sl ? "STOP_LOSS" : "";
     if(!event) return;
-    const key = "btc_manual_position_alert|" + position.ticker + "|" + event;
+    const key = "btc_manual_position_alert|" + position.ticker + "|" + position.side + "|" + String(position.entry_ts || "no-ts") + "|" + event;
     try{
         if(localStorage.getItem(key) === "sent") return;
         localStorage.setItem(key,"sent");
@@ -6008,6 +6012,17 @@ function updateRadar(d){
         if(manualStatus) manualStatus.textContent = "POSICIÓN " + manualPosition.side + " · " + Number(manualPosition.contracts || 1) + " contratos · " + (manualPosition.entry_source || "entrada estimada");
         if(liveMetrics) liveMetrics.hidden = false;
         if(liveState) liveState.hidden = false;
+        const riskNode = $("manualLiveRisk");
+        if(riskNode){
+            riskNode.hidden = false;
+            const targetGain = manualPosition.profit_at_take_profit == null ? null : Number(manualPosition.profit_at_take_profit);
+            const stopLoss = manualPosition.loss_at_stop_loss == null ? null : Number(manualPosition.loss_at_stop_loss);
+            const maxLoss = manualPosition.max_loss_at_settlement == null ? null : Number(manualPosition.max_loss_at_settlement);
+            riskNode.textContent = "Si alcanza objetivo: +" + (targetGain == null ? "--" : "$"+targetGain.toFixed(2)) +
+                " · Si toca stop: " + (stopLoss == null ? "--" : "-$"+Math.abs(stopLoss).toFixed(2)) +
+                " · Pérdida máxima al vencimiento: " + (maxLoss == null ? "--" : "$"+maxLoss.toFixed(2)) +
+                " (estimaciones brutas, sin comisiones).";
+        }
         $("manualLiveEntry").textContent = Number.isFinite(entry) ? "$"+entry.toFixed(2) : "--";
         $("manualLiveBid").textContent = bid == null || !Number.isFinite(bid) ? "SIN BID" : "$"+bid.toFixed(2);
         const pnlNode = $("manualLivePnl");
@@ -6022,6 +6037,8 @@ function updateRadar(d){
     }else{
         if(liveMetrics) liveMetrics.hidden = true;
         if(liveState) liveState.hidden = true;
+        const riskNode = $("manualLiveRisk");
+        if(riskNode) riskNode.hidden = true;
         if($("manualYes")) $("manualYes").disabled = !canRegister;
         if($("manualNo")) $("manualNo").disabled = !canRegister;
         if(manualStatus) manualStatus.textContent = canRegister
