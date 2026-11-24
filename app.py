@@ -1,4 +1,5 @@
 import os
+import gzip
 import json
 import time
 import math
@@ -17,6 +18,28 @@ from cryptography.hazmat.primitives.asymmetric import padding
 import pattern_memory
 import market_intelligence
 app = Flask(__name__)
+
+@app.after_request
+def compress_response(response):
+    """Reduce transfer usage for HTML and JSON responses when the client supports gzip."""
+    accepted = request.headers.get("Accept-Encoding", "").lower()
+    content_type = response.headers.get("Content-Type", "").lower()
+    if (
+        "gzip" in accepted
+        and not response.direct_passthrough
+        and response.status_code == 200
+        and not response.headers.get("Content-Encoding")
+        and any(kind in content_type for kind in ("application/json", "text/html", "text/css", "javascript"))
+    ):
+        body = response.get_data()
+        if len(body) >= 500:
+            compressed = gzip.compress(body, compresslevel=5)
+            if len(compressed) < len(body):
+                response.set_data(compressed)
+                response.headers["Content-Encoding"] = "gzip"
+                response.headers["Content-Length"] = str(len(compressed))
+                response.headers["Vary"] = "Accept-Encoding"
+    return response
 
 @app.route("/service-worker.js")
 def radar_service_worker():
@@ -6210,11 +6233,14 @@ paintRadarAlertToggle();
 refreshData();
 refreshAccuracy();
 
+// Menos solicitudes: el precio sigue actualizándose en vivo por WebSocket.
+// La pantalla consulta el resumen cada 3 segundos en vez de cada segundo.
 setInterval(
     ()=>refreshData(false),
-    1000
+    3000
 );
-setInterval(refreshAccuracy,60000);
+// Las estadísticas históricas cambian lentamente; consultarlas cada 5 minutos basta.
+setInterval(refreshAccuracy,300000);
 
 setInterval(updateContractCountdown,250);
 
