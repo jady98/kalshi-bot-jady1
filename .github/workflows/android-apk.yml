@@ -28,12 +28,16 @@ jobs:
           retention-days: 14
       - name: Boot Android emulator and run BTC Radar
         uses: reactivecircus/android-emulator-runner@v2
+        env:
+          ANDROID_I_WANT_MY_TCG: 'yes'
         with:
-          api-level: 34
+          api-level: 30
           target: google_apis
-          arch: x86_64
+          arch: x86
           profile: pixel_2
           disable-animations: true
+          emulator-boot-timeout: 900
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
           script: |
             adb install -r android-radar/app/build/outputs/apk/debug/app-debug.apk
             adb shell am force-stop com.jady.btcradar
