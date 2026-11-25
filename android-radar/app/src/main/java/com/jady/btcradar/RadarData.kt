@@ -28,7 +28,7 @@ object RadarData {
         val nowMs = System.currentTimeMillis()
         cached?.let { if (nowMs - cachedAt < 5000L) return it }
         val tickerPrice = try { getObject("/products/BTC-USD/ticker").optString("price", "").toDoubleOrNull()?.takeIf { it.isFinite() && it > 0 } } catch (_: Exception) { null }
-        val raw = getArray("/products/BTC-USD/candles?granularity=60")
+        val raw = try { getArray("/products/BTC-USD/candles?granularity=60") } catch (_: Exception) { JSONArray() }
         val rows = mutableListOf<Raw>()
         for (i in 0 until raw.length()) {
             val a = raw.optJSONArray(i) ?: continue
@@ -41,9 +41,20 @@ object RadarData {
         rows.sortBy { it.time }
         val currentMinute = (System.currentTimeMillis() / 1000L / 60L) * 60L
         rows.removeAll { it.time >= currentMinute }
-        require(rows.size >= 30) { "Coinbase todavía no entregó suficientes velas de un minuto." }
-        val last=rows.last()
         val spotPrice = tickerPrice ?: try { val spot = getObjectUrl("https://api.coinbase.com/v2/prices/BTC-USD/spot"); spot.optJSONObject("data")?.optString("amount", "")?.toDoubleOrNull()?.takeIf { it.isFinite() && it > 0 } } catch (_: Exception) { null }
+        if (rows.size < 30) {
+            val live = spotPrice ?: cached?.price ?: throw java.io.IOException("Coinbase no entregó el precio BTC en vivo.")
+            val epoch = System.currentTimeMillis() / 1000L
+            val seconds = (900L - epoch % 900L).toInt()
+            val previous = cached
+            val fallback = Snapshot(live, live, previous?.up ?: 50, "%02d:%02d".format(Locale.US,seconds/60,seconds%60),
+                previous?.candles ?: emptyList(), "INDECISO", "", "Precio BTC en vivo disponible; esperando historial de velas de Coinbase.",
+                "", 0L, "SIN_SEÑAL", "INDECISO", "", seconds, "ESPERANDO VELAS",
+                "El precio se actualiza aunque Coinbase no haya enviado todavía las velas.", 0.0, 50.0)
+            cached = fallback; cachedAt = nowMs
+            return fallback
+        }
+        val last=rows.last()
         val price = spotPrice ?: last.close
         val closes=rows.map { it.close }
         val e9=ema(closes,9); val e21=ema(closes,21)
