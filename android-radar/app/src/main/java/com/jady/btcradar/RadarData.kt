@@ -68,8 +68,8 @@ object RadarData {
             val facts=listOf(if(emaUp&&direction=="ALCISTA"||emaDown&&direction=="BAJISTA")"EMA 9/21 alineadas" else "",
                 if(direction=="ALCISTA"&&momentum>0||direction=="BAJISTA"&&momentum<0)"impulso 5m compatible" else "",
                 if(breakUp||breakDown)"ruptura de rango" else if(bullCandle||bearCandle)"vela compatible" else "",
-                "RSI \${rsi.toInt()}").filter{it.isNotBlank()}
-            "Señal $direction confirmada por \${facts.joinToString(", ")}. Patrón: $pattern."
+                "RSI ${rsi.toInt()}").filter{it.isNotBlank()}
+            "Señal $direction confirmada por ${facts.joinToString(", ")}. Patrón: $pattern."
         } else "Sin señal importante confirmada. El radar continúa vigilando."
         val strength=min(28.0,abs(momentum)*230.0)+if(emaUp&&momentum>0||emaDown&&momentum<0)9.0 else 0.0
         val upScore=(50.0+(if(emaUp)1 else if(emaDown)-1 else 0)*strength).toInt().coerceIn(5,95)
@@ -78,9 +78,9 @@ object RadarData {
         val seconds=(900L-epoch%900L).toInt()
         val result=Snapshot(price,price*(1+projection),upScore,"%02d:%02d".format(Locale.US,seconds/60,seconds%60),
             candles.takeLast(90),direction,if(confirmed)"ENTRADA" else "",
-            alertMessage,if(confirmed)"$direction|\${last.time}" else "",if(confirmed)epoch else 0L,
+            alertMessage,if(confirmed)"$direction|${epoch/900L}" else "",if(confirmed)epoch else 0L,
             if(confirmed)"ENTRADA" else "SIN_SEÑAL",direction,"",seconds,pattern,
-            "EMA9 \${if(emaUp)"sobre" else "bajo"} EMA21 · momentum 5m \${String.format(Locale.US,"%+.3f",momentum)}% · RSI \${rsi.toInt()}",
+            "EMA9 ${if(emaUp)"sobre" else "bajo"} EMA21 · momentum 5m ${String.format(Locale.US,"%+.3f",momentum)}% · RSI ${rsi.toInt()}",
             momentum,rsi)
         cached=result; cachedAt=nowMs
         return result
