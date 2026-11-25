@@ -27,7 +27,7 @@ object RadarData {
     @Synchronized fun load(): Snapshot {
         val nowMs = System.currentTimeMillis()
         cached?.let { if (nowMs - cachedAt < 5000L) return it }
-        val ticker = getObject("/products/BTC-USD/ticker")
+        val tickerPrice = try { getObject("/products/BTC-USD/ticker").optString("price", "").toDoubleOrNull()?.takeIf { it.isFinite() && it > 0 } } catch (_: Exception) { null }
         val raw = getArray("/products/BTC-USD/candles?granularity=60")
         val rows = mutableListOf<Raw>()
         for (i in 0 until raw.length()) {
@@ -43,7 +43,8 @@ object RadarData {
         rows.removeAll { it.time >= currentMinute }
         require(rows.size >= 30) { "Coinbase todavía no entregó suficientes velas de un minuto." }
         val last=rows.last()
-        val price=ticker.optString("price","").toDoubleOrNull()?.takeIf { it.isFinite() && it>0 } ?: last.close
+        val spotPrice = tickerPrice ?: try { val spot = getObjectUrl("https://api.coinbase.com/v2/prices/BTC-USD/spot"); spot.optJSONObject("data")?.optString("amount", "")?.toDoubleOrNull()?.takeIf { it.isFinite() && it > 0 } } catch (_: Exception) { null }
+        val price = spotPrice ?: last.close
         val closes=rows.map { it.close }
         val e9=ema(closes,9); val e21=ema(closes,21)
         val candles=rows.indices.map { i -> val c=rows[i]; Candle(c.time,c.low.toFloat(),c.high.toFloat(),c.open.toFloat(),c.close.toFloat(),e9[i].toFloat(),e21[i].toFloat()) }
@@ -89,10 +90,12 @@ object RadarData {
     }
 
     private data class Raw(val time:Long,val low:Double,val high:Double,val open:Double,val close:Double)
-    private fun getObject(path:String):JSONObject { val c=connection(path); return try{JSONObject(c.inputStream.bufferedReader().use{it.readText()})}finally{c.disconnect()} }
-    private fun getArray(path:String):JSONArray { val c=connection(path); return try{JSONArray(c.inputStream.bufferedReader().use{it.readText()})}finally{c.disconnect()} }
-    private fun connection(path:String)= (URL(BASE+path).openConnection() as HttpURLConnection).apply {
-        connectTimeout=7000; readTimeout=7000; setRequestProperty("User-Agent","BTC-Radar-Android/2.0"); setRequestProperty("Accept","application/json")
+    private fun getObject(path:String):JSONObject = getObjectUrl(BASE + path)
+    private fun getObjectUrl(address:String):JSONObject { val c=connection(address); return try{JSONObject(readResponse(c))}finally{c.disconnect()} }
+    private fun getArray(path:String):JSONArray { val c=connection(BASE + path); return try{JSONArray(readResponse(c))}finally{c.disconnect()} }
+    private fun readResponse(c:HttpURLConnection):String { val code=c.responseCode; val stream=if(code in 200..299)c.inputStream else c.errorStream; val body=stream?.bufferedReader()?.use{it.readText()} ?: ""; if(code !in 200..299) throw java.io.IOException("HTTP $code ${body.take(160)}"); return body }
+    private fun connection(address:String)= (URL(address).openConnection() as HttpURLConnection).apply {
+        connectTimeout=12000; readTimeout=12000; setRequestProperty("User-Agent","BTC-Radar-Android/2.1"); setRequestProperty("Accept","application/json")
     }
     private fun ema(v:List<Double>,p:Int):List<Double>{val a=2.0/(p+1.0);var x=v.first();return v.mapIndexed{i,n->x=if(i==0)n else a*n+(1-a)*x;x}}
     private fun rsi(v:List<Double>,p:Int):Double{if(v.size<=p)return 50.0;var g=0.0;var l=0.0;for(i in v.size-p until v.size){val d=v[i]-v[i-1];if(d>=0)g+=d else l-=d};if(l==0.0)return 100.0;val rs=(g/p)/(l/p);return 100.0-100.0/(1.0+rs)}
