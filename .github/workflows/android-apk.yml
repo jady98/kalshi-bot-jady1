@@ -30,19 +30,22 @@ jobs:
         uses: reactivecircus/android-emulator-runner@v2
         env:
           ANDROID_I_WANT_MY_TCG: 'yes'
+          ANDROID_EMULATOR_WAIT_TIME_BEFORE_KILL: '5'
         with:
-          api-level: 30
-          target: google_apis
+          api-level: 28
+          target: default
           arch: x86
           profile: pixel_2
-          disable-animations: true
-          emulator-boot-timeout: 900
+          disable-animations: false
+          emulator-boot-timeout: 1200
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
           script: |
+            set -eux
+            adb wait-for-device
             adb install -r android-radar/app/build/outputs/apk/debug/app-debug.apk
             adb shell am force-stop com.jady.btcradar
             adb shell monkey -p com.jady.btcradar 1
-            sleep 45
+            sleep 35
             adb shell screencap -p /sdcard/btc-radar-screen.png
             adb pull /sdcard/btc-radar-screen.png btc-radar-screen.png
             adb logcat -d -t 6000 > btc-radar-logcat.txt
