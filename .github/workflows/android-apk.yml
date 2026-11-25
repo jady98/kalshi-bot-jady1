@@ -10,7 +10,7 @@ permissions:
   actions: read
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -29,10 +29,10 @@ jobs:
       - name: Boot Android emulator and run BTC Radar
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 35
+          api-level: 34
           target: google_apis
           arch: x86_64
-          profile: pixel_6
+          profile: pixel_2
           disable-animations: true
           script: |
             adb install -r android-radar/app/build/outputs/apk/debug/app-debug.apk
