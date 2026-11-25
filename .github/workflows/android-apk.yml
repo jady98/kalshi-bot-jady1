@@ -1,4 +1,4 @@
-name: Build BTC Radar APK
+name: Build and emulator-test BTC Radar
 on:
   push:
     paths:
@@ -26,4 +26,30 @@ jobs:
           name: BTC-Radar-APK
           path: android-radar/app/build/outputs/apk/debug/app-debug.apk
           retention-days: 14
-# Rebuild latest standalone BTC Radar APK.
+      - name: Boot Android emulator and run BTC Radar
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          script: |
+            adb install -r android-radar/app/build/outputs/apk/debug/app-debug.apk
+            adb shell am force-stop com.jady.btcradar
+            adb shell monkey -p com.jady.btcradar 1
+            sleep 45
+            adb shell screencap -p /sdcard/btc-radar-screen.png
+            adb pull /sdcard/btc-radar-screen.png btc-radar-screen.png
+            adb logcat -d -t 6000 > btc-radar-logcat.txt
+            adb shell dumpsys activity activities | grep -q 'com.jady.btcradar/.MainActivity'
+      - name: Upload emulator evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: BTC-Radar-Emulator-Evidence
+          path: |
+            btc-radar-screen.png
+            btc-radar-logcat.txt
+          if-no-files-found: warn
+          retention-days: 14
