@@ -15,6 +15,8 @@ import android.media.RingtoneManager
 import android.media.AudioManager
 import android.media.ToneGenerator
 import android.webkit.WebView
+import android.webkit.JavascriptInterface
+import org.json.JSONObject
 import android.widget.FrameLayout
 import android.text.SpannableString
 import android.text.Spanned
@@ -27,6 +29,7 @@ class RadarService : Service() {
     }
     private lateinit var wm: WindowManager
     private var panel: View? = null
+    private var overlayWeb: WebView? = null
     private val handler = Handler(Looper.getMainLooper())
     private var lastSignal = ""
     private var toneGenerator: ToneGenerator? = null
@@ -54,6 +57,7 @@ class RadarService : Service() {
                         panel?.findViewWithTag<TextView>("timer")?.text = d.time
                         panel?.findViewWithTag<TextView>("position")?.text =
                             if (d.manualSide == "YES" || d.manualSide == "NO") "TU POSICIÓN: ${d.manualSide}" else "POSICIÓN: SIN MARCAR"
+                        overlayWeb?.evaluateJavascript("window.setRadarData && window.setRadarData(" + snapshotJson(d) + ")", null)
                         notifyRadarEvent(d)
                     }
                 } catch (_: Exception) {
@@ -111,7 +115,7 @@ class RadarService : Service() {
             prefs.edit().putString("last_direction", d.direction).apply()
             return
         }
-        playContractFinalSeconds(d.secondsToClose)
+        // No emitir pitidos de cuenta regresiva: solo avisos de señales importantes.
         val expected = if (d.manualSide == "YES") "ALCISTA" else if (d.manualSide == "NO") "BAJISTA" else ""
         val alignment = when {
             d.manualSide.isEmpty() -> "No has marcado YES o NO."
@@ -196,7 +200,10 @@ class RadarService : Service() {
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
             settings.cacheMode = android.webkit.WebSettings.LOAD_NO_CACHE
-            loadDataWithBaseURL("https://kalshi-bot-jady1.onrender.com/",
+            addJavascriptInterface(object {
+                @JavascriptInterface fun getSnapshotJson(): String = try { snapshotJson(RadarData.load()) } catch (e: Exception) { JSONObject().put("error", e.message ?: "Sin datos").toString() }
+            }, "AndroidRadar")
+            loadDataWithBaseURL("file:///android_asset/",
                 """
                 <!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
                 <style>
@@ -238,23 +245,23 @@ class RadarService : Service() {
                 
                 </div><script>
                 const money=v=>Number.isFinite(Number(v))&&Number(v)>0?'$'+Number(v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}):'--';
-                async function refresh(){
-                  try{
-                    const r=await fetch('/api?t='+Date.now(),{cache:'no-store'});if(!r.ok)throw Error('api');const d=await r.json();
-                    const p=Number(d.bullish_score);const q=Number(d.bearish_score);const valid=d.bullish_score!=null&&d.bearish_score!=null&&Number.isFinite(p)&&Number.isFinite(q);const up=valid?Math.max(0,Math.min(100,p)):50;const down=valid?Math.max(0,Math.min(100,q)):50;
-                    document.getElementById('price').textContent=money(d.brti_price??d.coinbase_price);
-                    document.getElementById('prediction').textContent=money(d.predicted_price);
-                    document.getElementById('bull').style.width=up+'%';document.getElementById('bear').style.width=down+'%';
-                    document.getElementById('up').textContent='ALCISTA '+(valid?up.toFixed(0)+'%':'--');document.getElementById('down').textContent='BAJISTA '+(valid?down.toFixed(0)+'%':'--');
-                    const buyRaw=d.buyers_pct??d.buyer_pct??d.buy_volume_pct;const sellRaw=d.sellers_pct??d.seller_pct??d.sell_volume_pct;const buy=Number(buyRaw),sell=Number(sellRaw);const flowValid=buyRaw!=null&&sellRaw!=null&&Number.isFinite(buy)&&Number.isFinite(sell)&&buy>=0&&sell>=0&&(buy+sell)>0;document.getElementById('buyers').textContent=flowValid?'COMPRADORES '+buy.toFixed(0)+'%':'COMPRADORES —';document.getElementById('sellers').textContent=flowValid?'VENDEDORES '+sell.toFixed(0)+'%':'VENDEDORES —';document.getElementById('flowBuy').style.width=(flowValid?buy:50)+'%';document.getElementById('flowSell').style.width=(flowValid?sell:50)+'%';
-                    let dir=String(d.direction||'').toUpperCase();if(dir!=='ALCISTA'&&dir!=='BAJISTA')dir=up>=55?'ALCISTA':up<=45?'BAJISTA':'INDECISA';
-                    const emaUp=d.ema9!=null&&d.ema21!=null&&Number(d.ema9)>Number(d.ema21);const emaDown=d.ema9!=null&&d.ema21!=null&&Number(d.ema9)<Number(d.ema21);const mom=Number(d.momentum_pct);const rsi=d.rsi==null?null:Number(d.rsi);const base=Number(d.brti_price??d.coinbase_price);const delta=Number(d.predicted_price)>0&&base>0?((Number(d.predicted_price)/base-1)*100):null;const factors=[];if(emaUp)factors.push('EMA 9 sobre 21');else if(emaDown)factors.push('EMA 9 bajo 21');if(Number.isFinite(mom))factors.push('impulso '+(mom>=0?'+':'')+mom.toFixed(3)+'%');if(rsi!==null&&Number.isFinite(rsi))factors.push('RSI '+rsi.toFixed(0));if(d.pattern)factors.push(String(d.pattern).replace(/[<>]/g,'').slice(0,30));const outlook=dir;const projection=delta===null?'':'; proyección '+(delta>=0?'+':'')+delta.toFixed(2)+'%';const caution=(emaUp&&mom<0)||(emaDown&&mom>0)?' · señales mixtas':'';const note=factors.slice(0,2).join(' y ')||'analizando señales';document.getElementById('direction').textContent=outlook;document.getElementById('direction').style.color=dir==='ALCISTA'?'#36d99a':dir==='BAJISTA'?'#ff7185':'#f3c969';const entryStage=String(d.entry_stage||'').toUpperCase();const stageLabel=entryStage==='ENTRADA'?'ENTRADA CONFIRMADA · '+(d.entry_direction||dir):entryStage==='PREALERTA'?'PREPARANDO ENTRADA · '+(d.short_direction||dir):entryStage==='SALIDA'?'TENDENCIA PERDIENDO FUERZA':entryStage.startsWith('ENTRADA BLOQUEADA')?'ENTRADA BLOQUEADA':entryStage||'OBSERVAR';const detail=String(d.guidance_note||'').replace(/\\s+/g,' ').trim();document.getElementById('why').textContent=stageLabel+(detail?' · '+detail:'');
-                    
-                    const box=document.getElementById('panel');box.className='wrap '+(dir==='ALCISTA'?'bull':dir==='BAJISTA'?'bear':'neutral');
-                                        let secs=Number(d.seconds_to_close??d.countdown);if(!Number.isFinite(secs)||secs<0){const close=Number(d.kalshi_market_close),now=Number(d.server_time);secs=close>0&&now>0?Math.max(0,Math.floor(close-now)):0;}
-                    const mm=Math.floor(secs/60),ss=secs%60;document.getElementById('close').textContent='TIEMPO '+String(mm).padStart(2,'0')+':'+String(ss).padStart(2,'0');
-                  }catch(e){document.getElementById('direction').textContent='CONECTANDO';}
-                }refresh();setInterval(refresh,1000);
+                function setRadarData(d){
+                  const money=v=>Number.isFinite(Number(v))&&Number(v)>0?'$'+Number(v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}):'--';
+                  if(d.error){document.getElementById('direction').textContent='SIN DATOS';return;}
+                  const up=Math.max(0,Math.min(100,Number(d.up)||50));
+                  document.getElementById('price').textContent=money(d.price);
+                  document.getElementById('prediction').textContent=money(d.prediction);
+                  document.getElementById('bull').style.width=up+'%';document.getElementById('bear').style.width=(100-up)+'%';
+                  document.getElementById('up').textContent='ALCISTA '+up+'%';document.getElementById('down').textContent='BAJISTA '+(100-up)+'%';
+                  document.getElementById('direction').textContent=d.direction||'INDECISO';
+                  document.getElementById('direction').style.color=d.direction==='ALCISTA'?'#36d99a':d.direction==='BAJISTA'?'#ff7185':'#f3c969';
+                  document.getElementById('why').textContent=(d.entryStage==='ENTRADA'?'SEÑAL CONFIRMADA · ':'VIGILANDO · ')+(d.alertMessage||d.patternDetail||'');
+                  document.getElementById('close').textContent='TIEMPO '+(d.time||'--:--');
+                  document.getElementById('buyers').textContent='PATRÓN '+(d.pattern||'—');
+                  document.getElementById('sellers').textContent='RSI '+Math.round(Number(d.rsi)||50);
+                }
+                function refresh(){try{setRadarData(JSON.parse(AndroidRadar.getSnapshotJson()));}catch(e){document.getElementById('direction').textContent='CONECTANDO';}}
+                refresh();setInterval(refresh,5000);
                 </script></body></html>
                 """.trimIndent(), "text/html", "UTF-8", null)
         }
@@ -377,11 +384,29 @@ class RadarService : Service() {
 
         wm.addView(root, lp)
         panel = root
+        overlayWeb = web
+    }
+
+
+    private fun snapshotJson(d: Snapshot): String {
+        return JSONObject()
+            .put("price", d.price)
+            .put("prediction", d.prediction)
+            .put("up", d.up)
+            .put("time", d.time)
+            .put("direction", d.direction)
+            .put("entryStage", d.entryStage)
+            .put("alertMessage", d.alertMessage)
+            .put("pattern", d.pattern)
+            .put("patternDetail", d.patternDetail)
+            .put("rsi", d.rsi)
+            .toString()
     }
 
     private fun removePanel() {
         try { panel?.let { wm.removeView(it) } } catch (_: Exception) {}
         panel = null
+        overlayWeb = null
     }
 
     override fun onStartCommand(i: Intent?, f: Int, id: Int): Int {
