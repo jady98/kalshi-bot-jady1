@@ -33,7 +33,7 @@ class MainActivity : Activity() {
         if(savedInstanceState==null) web.loadUrl("file:///android_asset/index.html") else web.restoreState(savedInstanceState)
     }
 
-    private inner class RadarBridge {
+    inner class RadarBridge {
         @JavascriptInterface fun getSnapshotJson():String = try {
             val d=RadarData.load(); val root=JSONObject()
             root.put("price",d.price); root.put("prediction",d.prediction); root.put("up",d.up)
