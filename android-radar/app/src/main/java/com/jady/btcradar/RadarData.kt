@@ -39,6 +39,8 @@ object RadarData {
                 rows.add(Raw(t,low,high,open,close))
         }
         rows.sortBy { it.time }
+        val currentMinute = (System.currentTimeMillis() / 1000L / 60L) * 60L
+        rows.removeAll { it.time >= currentMinute }
         require(rows.size >= 30) { "Coinbase todavía no entregó suficientes velas de un minuto." }
         val last=rows.last()
         val price=ticker.optString("price","").toDoubleOrNull()?.takeIf { it.isFinite() && it>0 } ?: last.close
