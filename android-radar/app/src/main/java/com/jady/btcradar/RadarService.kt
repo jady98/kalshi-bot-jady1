@@ -201,7 +201,7 @@ class RadarService : Service() {
             settings.domStorageEnabled = true
             settings.cacheMode = android.webkit.WebSettings.LOAD_NO_CACHE
             addJavascriptInterface(object {
-                @JavascriptInterface fun getSnapshotJson(): String = try { snapshotJson(RadarData.load()) } catch (e: Exception) { JSONObject().put("error", e.message ?: "Sin datos").toString() }
+                @JavascriptInterface fun getSnapshotJson(): String = try { snapshotJson(RadarData.peek()) } catch (e: Exception) { JSONObject().put("error", e.message ?: "Sin datos").toString() }
             }, "AndroidRadar")
             loadDataWithBaseURL("file:///android_asset/",
                 """
