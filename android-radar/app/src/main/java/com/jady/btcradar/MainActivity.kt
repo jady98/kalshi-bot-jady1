@@ -35,7 +35,7 @@ class MainActivity : Activity() {
 
     inner class RadarBridge {
         @JavascriptInterface fun getSnapshotJson():String = try {
-            val d=RadarData.load(); val root=JSONObject()
+            val d=RadarData.peek(); val root=JSONObject()
             root.put("price",d.price); root.put("prediction",d.prediction); root.put("up",d.up)
             root.put("time",d.time); root.put("direction",d.direction); root.put("entryStage",d.entryStage)
             root.put("alertMessage",d.alertMessage); root.put("pattern",d.pattern); root.put("patternDetail",d.patternDetail)
