@@ -24,6 +24,19 @@ object RadarData {
     @Volatile private var cached: Snapshot? = null
     @Volatile private var cachedAt = 0L
 
+    // La interfaz solo consulta esta copia en memoria: nunca espera una petición de red.
+    fun peek(): Snapshot {
+        cached?.let { return it }
+        val epoch = System.currentTimeMillis() / 1000L
+        val seconds = (900L - epoch % 900L).toInt()
+        return Snapshot(
+            0.0, 0.0, 50, "%02d:%02d".format(Locale.US, seconds / 60, seconds % 60),
+            emptyList(), "CONECTANDO", "", "Conectando directamente a Coinbase…",
+            "", 0L, "SIN_SEÑAL", "INDECISO", "", seconds, "CONECTANDO",
+            "La primera lectura se está realizando en segundo plano.", 0.0, 50.0
+        )
+    }
+
     @Synchronized fun load(): Snapshot {
         val nowMs = System.currentTimeMillis()
         cached?.let { if (nowMs - cachedAt < 5000L) return it }
@@ -106,7 +119,7 @@ object RadarData {
     private fun getArray(path:String):JSONArray { val c=connection(BASE + path); return try{JSONArray(readResponse(c))}finally{c.disconnect()} }
     private fun readResponse(c:HttpURLConnection):String { val code=c.responseCode; val stream=if(code in 200..299)c.inputStream else c.errorStream; val body=stream?.bufferedReader()?.use{it.readText()} ?: ""; if(code !in 200..299) throw java.io.IOException("HTTP $code ${body.take(160)}"); return body }
     private fun connection(address:String)= (URL(address).openConnection() as HttpURLConnection).apply {
-        connectTimeout=12000; readTimeout=12000; setRequestProperty("User-Agent","BTC-Radar-Android/2.1"); setRequestProperty("Accept","application/json")
+        connectTimeout=6000; readTimeout=6000; setRequestProperty("User-Agent","BTC-Radar-Android/2.1"); setRequestProperty("Accept","application/json")
     }
     private fun ema(v:List<Double>,p:Int):List<Double>{val a=2.0/(p+1.0);var x=v.first();return v.mapIndexed{i,n->x=if(i==0)n else a*n+(1-a)*x;x}}
     private fun rsi(v:List<Double>,p:Int):Double{if(v.size<=p)return 50.0;var g=0.0;var l=0.0;for(i in v.size-p until v.size){val d=v[i]-v[i-1];if(d>=0)g+=d else l-=d};if(l==0.0)return 100.0;val rs=(g/p)/(l/p);return 100.0-100.0/(1.0+rs)}
